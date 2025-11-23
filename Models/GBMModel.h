@@ -11,12 +11,13 @@
 
 template<typename MarketObject>
 struct GBMParams {
-    MarketObject initialValue;  // Can be any type
-    double drift;               // mu (scalar)
-    double volatility;          // sigma (scalar)
+    MarketObject initialValue; // Can be any type
+    double drift; // mu (scalar)
+    double volatility; // sigma (scalar)
 
-    GBMParams(const MarketObject& initialValue, double drift, double volatility)
-        : initialValue(initialValue), drift(drift), volatility(volatility) {}
+    GBMParams(const MarketObject &initialValue, double drift, double volatility)
+        : initialValue(initialValue), drift(drift), volatility(volatility) {
+    }
 };
 
 template<typename MarketObject>
@@ -24,23 +25,23 @@ struct GBMState {
     MarketObject value;
 
     GBMState() = default;
-    GBMState(const MarketObject& value) : value(value) {}
+
+    GBMState(const MarketObject &value) : value(value) {
+    }
 };
 
 // Namespace for GBM model functions
 namespace GBM {
-
     // Generic update function for any MarketObject type
     // Evolution: S_t = S_0 * exp((mu - sigma^2/2)*t + sigma*W_t)
     // Discrete form: S_new = S_old * exp((mu - sigma^2/2)*dt + sigma*dW)
     template<typename MarketObject>
-    inline void updateGBM(GBMState<MarketObject>& current,
-                         const GBMState<MarketObject>& previous,
-                         size_t stepIndex,
-                         double dt,
-                         const std::vector<double>& dW,
-                         const GBMParams<MarketObject>& params) {
-
+    inline void updateGBM(GBMState<MarketObject> &current,
+                          const GBMState<MarketObject> &previous,
+                          size_t stepIndex,
+                          double dt,
+                          const std::vector<double> &dW,
+                          const GBMParams<MarketObject> &params) {
         if (dW.empty()) {
             throw std::invalid_argument("GBM model requires at least 1 Brownian motion");
         }
@@ -59,7 +60,6 @@ namespace GBM {
         double factor = std::exp(drift_correction + diffusion);
         current.value = previous.value * factor;
     }
-
 } // namespace GBM
 
 #endif // GBM_MODEL_H

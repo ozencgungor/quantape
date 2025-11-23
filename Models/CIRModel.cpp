@@ -9,7 +9,6 @@
 
 CIRParams::CIRParams(double r0, double kappa, double theta, double sigma)
     : r0(r0), kappa(kappa), theta(theta), sigma(sigma) {
-
     if (r0 < 0.0) throw std::invalid_argument("Initial value must be non-negative");
     if (kappa <= 0.0) throw std::invalid_argument("Mean reversion speed must be positive");
     if (theta < 0.0) throw std::invalid_argument("Long-term mean must be non-negative");
@@ -20,21 +19,22 @@ CIRParams::CIRParams(double r0, double kappa, double theta, double sigma)
 // CIRState Implementation
 // ============================================================================
 
-CIRState::CIRState(double value) : value(value) {}
+CIRState::CIRState(double value) : value(value) {
+}
 
 // ============================================================================
 // CIRModel Implementation
 // ============================================================================
 
-CIRModel::CIRModel(const CIRParams& params)
-    : m_params(params) {}
+CIRModel::CIRModel(const CIRParams &params)
+    : m_params(params) {
+}
 
-void CIRModel::update(CIRState& current,
-                     const CIRState& previous,
-                     size_t stepIndex,
-                     double dt,
-                     const std::vector<double>& dW) const {
-
+void CIRModel::update(CIRState &current,
+                      const CIRState &previous,
+                      size_t stepIndex,
+                      double dt,
+                      const std::vector<double> &dW) const {
     if (dW.empty()) {
         throw std::invalid_argument("CIR model requires at least 1 Brownian motion");
     }

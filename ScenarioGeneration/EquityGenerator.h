@@ -9,21 +9,24 @@
 
 class EquityGenerator : public ModelGenerator {
 public:
-    explicit EquityGenerator(EquitySimulator& simulator);
+    explicit EquityGenerator(EquitySimulator &simulator);
 
     // Query methods (trigger lazy simulation if needed)
-    double getSpot(const std::string& name, int day);
-    double getVariance(const std::string& name, int day);
-    HestonState getState(const std::string& name, int day);
-    const std::map<int, HestonState>& getPath(const std::string& name);
+    double getSpot(const std::string &name, int day);
+
+    double getVariance(const std::string &name, int day);
+
+    HestonState getState(const std::string &name, int day);
+
+    const std::map<int, HestonState> &getPath(const std::string &name);
 
     // Utility
     std::vector<std::string> getEquityNames() const;
 
 private:
-    EquitySimulator* m_simulator;
+    EquitySimulator *m_simulator;
 
-    void ensureSimulated(const std::string& name);
+    void ensureSimulated(const std::string &name);
 };
 
 #endif // EQUITY_GENERATOR_H
