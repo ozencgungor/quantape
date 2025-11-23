@@ -24,27 +24,27 @@
  */
 
 // Integration methods
-#include "Integrals/Integrator.h"
-#include "Integrals/TrapezoidIntegrator.h"
-#include "Integrals/SimpsonIntegrator.h"
-#include "Integrals/GaussianQuadrature.h"
 #include "Integrals/GaussLobattoIntegrator.h"
+#include "Integrals/GaussianQuadrature.h"
+#include "Integrals/Integrator.h"
+#include "Integrals/SimpsonIntegrator.h"
+#include "Integrals/TrapezoidIntegrator.h"
 
 // Solver methods
-#include "Solvers/Solver1DBase.h"
 #include "Solvers/BisectionSolver.h"
 #include "Solvers/BrentSolver.h"
-#include "Solvers/SecantSolver.h"
+#include "Solvers/FalsePositionSolver.h"
 #include "Solvers/NewtonSolver.h"
 #include "Solvers/RidderSolver.h"
-#include "Solvers/FalsePositionSolver.h"
+#include "Solvers/SecantSolver.h"
+#include "Solvers/Solver1DBase.h"
 
 // Type aliases for convenience
 namespace Math {
-    // Stan Math AD type alias (when Stan Math is available)
-    // Uncomment when linking with Stan Math:
-    // #include <stan/math.hpp>
-    // using ADVariableT = stan::math::var;
+// Stan Math AD type alias (when Stan Math is available)
+// Uncomment when linking with Stan Math:
+// #include <stan/math.hpp>
+// using ADVariableT = stan::math::var;
 }
 
 #endif // NUMERICAL_METHODS_H

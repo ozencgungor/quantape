@@ -3,19 +3,20 @@
 // Schedules are specified in days and automatically converted to years for simulation
 //
 
-#include "EquitySimulator.h"
-#include "EquityGenerator.h"
-#include "CreditSimulator.h"
-#include "CreditGenerator.h"
-#include <iostream>
 #include <iomanip>
+#include <iostream>
+
+#include "CreditGenerator.h"
+#include "CreditSimulator.h"
+#include "EquityGenerator.h"
+#include "EquitySimulator.h"
 
 void exampleEquityLazy() {
     std::cout << "=== Equity Lazy Evaluation Example (Day-Based Schedule) ===" << std::endl;
     std::cout << "Generators trigger simulation automatically on first access!\n" << std::endl;
 
     // Define time schedule in DAYS (not years!)
-    std::vector<int> schedule = {0, 30, 60, 90, 180, 365};  // 0, 1mo, 2mo, 3mo, 6mo, 1yr
+    std::vector<int> schedule = {0, 30, 60, 90, 180, 365}; // 0, 1mo, 2mo, 3mo, 6mo, 1yr
 
     // 1. Create equity simulator
     EquitySimulator simulator(schedule, 42);
@@ -38,7 +39,8 @@ void exampleEquityLazy() {
     // 4. Query values - simulation happens automatically!
     std::cout << "Querying AAPL at day 90 (triggers simulation)..." << std::endl;
     double appleSpot = generator.getSpot("AAPL", 90);
-    std::cout << "  AAPL spot at day 90: $" << std::fixed << std::setprecision(2) << appleSpot << std::endl;
+    std::cout << "  AAPL spot at day 90: $" << std::fixed << std::setprecision(2) << appleSpot
+              << std::endl;
 
     std::cout << "\nQuerying MSFT at day 365 (triggers simulation)..." << std::endl;
     double msftSpot = generator.getSpot("MSFT", 365);
@@ -55,7 +57,8 @@ void exampleEquityLazy() {
     for (const auto& name : generator.getEquityNames()) {
         std::cout << "\n" << name << ":" << std::endl;
         for (int day : schedule) {
-            std::cout << "  Day " << std::setw(3) << day << ": $" << generator.getSpot(name, day) << std::endl;
+            std::cout << "  Day " << std::setw(3) << day << ": $" << generator.getSpot(name, day)
+                      << std::endl;
         }
     }
 }
@@ -64,7 +67,7 @@ void exampleCreditLazy() {
     std::cout << "\n=== Credit Lazy Evaluation Example (Day-Based Schedule) ===" << std::endl;
 
     // Define time schedule in DAYS
-    std::vector<int> schedule = {0, 365, 730, 1095, 1460, 1825};  // 0, 1yr, 2yr, 3yr, 4yr, 5yr
+    std::vector<int> schedule = {0, 365, 730, 1095, 1460, 1825}; // 0, 1yr, 2yr, 3yr, 4yr, 5yr
 
     // Create simulator
     CreditSimulator simulator(schedule, 123);
@@ -85,8 +88,8 @@ void exampleCreditLazy() {
     // Query values - triggers simulation
     std::cout << "Querying Corp_AAA at day 730 (2 years - triggers simulation)..." << std::endl;
     double aaaRate = generator.getValue("Corp_AAA", 730);
-    std::cout << "  Corp_AAA rate: " << std::fixed << std::setprecision(4)
-              << (aaaRate * 100) << "%" << std::endl;
+    std::cout << "  Corp_AAA rate: " << std::fixed << std::setprecision(4) << (aaaRate * 100) << "%"
+              << std::endl;
 
     std::cout << "\nQuerying Corp_BBB at day 1095 (3 years - triggers simulation)..." << std::endl;
     double bbbRate = generator.getValue("Corp_BBB", 1095);
@@ -99,8 +102,8 @@ void exampleCreditLazy() {
         for (int day : schedule) {
             double rate = generator.getValue(name, day);
             int years = day / 365;
-            std::cout << "  Day " << std::setw(4) << day << " (" << years << "yr): "
-                      << (rate * 100) << "%" << std::endl;
+            std::cout << "  Day " << std::setw(4) << day << " (" << years << "yr): " << (rate * 100)
+                      << "%" << std::endl;
         }
     }
 }
@@ -135,14 +138,14 @@ void exampleExplicitSimulation() {
     std::cout << "\n=== Explicit Simulation Example ===" << std::endl;
     std::cout << "You can still explicitly simulate all if needed\n" << std::endl;
 
-    std::vector<int> schedule = {0, 180, 365};  // 0, 6mo, 1yr
+    std::vector<int> schedule = {0, 180, 365}; // 0, 6mo, 1yr
 
     EquitySimulator simulator(schedule, 555);
     simulator.addEquity("A", HestonParams(100, 0.04, 0.05, 2.0, 0.04, 0.3, -0.7));
     simulator.addEquity("B", HestonParams(200, 0.04, 0.05, 2.0, 0.04, 0.3, -0.7));
 
     std::cout << "Calling simulate() explicitly to simulate all equities..." << std::endl;
-    simulator.simulate();  // Simulate all equities upfront
+    simulator.simulate(); // Simulate all equities upfront
 
     EquityGenerator generator(simulator);
 
@@ -157,7 +160,7 @@ void exampleDayConversion() {
     std::cout << "Internally converts days to years using DAYS_IN_YEAR = 365.25\n" << std::endl;
 
     // Schedule in days
-    std::vector<int> schedule = {0, 365, 730};  // 0, ~1yr, ~2yr
+    std::vector<int> schedule = {0, 365, 730}; // 0, ~1yr, ~2yr
 
     EquitySimulator simulator(schedule, 42);
     HestonParams params(100.0, 0.04, 0.05, 2.0, 0.04, 0.3, -0.7);
@@ -173,8 +176,8 @@ void exampleDayConversion() {
 
     std::cout << "\nConversion to years:" << std::endl;
     std::cout << "  Day 0 = 0.000 years" << std::endl;
-    std::cout << "  Day 365 = " << std::fixed << std::setprecision(3)
-              << (365.0 / 365.25) << " years" << std::endl;
+    std::cout << "  Day 365 = " << std::fixed << std::setprecision(3) << (365.0 / 365.25)
+              << " years" << std::endl;
     std::cout << "  Day 730 = " << (730.0 / 365.25) << " years" << std::endl;
 
     std::cout << "\nSimulated values:" << std::endl;
@@ -194,7 +197,8 @@ int main() {
     std::cout << "\n=== All examples completed ===" << std::endl;
     std::cout << "\nKey takeaways:" << std::endl;
     std::cout << "  - Schedules are specified in DAYS (integers)" << std::endl;
-    std::cout << "  - Internally converted to years for simulation (DAYS_IN_YEAR = 365.25)" << std::endl;
+    std::cout << "  - Internally converted to years for simulation (DAYS_IN_YEAR = 365.25)"
+              << std::endl;
     std::cout << "  - Lazy evaluation: simulation triggered on first access" << std::endl;
     std::cout << "  - Query by day number, not by year" << std::endl;
     return 0;

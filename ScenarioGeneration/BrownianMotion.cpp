@@ -1,7 +1,8 @@
 #include "BrownianMotion.h"
-#include <stdexcept>
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 const double DAYS_IN_YEAR = 365.25;
 
@@ -9,14 +10,14 @@ const double DAYS_IN_YEAR = 365.25;
 // BrownianMotion Implementation
 // ============================================================================
 
-BrownianMotion::BrownianMotion(const std::vector<int> &scheduleDays, unsigned int seed)
+BrownianMotion::BrownianMotion(const std::vector<int>& scheduleDays, unsigned int seed)
     : m_scheduleDays(scheduleDays) {
     validateSchedule();
     convertDaysToYears();
     generatePath(seed);
 }
 
-BrownianMotion::BrownianMotion(const std::vector<int> &scheduleDays)
+BrownianMotion::BrownianMotion(const std::vector<int>& scheduleDays)
     : m_scheduleDays(scheduleDays) {
     validateSchedule();
     convertDaysToYears();
@@ -86,11 +87,11 @@ double BrownianMotion::getIncrement(int day1, int day2) const {
     return getValue(day2) - getValue(day1);
 }
 
-const std::map<int, double> &BrownianMotion::getPath() const {
+const std::map<int, double>& BrownianMotion::getPath() const {
     return m_path;
 }
 
-const std::vector<int> &BrownianMotion::getScheduleDays() const {
+const std::vector<int>& BrownianMotion::getScheduleDays() const {
     return m_scheduleDays;
 }
 
@@ -99,10 +100,10 @@ const std::vector<int> &BrownianMotion::getScheduleDays() const {
 // ============================================================================
 
 // Cholesky decomposition
-static std::vector<std::vector<double> > choleskyDecomposition(
-    const std::vector<std::vector<double> > &correlationMatrix) {
+static std::vector<std::vector<double>>
+choleskyDecomposition(const std::vector<std::vector<double>>& correlationMatrix) {
     size_t n = correlationMatrix.size();
-    std::vector<std::vector<double> > L(n, std::vector<double>(n, 0.0));
+    std::vector<std::vector<double>> L(n, std::vector<double>(n, 0.0));
 
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j <= i; ++j) {
@@ -126,16 +127,15 @@ static std::vector<std::vector<double> > choleskyDecomposition(
     return L;
 }
 
-std::vector<BrownianMotion> generateCorrelatedBrownianMotions(
-    const std::vector<int> &scheduleDays,
-    size_t numMotions,
-    const std::vector<std::vector<double> > &correlationMatrix,
-    unsigned int seed) {
+std::vector<BrownianMotion>
+generateCorrelatedBrownianMotions(const std::vector<int>& scheduleDays, size_t numMotions,
+                                  const std::vector<std::vector<double>>& correlationMatrix,
+                                  unsigned int seed) {
     // Validate correlation matrix
     if (correlationMatrix.size() != numMotions) {
         throw std::invalid_argument("Correlation matrix size must match number of motions");
     }
-    for (const auto &row: correlationMatrix) {
+    for (const auto& row : correlationMatrix) {
         if (row.size() != numMotions) {
             throw std::invalid_argument("Correlation matrix must be square");
         }
@@ -156,7 +156,7 @@ std::vector<BrownianMotion> generateCorrelatedBrownianMotions(
         BrownianMotion correlatedBM(scheduleDays, seed + numMotions + i);
 
         // For each time point, compute correlated value
-        for (int day: scheduleDays) {
+        for (int day : scheduleDays) {
             double correlatedValue = 0.0;
             for (size_t j = 0; j <= i; ++j) {
                 correlatedValue += L[i][j] * independentBMs[j].getValue(day);
@@ -170,10 +170,9 @@ std::vector<BrownianMotion> generateCorrelatedBrownianMotions(
     return correlatedBMs;
 }
 
-std::vector<BrownianMotion> generateIndependentBrownianMotions(
-    const std::vector<int> &scheduleDays,
-    size_t numMotions,
-    unsigned int seed) {
+std::vector<BrownianMotion> generateIndependentBrownianMotions(const std::vector<int>& scheduleDays,
+                                                               size_t numMotions,
+                                                               unsigned int seed) {
     std::vector<BrownianMotion> brownianMotions;
     for (size_t i = 0; i < numMotions; ++i) {
         brownianMotions.emplace_back(scheduleDays, seed + i);
