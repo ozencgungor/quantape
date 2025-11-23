@@ -84,6 +84,7 @@ endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Models)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Math)
 
 # Third-party includes
 include_directories(${Boost_INCLUDE_DIRS})
@@ -134,9 +135,18 @@ set(SCENARIO_HEADERS
     ScenarioGeneration/CreditGenerator.h
 )
 
+# Math library header files (header-only)
+set(MATH_HEADERS
+    Math/NumericalMethods.h
+    Math/Integrator.h
+    Math/TrapezoidIntegrator.h
+    Math/GaussianQuadrature.h
+    Math/Solver1D.h
+)
+
 # Combine all sources and headers
 set(LIB_SOURCES ${MODEL_SOURCES} ${SCENARIO_SOURCES})
-set(LIB_HEADERS ${MODEL_HEADERS} ${SCENARIO_HEADERS})
+set(LIB_HEADERS ${MODEL_HEADERS} ${SCENARIO_HEADERS} ${MATH_HEADERS})
 
 # ============================================================================
 # Library target
@@ -150,6 +160,7 @@ target_include_directories(generic_MC_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/Models
     ${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration
+    ${CMAKE_CURRENT_SOURCE_DIR}/Math
     ${Boost_INCLUDE_DIRS}
     ${STAN_MATH_INCLUDE_DIR}
 )
@@ -161,12 +172,16 @@ target_link_libraries(generic_MC_lib PUBLIC
 )
 
 # ============================================================================
-# Example executable
+# Example executables
 # ============================================================================
 
 # Create executable for example usage
 add_executable(example_usage example_usage.cpp)
 target_link_libraries(example_usage generic_MC_lib)
+
+# Create executable for Math library tests
+add_executable(test_math test_math.cpp)
+target_link_libraries(test_math generic_MC_lib)
 
 # ============================================================================
 # Compiler options
@@ -176,9 +191,11 @@ target_link_libraries(example_usage generic_MC_lib)
 if(MSVC)
     target_compile_options(generic_MC_lib PRIVATE /W4)
     target_compile_options(example_usage PRIVATE /W4)
+    target_compile_options(test_math PRIVATE /W4)
 else()
     target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # ============================================================================
