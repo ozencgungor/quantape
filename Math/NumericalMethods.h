@@ -23,11 +23,20 @@
  *                                          ADVariableT(0.0), ADVariableT(1.0));
  */
 
-// Core components
-#include "Integrator.h"
-#include "TrapezoidIntegrator.h"
-#include "GaussianQuadrature.h"
-#include "Solver1D.h"
+// Integration methods
+#include "Integrals/Integrator.h"
+#include "Integrals/TrapezoidIntegrator.h"
+#include "Integrals/SimpsonIntegrator.h"
+#include "Integrals/GaussianQuadrature.h"
+
+// Solver methods
+#include "Solvers/Solver1DBase.h"
+#include "Solvers/BisectionSolver.h"
+#include "Solvers/BrentSolver.h"
+#include "Solvers/SecantSolver.h"
+#include "Solvers/NewtonSolver.h"
+#include "Solvers/RidderSolver.h"
+#include "Solvers/FalsePositionSolver.h"
 
 // Type aliases for convenience
 namespace Math {
