@@ -33,3 +33,7 @@ Makefile
 
 # Executables
 example_usage
+
+
+# pdfs:
+*.pdf

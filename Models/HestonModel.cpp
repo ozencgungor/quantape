@@ -8,9 +8,8 @@
 // ============================================================================
 
 HestonParams::HestonParams(double s0, double v0, double mu, double kappa,
-                          double theta, double sigma, double rho)
+                           double theta, double sigma, double rho)
     : s0(s0), v0(v0), mu(mu), kappa(kappa), theta(theta), sigma(sigma), rho(rho) {
-
     if (s0 <= 0.0) throw std::invalid_argument("Initial spot must be positive");
     if (v0 < 0.0) throw std::invalid_argument("Initial variance must be non-negative");
     if (kappa <= 0.0) throw std::invalid_argument("Mean reversion speed must be positive");
@@ -24,21 +23,22 @@ HestonParams::HestonParams(double s0, double v0, double mu, double kappa,
 // ============================================================================
 
 HestonState::HestonState(double spot, double variance)
-    : spot(spot), variance(variance) {}
+    : spot(spot), variance(variance) {
+}
 
 // ============================================================================
 // HestonModel Implementation
 // ============================================================================
 
-HestonModel::HestonModel(const HestonParams& params)
-    : m_params(params) {}
+HestonModel::HestonModel(const HestonParams &params)
+    : m_params(params) {
+}
 
-void HestonModel::update(HestonState& current,
-                        const HestonState& previous,
-                        size_t stepIndex,
-                        double dt,
-                        const std::vector<double>& dW) const {
-
+void HestonModel::update(HestonState &current,
+                         const HestonState &previous,
+                         size_t stepIndex,
+                         double dt,
+                         const std::vector<double> &dW) const {
     if (dW.size() < 2) {
         throw std::invalid_argument("Heston model requires 2 Brownian motions");
     }

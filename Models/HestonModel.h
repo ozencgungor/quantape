@@ -5,13 +5,13 @@
 
 // Heston model parameters (pure data)
 struct HestonParams {
-    double s0;       // Initial spot price
-    double v0;       // Initial variance
-    double mu;       // Drift (risk-free rate)
-    double kappa;    // Mean reversion speed
-    double theta;    // Long-term variance
-    double sigma;    // Volatility of variance
-    double rho;      // Correlation between spot and variance Brownian motions
+    double s0; // Initial spot price
+    double v0; // Initial variance
+    double mu; // Drift (risk-free rate)
+    double kappa; // Mean reversion speed
+    double theta; // Long-term variance
+    double sigma; // Volatility of variance
+    double rho; // Correlation between spot and variance Brownian motions
 
     HestonParams(double s0, double v0, double mu, double kappa,
                  double theta, double sigma, double rho);
@@ -29,17 +29,17 @@ struct HestonState {
 class HestonModel {
 public:
     // Constructor takes params struct
-    explicit HestonModel(const HestonParams& params);
+    explicit HestonModel(const HestonParams &params);
 
     // Update function for Heston model
-    void update(HestonState& current,
-               const HestonState& previous,
-               size_t stepIndex,
-               double dt,
-               const std::vector<double>& dW) const;
+    void update(HestonState &current,
+                const HestonState &previous,
+                size_t stepIndex,
+                double dt,
+                const std::vector<double> &dW) const;
 
     // Access to parameters
-    const HestonParams& getParams() const { return m_params; }
+    const HestonParams &getParams() const { return m_params; }
 
 private:
     HestonParams m_params;

@@ -10,10 +10,9 @@
 
 JCIRPPParams::JCIRPPParams(double x0, double kappa, double theta, double sigma,
                            double jumpIntensity, double jumpMean,
-                           const std::vector<double>& shifts)
+                           const std::vector<double> &shifts)
     : x0(x0), kappa(kappa), theta(theta), sigma(sigma),
       shifts(shifts), jumpIntensity(jumpIntensity), jumpMean(jumpMean) {
-
     if (x0 < 0.0) throw std::invalid_argument("Initial x value must be non-negative");
     if (kappa <= 0.0) throw std::invalid_argument("Mean reversion speed must be positive");
     if (theta < 0.0) throw std::invalid_argument("Long-term mean must be non-negative");
@@ -27,22 +26,23 @@ JCIRPPParams::JCIRPPParams(double x0, double kappa, double theta, double sigma,
 // ============================================================================
 
 JCIRPPState::JCIRPPState(double intensity, double cumulativeIntensity, int totalJumps)
-    : intensity(intensity), cumulativeIntensity(cumulativeIntensity), totalJumps(totalJumps) {}
+    : intensity(intensity), cumulativeIntensity(cumulativeIntensity), totalJumps(totalJumps) {
+}
 
 // ============================================================================
 // JCIRPPModel Implementation
 // ============================================================================
 
-JCIRPPModel::JCIRPPModel(const JCIRPPParams& params)
-    : m_params(params) {}
+JCIRPPModel::JCIRPPModel(const JCIRPPParams &params)
+    : m_params(params) {
+}
 
-void JCIRPPModel::update(JCIRPPState& current,
-                        const JCIRPPState& previous,
-                        size_t stepIndex,
-                        double dt,
-                        const std::vector<double>& dW,
-                        unsigned int seed) const {
-
+void JCIRPPModel::update(JCIRPPState &current,
+                         const JCIRPPState &previous,
+                         size_t stepIndex,
+                         double dt,
+                         const std::vector<double> &dW,
+                         unsigned int seed) const {
     if (dW.empty()) {
         throw std::invalid_argument("JCIR++ model requires at least 1 Brownian motion");
     }
@@ -75,7 +75,7 @@ void JCIRPPModel::update(JCIRPPState& current,
     // Jump component: J·dN
     // ========================================================================
     // Generate Poisson jumps
-    std::mt19937 gen(seed + stepIndex * 1000);  // Seed based on step for reproducibility
+    std::mt19937 gen(seed + stepIndex * 1000); // Seed based on step for reproducibility
 
     // Number of jumps in time interval dt follows Poisson(ν * dt)
     std::poisson_distribution<int> poissonDist(m_params.jumpIntensity * dt);
@@ -111,137 +111,127 @@ void JCIRPPModel::update(JCIRPPState& current,
 // ============================================================================
 
 namespace JCIRPP {
+    // ============================================================================
+    // Credit Risk Helper Functions
+    // ============================================================================
 
-// ============================================================================
-// Credit Risk Helper Functions
-// ============================================================================
+    double calculateSurvivalProbability(
+        const std::map<int, JCIRPPState> &path,
+        int fromDay,
+        int toDay) {
+        auto fromIt = path.find(fromDay);
+        auto toIt = path.find(toDay);
 
-double calculateSurvivalProbability(
-    const std::map<int, JCIRPPState>& path,
-    int fromDay,
-    int toDay) {
-
-    auto fromIt = path.find(fromDay);
-    auto toIt = path.find(toDay);
-
-    if (fromIt == path.end() || toIt == path.end()) {
-        throw std::out_of_range("Day not found in path");
-    }
-
-    if (fromDay > toDay) {
-        throw std::invalid_argument("fromDay must be <= toDay");
-    }
-
-    // Survival probability: SP(t,T) = exp(-∫[t,T] λ(s) ds)
-    double integralDifference = toIt->second.cumulativeIntensity - fromIt->second.cumulativeIntensity;
-    return std::exp(-integralDifference);
-}
-
-double calculateDefaultProbability(
-    const std::map<int, JCIRPPState>& path,
-    int fromDay,
-    int toDay) {
-
-    return 1.0 - calculateSurvivalProbability(path, fromDay, toDay);
-}
-
-std::map<int, double> calculateSurvivalCurve(
-    const std::map<int, JCIRPPState>& path,
-    int fromDay,
-    const std::vector<int>& tenorDays) {
-
-    std::map<int, double> survivalCurve;
-
-    for (int tenor : tenorDays) {
-        int toDay = fromDay + tenor;
-        if (path.find(toDay) != path.end()) {
-            survivalCurve[tenor] = calculateSurvivalProbability(path, fromDay, toDay);
+        if (fromIt == path.end() || toIt == path.end()) {
+            throw std::out_of_range("Day not found in path");
         }
+
+        if (fromDay > toDay) {
+            throw std::invalid_argument("fromDay must be <= toDay");
+        }
+
+        // Survival probability: SP(t,T) = exp(-∫[t,T] λ(s) ds)
+        double integralDifference = toIt->second.cumulativeIntensity - fromIt->second.cumulativeIntensity;
+        return std::exp(-integralDifference);
     }
 
-    return survivalCurve;
-}
-
-double calculateForwardSurvivalProbability(
-    const std::map<int, JCIRPPState>& path,
-    int observationDay,
-    int fromDay,
-    int toDay) {
-
-    if (observationDay > fromDay || fromDay > toDay) {
-        throw std::invalid_argument("Days must satisfy: observationDay <= fromDay <= toDay");
+    double calculateDefaultProbability(
+        const std::map<int, JCIRPPState> &path,
+        int fromDay,
+        int toDay) {
+        return 1.0 - calculateSurvivalProbability(path, fromDay, toDay);
     }
 
-    return calculateSurvivalProbability(path, fromDay, toDay);
-}
+    std::map<int, double> calculateSurvivalCurve(
+        const std::map<int, JCIRPPState> &path,
+        int fromDay,
+        const std::vector<int> &tenorDays) {
+        std::map<int, double> survivalCurve;
 
-double getHazardRate(
-    const std::map<int, JCIRPPState>& path,
-    int day) {
+        for (int tenor: tenorDays) {
+            int toDay = fromDay + tenor;
+            if (path.find(toDay) != path.end()) {
+                survivalCurve[tenor] = calculateSurvivalProbability(path, fromDay, toDay);
+            }
+        }
 
-    auto it = path.find(day);
-    if (it == path.end()) {
-        throw std::out_of_range("Day not found in path");
+        return survivalCurve;
     }
 
-    return it->second.intensity;
-}
+    double calculateForwardSurvivalProbability(
+        const std::map<int, JCIRPPState> &path,
+        int observationDay,
+        int fromDay,
+        int toDay) {
+        if (observationDay > fromDay || fromDay > toDay) {
+            throw std::invalid_argument("Days must satisfy: observationDay <= fromDay <= toDay");
+        }
 
-double getAverageHazardRate(
-    const std::map<int, JCIRPPState>& path,
-    int fromDay,
-    int toDay) {
-
-    auto fromIt = path.find(fromDay);
-    auto toIt = path.find(toDay);
-
-    if (fromIt == path.end() || toIt == path.end()) {
-        throw std::out_of_range("Day not found in path");
+        return calculateSurvivalProbability(path, fromDay, toDay);
     }
 
-    if (fromDay >= toDay) {
-        throw std::invalid_argument("fromDay must be < toDay");
+    double getHazardRate(
+        const std::map<int, JCIRPPState> &path,
+        int day) {
+        auto it = path.find(day);
+        if (it == path.end()) {
+            throw std::out_of_range("Day not found in path");
+        }
+
+        return it->second.intensity;
     }
 
-    // Average hazard rate = ∫[t,T] λ(s) ds / (T - t)
-    double integralDifference = toIt->second.cumulativeIntensity - fromIt->second.cumulativeIntensity;
+    double getAverageHazardRate(
+        const std::map<int, JCIRPPState> &path,
+        int fromDay,
+        int toDay) {
+        auto fromIt = path.find(fromDay);
+        auto toIt = path.find(toDay);
 
-    // Convert days to years for proper annualization
-    const double DAYS_IN_YEAR = 365.25;
-    double timeInYears = (toDay - fromDay) / DAYS_IN_YEAR;
+        if (fromIt == path.end() || toIt == path.end()) {
+            throw std::out_of_range("Day not found in path");
+        }
 
-    return integralDifference / timeInYears;
-}
+        if (fromDay >= toDay) {
+            throw std::invalid_argument("fromDay must be < toDay");
+        }
 
-int getTotalJumps(
-    const std::map<int, JCIRPPState>& path,
-    int day) {
+        // Average hazard rate = ∫[t,T] λ(s) ds / (T - t)
+        double integralDifference = toIt->second.cumulativeIntensity - fromIt->second.cumulativeIntensity;
 
-    auto it = path.find(day);
-    if (it == path.end()) {
-        throw std::out_of_range("Day not found in path");
+        // Convert days to years for proper annualization
+        const double DAYS_IN_YEAR = 365.25;
+        double timeInYears = (toDay - fromDay) / DAYS_IN_YEAR;
+
+        return integralDifference / timeInYears;
     }
 
-    return it->second.totalJumps;
-}
+    int getTotalJumps(
+        const std::map<int, JCIRPPState> &path,
+        int day) {
+        auto it = path.find(day);
+        if (it == path.end()) {
+            throw std::out_of_range("Day not found in path");
+        }
 
-int getJumpsInPeriod(
-    const std::map<int, JCIRPPState>& path,
-    int fromDay,
-    int toDay) {
-
-    auto fromIt = path.find(fromDay);
-    auto toIt = path.find(toDay);
-
-    if (fromIt == path.end() || toIt == path.end()) {
-        throw std::out_of_range("Day not found in path");
+        return it->second.totalJumps;
     }
 
-    if (fromDay > toDay) {
-        throw std::invalid_argument("fromDay must be <= toDay");
+    int getJumpsInPeriod(
+        const std::map<int, JCIRPPState> &path,
+        int fromDay,
+        int toDay) {
+        auto fromIt = path.find(fromDay);
+        auto toIt = path.find(toDay);
+
+        if (fromIt == path.end() || toIt == path.end()) {
+            throw std::out_of_range("Day not found in path");
+        }
+
+        if (fromDay > toDay) {
+            throw std::invalid_argument("fromDay must be <= toDay");
+        }
+
+        return toIt->second.totalJumps - fromIt->second.totalJumps;
     }
-
-    return toIt->second.totalJumps - fromIt->second.totalJumps;
-}
-
 } // namespace JCIRPP
