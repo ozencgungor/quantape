@@ -138,10 +138,17 @@ set(SCENARIO_HEADERS
 # Math library header files (header-only)
 set(MATH_HEADERS
     Math/NumericalMethods.h
-    Math/Integrator.h
-    Math/TrapezoidIntegrator.h
-    Math/GaussianQuadrature.h
-    Math/Solver1D.h
+    Math/Integrals/Integrator.h
+    Math/Integrals/TrapezoidIntegrator.h
+    Math/Integrals/SimpsonIntegrator.h
+    Math/Integrals/GaussianQuadrature.h
+    Math/Solvers/Solver1DBase.h
+    Math/Solvers/BisectionSolver.h
+    Math/Solvers/BrentSolver.h
+    Math/Solvers/SecantSolver.h
+    Math/Solvers/NewtonSolver.h
+    Math/Solvers/RidderSolver.h
+    Math/Solvers/FalsePositionSolver.h
 )
 
 # Combine all sources and headers

@@ -35,7 +35,19 @@ void testIntegration() {
         std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
     }
 
-    // Test 3: Gauss-Legendre integrator (various orders)
+    // Test 3: Simpson integrator
+    {
+        SimpsonIntegrator<double> integrator(1e-8, 1000);
+        double result = integrator(f_square, 0.0, 1.0);
+        double exact = 1.0 / 3.0;
+        std::cout << "Simpson's Rule:\n";
+        std::cout << "  ∫₀¹ x² dx = " << std::setprecision(10) << result << "\n";
+        std::cout << "  Exact     = " << exact << "\n";
+        std::cout << "  Error     = " << std::fabs(result - exact) << "\n";
+        std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
+    }
+
+    // Test 4: Gauss-Legendre integrator (various orders)
     {
         double exact = 1.0 / 3.0;
         for (size_t order : {2, 3, 5, 10, 20}) {
@@ -48,7 +60,7 @@ void testIntegration() {
         }
     }
 
-    // Test 4: More challenging integral - sin(x) from 0 to π
+    // Test 5: More challenging integral - sin(x) from 0 to π
     {
         auto f_sin = [](double x) { return std::sin(x); };
         double exact = 2.0;  // ∫₀^π sin(x) dx = 2
@@ -56,12 +68,17 @@ void testIntegration() {
         TrapezoidIntegratorDefault<double> trap(1e-8, 1000);
         double result_trap = trap(f_sin, 0.0, M_PI);
 
+        SimpsonIntegrator<double> simpson(1e-8, 1000);
+        double result_simpson = simpson(f_sin, 0.0, M_PI);
+
         GaussLegendreIntegrator<double> gauss(20);
         double result_gauss = gauss(f_sin, 0.0, M_PI);
 
         std::cout << "Integral of sin(x) from 0 to π:\n";
         std::cout << "  Trapezoid  = " << std::setprecision(10) << result_trap
                   << " (error: " << std::fabs(result_trap - exact) << ")\n";
+        std::cout << "  Simpson    = " << result_simpson
+                  << " (error: " << std::fabs(result_simpson - exact) << ")\n";
         std::cout << "  Gauss-20   = " << result_gauss
                   << " (error: " << std::fabs(result_gauss - exact) << ")\n";
         std::cout << "  Exact      = " << exact << "\n\n";
@@ -76,16 +93,61 @@ void testSolvers() {
         auto f = [](double x) { return x * x - 2.0; };
         double exact = std::sqrt(2.0);
 
-        BrentSolver<double> solver;
-        solver.setMaxEvaluations(100);
+        std::cout << "Finding root of x² - 2 = 0 (exact: √2 = " << exact << "):\n\n";
 
-        double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+        // Bisection
+        {
+            BisectionSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  Bisection:  root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n";
+        }
 
-        std::cout << "Brent's method for x² - 2 = 0:\n";
-        std::cout << "  Root      = " << std::setprecision(15) << root << "\n";
-        std::cout << "  Exact     = " << exact << "\n";
-        std::cout << "  Error     = " << std::fabs(root - exact) << "\n";
-        std::cout << "  f(root)   = " << f(root) << "\n\n";
+        // Secant
+        {
+            SecantSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  Secant:     root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n";
+        }
+
+        // Newton (with finite differences)
+        {
+            NewtonSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  Newton:     root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n";
+        }
+
+        // Brent
+        {
+            BrentSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  Brent:      root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n";
+        }
+
+        // Ridder
+        {
+            RidderSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  Ridder:     root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n";
+        }
+
+        // False Position
+        {
+            FalsePositionSolver<double> solver;
+            solver.setMaxEvaluations(100);
+            double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+            std::cout << "  FalsePos:   root = " << std::setprecision(15) << root
+                      << " (error: " << std::fabs(root - exact) << ")\n\n";
+        }
     }
 
     // Test 2: f(x) = exp(x) - 3, root at x = ln(3)
@@ -93,14 +155,14 @@ void testSolvers() {
         auto f = [](double x) { return std::exp(x) - 3.0; };
         double exact = std::log(3.0);
 
+        std::cout << "Finding root of exp(x) - 3 = 0 (exact: ln(3) = " << exact << "):\n\n";
+
         BrentSolver<double> solver;
         double root = solver.solve(f, 1e-10, 1.0, 0.0, 2.0);
 
-        std::cout << "Brent's method for exp(x) - 3 = 0:\n";
-        std::cout << "  Root      = " << std::setprecision(15) << root << "\n";
-        std::cout << "  Exact     = " << exact << "\n";
-        std::cout << "  Error     = " << std::fabs(root - exact) << "\n";
-        std::cout << "  f(root)   = " << f(root) << "\n\n";
+        std::cout << "  Brent:      root = " << std::setprecision(15) << root
+                  << " (error: " << std::fabs(root - exact) << ")\n";
+        std::cout << "  f(root)     = " << f(root) << "\n\n";
     }
 
     // Test 3: Automatic bracketing
@@ -110,9 +172,25 @@ void testSolvers() {
         BrentSolver<double> solver;
         double root = solver.solve(f, 1e-10, 1.5, 0.1);  // Auto-bracket from guess with step
 
-        std::cout << "Brent's method with auto-bracketing for x³ - x - 2 = 0:\n";
-        std::cout << "  Root      = " << std::setprecision(15) << root << "\n";
-        std::cout << "  f(root)   = " << f(root) << "\n\n";
+        std::cout << "Finding root of x³ - x - 2 = 0 with auto-bracketing:\n";
+        std::cout << "  Brent:      root = " << std::setprecision(15) << root << "\n";
+        std::cout << "  f(root)     = " << f(root) << "\n\n";
+    }
+
+    // Test 4: Newton with explicit derivative
+    {
+        auto f = [](double x) { return x * x - 2.0; };
+        auto df = [](double x) { return 2.0 * x; };
+        double exact = std::sqrt(2.0);
+
+        NewtonSolverWithDerivative<double> solver;
+        solver.setDerivative(df);
+        solver.setMaxEvaluations(100);
+        double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
+
+        std::cout << "Newton with explicit derivative for x² - 2 = 0:\n";
+        std::cout << "  Root        = " << std::setprecision(15) << root
+                  << " (error: " << std::fabs(root - exact) << ")\n\n";
     }
 }
 
