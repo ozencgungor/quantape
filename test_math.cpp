@@ -1,7 +1,8 @@
 #include "Math/NumericalMethods.h"
-#include <iostream>
-#include <iomanip>
+
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 
 using namespace Math;
 
@@ -63,7 +64,7 @@ void testIntegration() {
     // Test 5: More challenging integral - sin(x) from 0 to π
     {
         auto f_sin = [](double x) { return std::sin(x); };
-        double exact = 2.0;  // ∫₀^π sin(x) dx = 2
+        double exact = 2.0; // ∫₀^π sin(x) dx = 2
 
         TrapezoidIntegratorDefault<double> trap(1e-8, 1000);
         double result_trap = trap(f_sin, 0.0, M_PI);
@@ -167,10 +168,10 @@ void testSolvers() {
 
     // Test 3: Automatic bracketing
     {
-        auto f = [](double x) { return x * x * x - x - 2.0; };  // Root at x ≈ 1.521
+        auto f = [](double x) { return x * x * x - x - 2.0; }; // Root at x ≈ 1.521
 
         BrentSolver<double> solver;
-        double root = solver.solve(f, 1e-10, 1.5, 0.1);  // Auto-bracket from guess with step
+        double root = solver.solve(f, 1e-10, 1.5, 0.1); // Auto-bracket from guess with step
 
         std::cout << "Finding root of x³ - x - 2 = 0 with auto-bracketing:\n";
         std::cout << "  Brent:      root = " << std::setprecision(15) << root << "\n";
@@ -200,8 +201,8 @@ void testQuadratureOnStandardDomain() {
     // Test polynomial integration (Gauss quadrature is exact for polynomials)
     // For order n, exact for polynomials up to degree 2n-1
 
-    auto poly2 = [](double x) { return 1.0 + 2.0*x + 3.0*x*x; };  // degree 2
-    auto poly4 = [](double x) { return 1.0 + x + x*x + x*x*x + x*x*x*x; };  // degree 4
+    auto poly2 = [](double x) { return 1.0 + 2.0 * x + 3.0 * x * x; };                 // degree 2
+    auto poly4 = [](double x) { return 1.0 + x + x * x + x * x * x + x * x * x * x; }; // degree 4
 
     // Exact integral of poly2 from -1 to 1: ∫(1 + 2x + 3x²)dx = [x + x² + x³]_{-1}^{1} = 4
     // Exact integral of poly4 from -1 to 1: ∫(1 + x + x² + x³ + x⁴)dx = 16/5
@@ -241,8 +242,7 @@ int main() {
 
         std::cout << "All tests completed successfully!\n";
         return 0;
-    }
-    catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }

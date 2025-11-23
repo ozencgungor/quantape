@@ -1,9 +1,10 @@
 #ifndef BICUBIC_INTERPOLATION_H
 #define BICUBIC_INTERPOLATION_H
 
-#include "Interpolation2D.h"
-#include "CubicInterpolation.h"
 #include <vector>
+
+#include "CubicInterpolation.h"
+#include "Interpolation2D.h"
 
 namespace Math {
 
@@ -23,7 +24,7 @@ namespace Math {
  *
  * @tparam DoubleT Numeric type (double or stan::math::var)
  */
-template<typename DoubleT>
+template <typename DoubleT>
 class BicubicInterpolation : public Interpolation2D<DoubleT> {
 public:
     using DerivativeApprox = typename CubicInterpolation<DoubleT>::DerivativeApprox;
@@ -37,13 +38,10 @@ public:
      *
      * Note: z is organized as z[row][col] where row corresponds to y and col to x
      */
-    template<typename ContainerX, typename ContainerY, typename Container2D>
-    BicubicInterpolation(const ContainerX& x,
-                        const ContainerY& y,
-                        const Container2D& z,
-                        DerivativeApprox method = DerivativeApprox::Spline)
-        : m_method(method)
-    {
+    template <typename ContainerX, typename ContainerY, typename Container2D>
+    BicubicInterpolation(const ContainerX& x, const ContainerY& y, const Container2D& z,
+                         DerivativeApprox method = DerivativeApprox::Spline)
+        : m_method(method) {
         m_x = this->toVector(x);
         m_y = this->toVector(y);
         m_z = this->toVector2D(z);
@@ -65,16 +63,17 @@ protected:
         std::vector<DoubleT> y_values(m_y.size());
         for (size_t i = 0; i < m_y.size(); ++i) {
             CubicInterpolation<DoubleT> x_interp(m_x, m_z[i], m_method);
-            y_values[i] = x_interp(x, true);  // Allow extrapolation
+            y_values[i] = x_interp(x, true); // Allow extrapolation
         }
 
         // Step 2: Interpolate along y-direction
         CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method);
-        return y_interp(y, true);  // Allow extrapolation
+        return y_interp(y, true); // Allow extrapolation
     }
 
     bool isInRange(DoubleT x, DoubleT y) const override {
-        if (m_x.empty() || m_y.empty()) return false;
+        if (m_x.empty() || m_y.empty())
+            return false;
 
         double x_val = value(x);
         double y_val = value(y);

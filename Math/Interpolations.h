@@ -12,7 +12,7 @@
  * Available 1D interpolations:
  * - LinearInterpolation: Simple linear interpolation
  * - LogLinearInterpolation: Log-linear interpolation
- * - CubicSplineInterpolation: C^2 continuous cubic spline
+ * - CubicInterpolation: Cubic interpolation with multiple methods (Spline, Akima, etc.)
  *
  * Available 2D interpolations:
  * - BilinearInterpolation: 2D linear interpolation
@@ -41,7 +41,7 @@
  *   using ADVariableT = stan::math::var;
  *   std::vector<ADVariableT> x_ad = {0.0, 1.0, 2.0, 3.0};
  *   std::vector<ADVariableT> y_ad = {0.0, 1.0, 4.0, 9.0};
- *   Math::CubicSplineInterpolation<ADVariableT> ad_spline(x_ad, y_ad);
+ *   Math::CubicInterpolation<ADVariableT> ad_spline(x_ad, y_ad);
  *   ADVariableT result_ad = ad_spline(ADVariableT(1.5));
  */
 
@@ -50,21 +50,20 @@
 #include "Interpolations/Interpolation2D.h"
 
 // 1D interpolations
+#include "Interpolations/CubicInterpolation.h"
 #include "Interpolations/LinearInterpolation.h"
 #include "Interpolations/LogLinearInterpolation.h"
-#include "Interpolations/CubicSplineInterpolation.h"
-#include "Interpolations/CubicInterpolation.h"
 
 // 2D interpolations
-#include "Interpolations/BilinearInterpolation.h"
 #include "Interpolations/BicubicInterpolation.h"
+#include "Interpolations/BilinearInterpolation.h"
 
 // Type aliases for convenience
 namespace Math {
-    // Stan Math AD type alias (when Stan Math is available)
-    // Uncomment when linking with Stan Math:
-    // #include <stan/math.hpp>
-    // using ADVariableT = stan::math::var;
+// Stan Math AD type alias (when Stan Math is available)
+// Uncomment when linking with Stan Math:
+// #include <stan/math.hpp>
+// using ADVariableT = stan::math::var;
 }
 
 #endif // INTERPOLATIONS_H

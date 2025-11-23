@@ -1,0 +1,4 @@
+# Directories to ignore for clang-format
+third-party/
+build/
+.git/
