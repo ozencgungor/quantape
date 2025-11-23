@@ -3,8 +3,8 @@
 
 const double DAYS_IN_YEAR = 365.25;
 
-MonteCarloSimulator::MonteCarloSimulator(const std::vector<int>& scheduleDays,
-                                         const std::vector<BrownianMotion>& brownianMotions)
+MonteCarloSimulator::MonteCarloSimulator(const std::vector<int> &scheduleDays,
+                                         const std::vector<BrownianMotion> &brownianMotions)
     : m_scheduleDays(scheduleDays),
       m_brownianMotions(&brownianMotions) {
     convertDaysToYears();
@@ -18,17 +18,16 @@ void MonteCarloSimulator::convertDaysToYears() {
 }
 
 void MonteCarloSimulator::simulate(
-    std::function<void(size_t, double, const std::vector<double>&)> updateStep) {
-
+    std::function<void(size_t, double, const std::vector<double> &)> updateStep) {
     if (m_brownianMotions->empty()) {
         throw std::runtime_error("No Brownian motions provided");
     }
 
     // Time stepping
     for (size_t i = 0; i < m_scheduleDays.size(); ++i) {
-        double dt = (i == 0) ? 0.0 : (m_scheduleYears[i] - m_scheduleYears[i-1]);
+        double dt = (i == 0) ? 0.0 : (m_scheduleYears[i] - m_scheduleYears[i - 1]);
         int currentDay = m_scheduleDays[i];
-        int previousDay = (i == 0) ? 0 : m_scheduleDays[i-1];
+        int previousDay = (i == 0) ? 0 : m_scheduleDays[i - 1];
 
         // Extract Brownian increments from pre-correlated Brownian motions
         std::vector<double> dW(m_brownianMotions->size());
@@ -45,10 +44,10 @@ void MonteCarloSimulator::simulate(
     }
 }
 
-const std::vector<int>& MonteCarloSimulator::getScheduleDays() const {
+const std::vector<int> &MonteCarloSimulator::getScheduleDays() const {
     return m_scheduleDays;
 }
 
-const std::vector<double>& MonteCarloSimulator::getScheduleYears() const {
+const std::vector<double> &MonteCarloSimulator::getScheduleYears() const {
     return m_scheduleYears;
 }
