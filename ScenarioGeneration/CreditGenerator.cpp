@@ -1,20 +1,19 @@
 #include "CreditGenerator.h"
+
 #include <stdexcept>
 
-CreditGenerator::CreditGenerator(CreditSimulator &simulator)
-    : ModelGenerator(simulator.getScheduleDays()),
-      m_simulator(&simulator) {
-}
+CreditGenerator::CreditGenerator(CreditSimulator& simulator)
+    : ModelGenerator(simulator.getScheduleDays()), m_simulator(&simulator) {}
 
-void CreditGenerator::ensureSimulated(const std::string &name) {
+void CreditGenerator::ensureSimulated(const std::string& name) {
     if (!m_simulator->isSimulated(name)) {
         m_simulator->simulateCredit(name);
     }
 }
 
-double CreditGenerator::getValue(const std::string &name, int day) {
+double CreditGenerator::getValue(const std::string& name, int day) {
     ensureSimulated(name);
-    const auto &path = m_simulator->getCreditPath(name);
+    const auto& path = m_simulator->getCreditPath(name);
     auto it = path.find(day);
     if (it == path.end()) {
         throw std::out_of_range("Day not found in credit path");
@@ -22,9 +21,9 @@ double CreditGenerator::getValue(const std::string &name, int day) {
     return it->second.value;
 }
 
-CIRState CreditGenerator::getState(const std::string &name, int day) {
+CIRState CreditGenerator::getState(const std::string& name, int day) {
     ensureSimulated(name);
-    const auto &path = m_simulator->getCreditPath(name);
+    const auto& path = m_simulator->getCreditPath(name);
     auto it = path.find(day);
     if (it == path.end()) {
         throw std::out_of_range("Day not found in credit path");
@@ -32,7 +31,7 @@ CIRState CreditGenerator::getState(const std::string &name, int day) {
     return it->second;
 }
 
-const std::map<int, CIRState> &CreditGenerator::getPath(const std::string &name) {
+const std::map<int, CIRState>& CreditGenerator::getPath(const std::string& name) {
     ensureSimulated(name);
     return m_simulator->getCreditPath(name);
 }

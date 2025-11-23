@@ -6,11 +6,11 @@
 // Abstract base class for all model generators
 class ModelGenerator {
 public:
-    ModelGenerator(const std::vector<int> &scheduleDays);
+    ModelGenerator(const std::vector<int>& scheduleDays);
 
     virtual ~ModelGenerator() = default;
 
-    const std::vector<int> &getScheduleDays() const;
+    const std::vector<int>& getScheduleDays() const;
 
 protected:
     std::vector<int> m_scheduleDays;

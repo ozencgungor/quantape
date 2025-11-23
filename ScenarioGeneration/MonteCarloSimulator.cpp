@@ -1,12 +1,12 @@
 #include "MonteCarloSimulator.h"
+
 #include <stdexcept>
 
 const double DAYS_IN_YEAR = 365.25;
 
-MonteCarloSimulator::MonteCarloSimulator(const std::vector<int> &scheduleDays,
-                                         const std::vector<BrownianMotion> &brownianMotions)
-    : m_scheduleDays(scheduleDays),
-      m_brownianMotions(&brownianMotions) {
+MonteCarloSimulator::MonteCarloSimulator(const std::vector<int>& scheduleDays,
+                                         const std::vector<BrownianMotion>& brownianMotions)
+    : m_scheduleDays(scheduleDays), m_brownianMotions(&brownianMotions) {
     convertDaysToYears();
 }
 
@@ -18,7 +18,7 @@ void MonteCarloSimulator::convertDaysToYears() {
 }
 
 void MonteCarloSimulator::simulate(
-    std::function<void(size_t, double, const std::vector<double> &)> updateStep) {
+    std::function<void(size_t, double, const std::vector<double>&)> updateStep) {
     if (m_brownianMotions->empty()) {
         throw std::runtime_error("No Brownian motions provided");
     }
@@ -44,10 +44,10 @@ void MonteCarloSimulator::simulate(
     }
 }
 
-const std::vector<int> &MonteCarloSimulator::getScheduleDays() const {
+const std::vector<int>& MonteCarloSimulator::getScheduleDays() const {
     return m_scheduleDays;
 }
 
-const std::vector<double> &MonteCarloSimulator::getScheduleYears() const {
+const std::vector<double>& MonteCarloSimulator::getScheduleYears() const {
     return m_scheduleYears;
 }

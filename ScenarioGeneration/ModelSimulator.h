@@ -1,13 +1,14 @@
 #ifndef MODEL_SIMULATOR_H
 #define MODEL_SIMULATOR_H
 
-#include "BrownianMotion.h"
 #include <vector>
+
+#include "BrownianMotion.h"
 
 // Abstract base class for all model simulators
 class ModelSimulator {
 public:
-    ModelSimulator(const std::vector<int> &scheduleDays, unsigned int seed, bool useSeed = true);
+    ModelSimulator(const std::vector<int>& scheduleDays, unsigned int seed, bool useSeed = true);
 
     virtual ~ModelSimulator() = default;
 
@@ -18,7 +19,7 @@ public:
 
     virtual void regenerate(unsigned int newSeed) = 0;
 
-    const std::vector<int> &getScheduleDays() const;
+    const std::vector<int>& getScheduleDays() const;
 
 protected:
     std::vector<int> m_scheduleDays;
