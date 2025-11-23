@@ -8,23 +8,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Third-party libraries
 # ============================================================================
 
-include(FetchContent)
-
 # Set third-party directory
 set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third-party)
 
 # ----------------------------------------------------------------------------
 # Eigen (header-only linear algebra library)
 # ----------------------------------------------------------------------------
-message(STATUS "Fetching Eigen...")
-FetchContent_Declare(
-    Eigen3
-    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
-    GIT_TAG 3.4.0
-    GIT_SHALLOW TRUE
-    SOURCE_DIR ${THIRD_PARTY_DIR}/eigen
-)
-FetchContent_MakeAvailable(Eigen3)
+set(EIGEN3_INCLUDE_DIR ${THIRD_PARTY_DIR}/eigen)
+include_directories(${EIGEN3_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------
 # Boost (try system install first, otherwise download subset)
@@ -62,20 +53,8 @@ endif()
 # ----------------------------------------------------------------------------
 # Stan Math (statistical modeling library, depends on Eigen and Boost)
 # ----------------------------------------------------------------------------
-message(STATUS "Fetching Stan Math...")
-FetchContent_Declare(
-    stan_math
-    GIT_REPOSITORY https://github.com/stan-dev/math.git
-    GIT_TAG v4.9.0
-    GIT_SHALLOW TRUE
-    SOURCE_DIR ${THIRD_PARTY_DIR}/stan-math
-)
-FetchContent_GetProperties(stan_math)
-if(NOT stan_math_POPULATED)
-    FetchContent_Populate(stan_math)
-    # Stan Math is header-only, just add include directory
-    set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math)
-endif()
+set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math)
+include_directories(${STAN_MATH_INCLUDE_DIR})
 
 # ============================================================================
 # Include directories
@@ -88,7 +67,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Math)
 
 # Third-party includes
 include_directories(${Boost_INCLUDE_DIRS})
-include_directories(${STAN_MATH_INCLUDE_DIR})
 
 # ============================================================================
 # Project source files
@@ -138,10 +116,12 @@ set(SCENARIO_HEADERS
 # Math library header files (header-only)
 set(MATH_HEADERS
     Math/NumericalMethods.h
+    Math/Interpolations.h
     Math/Integrals/Integrator.h
     Math/Integrals/TrapezoidIntegrator.h
     Math/Integrals/SimpsonIntegrator.h
     Math/Integrals/GaussianQuadrature.h
+    Math/Integrals/GaussLobattoIntegrator.h
     Math/Solvers/Solver1DBase.h
     Math/Solvers/BisectionSolver.h
     Math/Solvers/BrentSolver.h
@@ -149,6 +129,15 @@ set(MATH_HEADERS
     Math/Solvers/NewtonSolver.h
     Math/Solvers/RidderSolver.h
     Math/Solvers/FalsePositionSolver.h
+    Math/Solvers/TridiagonalSolver.h
+    Math/Interpolations/Interpolation.h
+    Math/Interpolations/LinearInterpolation.h
+    Math/Interpolations/LogLinearInterpolation.h
+    Math/Interpolations/CubicSplineInterpolation.h
+    Math/Interpolations/CubicInterpolation.h
+    Math/Interpolations/Interpolation2D.h
+    Math/Interpolations/BilinearInterpolation.h
+    Math/Interpolations/BicubicInterpolation.h
 )
 
 # Combine all sources and headers
@@ -169,14 +158,13 @@ target_include_directories(generic_MC_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration
     ${CMAKE_CURRENT_SOURCE_DIR}/Math
     ${Boost_INCLUDE_DIRS}
-    ${STAN_MATH_INCLUDE_DIR}
 )
 
 # Link third-party libraries
-target_link_libraries(generic_MC_lib PUBLIC
-    Eigen3::Eigen
-    # dlib::dlib  # Disabled due to C++20 compatibility issues
-)
+# target_link_libraries(generic_MC_lib PUBLIC
+#     Eigen3::Eigen
+#     # dlib::dlib  # Disabled due to C++20 compatibility issues
+# )
 
 # ============================================================================
 # Example executables
@@ -189,6 +177,10 @@ target_link_libraries(example_usage generic_MC_lib)
 # Create executable for Math library tests
 add_executable(test_math test_math.cpp)
 target_link_libraries(test_math generic_MC_lib)
+
+# Create executable for Interpolation library tests
+add_executable(test_interpolation test_interpolation.cpp)
+target_link_libraries(test_interpolation generic_MC_lib)
 
 # ============================================================================
 # Compiler options
@@ -211,7 +203,7 @@ endif()
 
 message(STATUS "===========================================")
 message(STATUS "Third-party libraries configuration:")
-message(STATUS "  Eigen:      ${THIRD_PARTY_DIR}/eigen")
+message(STATUS "  Eigen:      ${EIGEN3_INCLUDE_DIR}")
 message(STATUS "  Boost:      ${Boost_INCLUDE_DIRS}")
 message(STATUS "  dlib:       ${THIRD_PARTY_DIR}/dlib")
 message(STATUS "  Stan Math:  ${STAN_MATH_INCLUDE_DIR}")
