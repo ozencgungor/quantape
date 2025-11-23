@@ -28,6 +28,7 @@
 #include "Integrals/TrapezoidIntegrator.h"
 #include "Integrals/SimpsonIntegrator.h"
 #include "Integrals/GaussianQuadrature.h"
+#include "Integrals/GaussLobattoIntegrator.h"
 
 // Solver methods
 #include "Solvers/Solver1DBase.h"

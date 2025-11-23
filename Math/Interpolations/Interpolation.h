@@ -31,6 +31,29 @@ namespace Math {
 
         virtual ~Interpolation() = default;
 
+    protected:
+        /**
+         * @brief Helper to convert any container to std::vector
+         * Works with std::vector, Eigen::Vector, arrays, etc.
+         */
+        template<typename Container>
+        static std::vector<DoubleT> toVector(const Container& container) {
+            // If it's already a std::vector, just copy it
+            if constexpr (std::is_same_v<Container, std::vector<DoubleT>>) {
+                return container;
+            } else {
+                // Otherwise, use size() and operator[]
+                std::vector<DoubleT> result;
+                result.reserve(container.size());
+                for (size_t i = 0; i < container.size(); ++i) {
+                    result.push_back(static_cast<DoubleT>(container[i]));
+                }
+                return result;
+            }
+        }
+
+    public:
+
         /**
          * @brief Get interpolated value at x
          * @param x Point at which to interpolate
