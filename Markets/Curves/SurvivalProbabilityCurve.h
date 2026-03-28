@@ -1,12 +1,14 @@
 #ifndef SURVIVALPROBABILITYCURVE_H
 #define SURVIVALPROBABILITYCURVE_H
 
-#include "Markets/Descriptors/CreditDescriptor.h"
 #include "Math/Interpolations/CubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <cmath>
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/CreditDescriptor.h"
 
 namespace Markets {
 
@@ -28,8 +30,7 @@ public:
      * @param descriptor Curve metadata
      */
     template <typename ContainerT>
-    SurvivalProbabilityCurve(const ContainerT& tenors,
-                             const ContainerT& survivalProbs,
+    SurvivalProbabilityCurve(const ContainerT& tenors, const ContainerT& survivalProbs,
                              const CreditDescriptor& descriptor = CreditDescriptor())
         : m_descriptor(descriptor) {
         // Convert to vectors
@@ -41,8 +42,7 @@ public:
                 "SurvivalProbabilityCurve: tenors and survivalProbs size mismatch");
         }
         if (m_tenors.size() < 2) {
-            throw std::runtime_error(
-                "SurvivalProbabilityCurve: need at least 2 points");
+            throw std::runtime_error("SurvivalProbabilityCurve: need at least 2 points");
         }
 
         // Validate survival probabilities are in valid range
@@ -63,8 +63,7 @@ public:
      * @brief Copy constructor
      */
     SurvivalProbabilityCurve(const SurvivalProbabilityCurve& other)
-        : m_descriptor(other.m_descriptor),
-          m_tenors(other.m_tenors),
+        : m_descriptor(other.m_descriptor), m_tenors(other.m_tenors),
           m_survivalProbs(other.m_survivalProbs) {
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
             m_tenors, m_survivalProbs, Math::CubicInterpolation<DoubleT>::Spline);
@@ -129,8 +128,7 @@ public:
      */
     DoubleT avgHazardRate(DoubleT t, bool allowExtrapolation = true) const {
         if (value_impl(t) <= 0.0) {
-            throw std::runtime_error(
-                "SurvivalProbabilityCurve::avgHazardRate: t must be positive");
+            throw std::runtime_error("SurvivalProbabilityCurve::avgHazardRate: t must be positive");
         }
         DoubleT sp = survivalProb(t, allowExtrapolation);
         return -log_impl(sp) / t;

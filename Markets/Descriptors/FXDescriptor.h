@@ -11,9 +11,9 @@ namespace Markets {
  * Contains metadata for FX instruments
  */
 struct FXDescriptor {
-    std::string domesticCcy;    ///< Domestic currency (e.g., "USD")
-    std::string foreignCcy;     ///< Foreign currency (e.g., "EUR")
-    std::string referenceDate;  ///< Reference date in YYYY-MM-DD format
+    std::string domesticCcy;   ///< Domestic currency (e.g., "USD")
+    std::string foreignCcy;    ///< Foreign currency (e.g., "EUR")
+    std::string referenceDate; ///< Reference date in YYYY-MM-DD format
 
     /**
      * @brief Default constructor
@@ -35,9 +35,7 @@ struct FXDescriptor {
     /**
      * @brief Get full identifier
      */
-    std::string identifier() const {
-        return domesticCcy + foreignCcy + "." + referenceDate;
-    }
+    std::string identifier() const { return domesticCcy + foreignCcy + "." + referenceDate; }
 };
 
 } // namespace Markets

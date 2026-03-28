@@ -1,12 +1,14 @@
 #ifndef IRCURVE_H
 #define IRCURVE_H
 
-#include "Markets/Descriptors/IRCurveDescriptor.h"
 #include "Math/Interpolations/CubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <cmath>
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/IRCurveDescriptor.h"
 
 namespace Markets {
 
@@ -51,8 +53,7 @@ public:
      * @brief Copy constructor
      */
     IRCurve(const IRCurve& other)
-        : m_descriptor(other.m_descriptor),
-          m_tenors(other.m_tenors),
+        : m_descriptor(other.m_descriptor), m_tenors(other.m_tenors),
           m_zeroRates(other.m_zeroRates) {
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
             m_tenors, m_zeroRates, Math::CubicInterpolation<DoubleT>::Spline);
@@ -99,8 +100,7 @@ public:
      * @param t2 End time
      * @return Forward rate f(t1, t2) = (r(t2)*t2 - r(t1)*t1) / (t2 - t1)
      */
-    DoubleT forwardRate(DoubleT t1, DoubleT t2,
-                        bool allowExtrapolation = true) const {
+    DoubleT forwardRate(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
         if (value_impl(t2) <= value_impl(t1)) {
             throw std::runtime_error("IRCurve::forwardRate: t2 must be > t1");
         }
@@ -115,8 +115,7 @@ public:
      * @param t2 End time
      * @return Forward DF = DF(t2) / DF(t1)
      */
-    DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2,
-                                  bool allowExtrapolation = true) const {
+    DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
         DoubleT df1 = discountFactor(t1, allowExtrapolation);
         DoubleT df2 = discountFactor(t2, allowExtrapolation);
         return df2 / df1;

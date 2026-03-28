@@ -1,12 +1,14 @@
 #ifndef YIELDCURVE_H
 #define YIELDCURVE_H
 
-#include "Markets/Descriptors/YieldCurveDescriptor.h"
 #include "Math/Interpolations/CubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <cmath>
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/YieldCurveDescriptor.h"
 
 namespace Markets {
 
@@ -52,8 +54,7 @@ public:
      * @brief Copy constructor
      */
     YieldCurve(const YieldCurve& other)
-        : m_descriptor(other.m_descriptor),
-          m_tenors(other.m_tenors),
+        : m_descriptor(other.m_descriptor), m_tenors(other.m_tenors),
           m_zeroRates(other.m_zeroRates) {
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
             m_tenors, m_zeroRates, Math::CubicInterpolation<DoubleT>::Spline);
@@ -107,8 +108,7 @@ public:
      * @param t2 End time
      * @return Forward yield
      */
-    DoubleT forwardYield(DoubleT t1, DoubleT t2,
-                         bool allowExtrapolation = true) const {
+    DoubleT forwardYield(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
         if (value_impl(t2) <= value_impl(t1)) {
             throw std::runtime_error("YieldCurve::forwardYield: t2 must be > t1");
         }
@@ -123,8 +123,7 @@ public:
      * @param t2 End time
      * @return Forward DF = DF(t2) / DF(t1)
      */
-    DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2,
-                                  bool allowExtrapolation = true) const {
+    DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
         DoubleT df1 = discountFactor(t1, allowExtrapolation);
         DoubleT df2 = discountFactor(t2, allowExtrapolation);
         return df2 / df1;

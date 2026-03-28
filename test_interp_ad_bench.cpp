@@ -31,18 +31,26 @@ using namespace Math;
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Extract double from var or double
-inline double dval(const var& v) { return v.val(); }
-inline double dval(double v) { return v; }
+inline double dval(const var& v) {
+    return v.val();
+}
+inline double dval(double v) {
+    return v;
+}
 
 // Binary search matching the library's locate()
 inline std::size_t locate(const std::vector<double>& x, double xVal) {
-    if (xVal <= x.front()) return 0;
-    if (xVal >= x.back()) return x.size() - 2;
+    if (xVal <= x.front())
+        return 0;
+    if (xVal >= x.back())
+        return x.size() - 2;
     std::size_t left = 0, right = x.size() - 1;
     while (right - left > 1) {
         std::size_t mid = left + (right - left) / 2;
-        if (x[mid] <= xVal) left = mid;
-        else right = mid;
+        if (x[mid] <= xVal)
+            left = mid;
+        else
+            right = mid;
     }
     return left;
 }
@@ -56,11 +64,8 @@ inline std::size_t locate(const std::vector<double>& x, double xVal) {
 //    ∂val/∂x      = (y[i+1] - y[i]) / (x[i+1] - x[i])
 // ═══════════════════════════════════════════════════════════════════════════
 
-inline var linearInterpAnalytical(
-    const var& x_v,
-    const std::vector<double>& x_grid,
-    const std::vector<var>& y_data)
-{
+inline var linearInterpAnalytical(const var& x_v, const std::vector<double>& x_grid,
+                                  const std::vector<var>& y_data) {
     double x = x_v.val();
     std::size_t i = locate(x_grid, x);
 
@@ -75,14 +80,12 @@ inline var linearInterpAnalytical(
     double w1 = t;
     double dval_dx = (y2 - y1) / dx;
 
-    return stan::math::make_callback_var(
-        val,
-        [x_v, &y_data, i, w0, w1, dval_dx](auto& vi) {
-            double adj = vi.adj();
-            y_data[i].adj()     += adj * w0;
-            y_data[i + 1].adj() += adj * w1;
-            x_v.adj()           += adj * dval_dx;
-        });
+    return stan::math::make_callback_var(val, [x_v, &y_data, i, w0, w1, dval_dx](auto& vi) {
+        double adj = vi.adj();
+        y_data[i].adj() += adj * w0;
+        y_data[i + 1].adj() += adj * w1;
+        x_v.adj() += adj * dval_dx;
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -94,17 +97,16 @@ inline var linearInterpAnalytical(
 
 inline std::size_t locateLinear(const std::vector<double>& grid, double val) {
     for (std::size_t i = 0; i < grid.size() - 1; ++i) {
-        if (val >= grid[i] && val <= grid[i + 1]) return i;
+        if (val >= grid[i] && val <= grid[i + 1])
+            return i;
     }
     return grid.size() - 2;
 }
 
-inline var bilinearInterpAnalytical(
-    const var& x_v, const var& y_v,
-    const std::vector<double>& x_grid,
-    const std::vector<double>& y_grid,
-    const std::vector<std::vector<var>>& z_data)
-{
+inline var bilinearInterpAnalytical(const var& x_v, const var& y_v,
+                                    const std::vector<double>& x_grid,
+                                    const std::vector<double>& y_grid,
+                                    const std::vector<std::vector<var>>& z_data) {
     double x = x_v.val(), y = y_v.val();
     std::size_t i = locateLinear(x_grid, x);
     std::size_t j = locateLinear(y_grid, y);
@@ -131,12 +133,11 @@ inline var bilinearInterpAnalytical(
     double dval_dy = ((1.0 - u) * (z01 - z00) + u * (z11 - z10)) / dy;
 
     return stan::math::make_callback_var(
-        val,
-        [x_v, y_v, &z_data, i, j, w00, w10, w01, w11, dval_dx, dval_dy](auto& vi) {
+        val, [x_v, y_v, &z_data, i, j, w00, w10, w01, w11, dval_dx, dval_dy](auto& vi) {
             double adj = vi.adj();
-            z_data[j][i].adj()         += adj * w00;
-            z_data[j][i + 1].adj()     += adj * w10;
-            z_data[j + 1][i].adj()     += adj * w01;
+            z_data[j][i].adj() += adj * w00;
+            z_data[j][i + 1].adj() += adj * w10;
+            z_data[j + 1][i].adj() += adj * w01;
             z_data[j + 1][i + 1].adj() += adj * w11;
             x_v.adj() += adj * dval_dx;
             y_v.adj() += adj * dval_dy;
@@ -153,11 +154,8 @@ inline var bilinearInterpAnalytical(
 //                → tridiagonal solve (adjoint = transposed solve)
 // ═══════════════════════════════════════════════════════════════════════════
 
-inline var cubicSplineInterpAnalytical(
-    const var& x_v,
-    const std::vector<double>& x_grid,
-    const std::vector<var>& y_data)
-{
+inline var cubicSplineInterpAnalytical(const var& x_v, const std::vector<double>& x_grid,
+                                       const std::vector<var>& y_data) {
     std::size_t n = x_grid.size();
     double x = x_v.val();
 
@@ -165,7 +163,8 @@ inline var cubicSplineInterpAnalytical(
 
     // Extract y values
     std::vector<double> y(n);
-    for (std::size_t k = 0; k < n; ++k) y[k] = y_data[k].val();
+    for (std::size_t k = 0; k < n; ++k)
+        y[k] = y_data[k].val();
 
     // Segment lengths and slopes
     std::vector<double> dx(n - 1), S(n - 1);
@@ -184,8 +183,12 @@ inline var cubicSplineInterpAnalytical(
         upper[k] = dx[k];
         rhs[k] = 3.0 * (dx[k] * S[k - 1] + dx[k - 1] * S[k]);
     }
-    diag[0] = 2.0;     upper[0] = 1.0;     rhs[0] = 3.0 * S[0];
-    lower[n - 2] = 1.0; diag[n - 1] = 2.0; rhs[n - 1] = 3.0 * S[n - 2];
+    diag[0] = 2.0;
+    upper[0] = 1.0;
+    rhs[0] = 3.0 * S[0];
+    lower[n - 2] = 1.0;
+    diag[n - 1] = 2.0;
+    rhs[n - 1] = 3.0 * S[n - 2];
 
     // Thomas algorithm forward sweep
     std::vector<double> c_prime(n - 1), d_prime(n);
@@ -218,7 +221,8 @@ inline var cubicSplineInterpAnalytical(
 
     // Evaluate
     std::size_t seg = locate(x_grid, x);
-    if (seg >= n - 1) seg = n - 2;
+    if (seg >= n - 1)
+        seg = n - 2;
     double t = x - x_grid[seg];
     double val = y[seg] + t * (a_coeff[seg] + t * (b_coeff[seg] + t * c_coeff[seg]));
 
@@ -234,33 +238,30 @@ inline var cubicSplineInterpAnalytical(
     //   a = deriv[seg]
     //   b = (3S - deriv[seg+1] - 2*deriv[seg]) / dx[seg]
     //   c = (deriv[seg+1] + deriv[seg] - 2S) / dx[seg]²
-    double dval_dy_seg = 1.0;  // direct y[seg] term
+    double dval_dy_seg = 1.0; // direct y[seg] term
     double dval_da = t;
     double dval_db = t * t;
     double dval_dc = t * t * t;
 
-    double da_dderiv_seg   = 1.0;
-    double db_dderiv_seg   = -2.0 / dx[seg];
-    double db_dderiv_seg1  = -1.0 / dx[seg];
-    double db_dS_seg       =  3.0 / dx[seg];
-    double dc_dderiv_seg   =  1.0 / (dx[seg] * dx[seg]);
-    double dc_dderiv_seg1  =  1.0 / (dx[seg] * dx[seg]);
-    double dc_dS_seg       = -2.0 / (dx[seg] * dx[seg]);
+    double da_dderiv_seg = 1.0;
+    double db_dderiv_seg = -2.0 / dx[seg];
+    double db_dderiv_seg1 = -1.0 / dx[seg];
+    double db_dS_seg = 3.0 / dx[seg];
+    double dc_dderiv_seg = 1.0 / (dx[seg] * dx[seg]);
+    double dc_dderiv_seg1 = 1.0 / (dx[seg] * dx[seg]);
+    double dc_dS_seg = -2.0 / (dx[seg] * dx[seg]);
 
     // ∂val/∂deriv[seg], ∂val/∂deriv[seg+1], ∂val/∂S[seg]
-    double dval_dderiv_seg  = dval_da * da_dderiv_seg
-                            + dval_db * db_dderiv_seg
-                            + dval_dc * dc_dderiv_seg;
-    double dval_dderiv_seg1 = dval_db * db_dderiv_seg1
-                            + dval_dc * dc_dderiv_seg1;
-    double dval_dS_seg      = dval_db * db_dS_seg
-                            + dval_dc * dc_dS_seg;
+    double dval_dderiv_seg =
+        dval_da * da_dderiv_seg + dval_db * db_dderiv_seg + dval_dc * dc_dderiv_seg;
+    double dval_dderiv_seg1 = dval_db * db_dderiv_seg1 + dval_dc * dc_dderiv_seg1;
+    double dval_dS_seg = dval_db * db_dS_seg + dval_dc * dc_dS_seg;
 
     // (2) Adjoint of tridiagonal solve: A·deriv = rhs
     //     If ∂val/∂deriv = g, then ∂val/∂rhs = A⁻ᵀ g
     //     i.e., solve Aᵀ λ = g  →  ∂val/∂rhs = λ
     std::vector<double> g(n, 0.0);
-    g[seg]     = dval_dderiv_seg;
+    g[seg] = dval_dderiv_seg;
     g[seg + 1] = dval_dderiv_seg1;
 
     // Solve Aᵀ λ = g using Thomas on the transposed system
@@ -268,8 +269,8 @@ inline var cubicSplineInterpAnalytical(
     // So Aᵀ: sub = upper, diag = diag, super = lower
     std::vector<double> t_lower(n - 1), t_upper(n - 1);
     for (std::size_t k = 0; k < n - 1; ++k) {
-        t_lower[k] = upper[k];   // Aᵀ sub-diagonal = A's super-diagonal
-        t_upper[k] = lower[k];   // Aᵀ super-diagonal = A's sub-diagonal
+        t_lower[k] = upper[k]; // Aᵀ sub-diagonal = A's super-diagonal
+        t_upper[k] = lower[k]; // Aᵀ super-diagonal = A's sub-diagonal
     }
 
     // Thomas on transposed system
@@ -315,7 +316,7 @@ inline var cubicSplineInterpAnalytical(
     // Interior: rhs[k] = 3*(dx[k]*S[k-1] + dx[k-1]*S[k])
     for (std::size_t k = 1; k < n - 1; ++k) {
         dval_dS[k - 1] += lambda[k] * 3.0 * dx[k];
-        dval_dS[k]     += lambda[k] * 3.0 * dx[k - 1];
+        dval_dS[k] += lambda[k] * 3.0 * dx[k - 1];
     }
 
     // rhs[n-1] = 3*S[n-2] → ∂rhs[n-1]/∂S[n-2] = 3
@@ -323,25 +324,23 @@ inline var cubicSplineInterpAnalytical(
 
     // Finally: S[k] → y[k], y[k+1]
     std::vector<double> dval_dy(n, 0.0);
-    dval_dy[seg] += dval_dy_seg;  // direct y[seg] in polynomial
+    dval_dy[seg] += dval_dy_seg; // direct y[seg] in polynomial
 
     for (std::size_t k = 0; k < n - 1; ++k) {
-        dval_dy[k]     += dval_dS[k] * (-1.0 / dx[k]);
-        dval_dy[k + 1] += dval_dS[k] * ( 1.0 / dx[k]);
+        dval_dy[k] += dval_dS[k] * (-1.0 / dx[k]);
+        dval_dy[k + 1] += dval_dS[k] * (1.0 / dx[k]);
     }
 
     // ∂val/∂x
     double dval_dx = a_coeff[seg] + t * (2.0 * b_coeff[seg] + 3.0 * c_coeff[seg] * t);
 
-    return stan::math::make_callback_var(
-        val,
-        [x_v, &y_data, dval_dy, dval_dx, n](auto& vi) {
-            double adj = vi.adj();
-            for (std::size_t k = 0; k < n; ++k) {
-                y_data[k].adj() += adj * dval_dy[k];
-            }
-            x_v.adj() += adj * dval_dx;
-        });
+    return stan::math::make_callback_var(val, [x_v, &y_data, dval_dy, dval_dx, n](auto& vi) {
+        double adj = vi.adj();
+        for (std::size_t k = 0; k < n; ++k) {
+            y_data[k].adj() += adj * dval_dy[k];
+        }
+        x_v.adj() += adj * dval_dx;
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -363,7 +362,8 @@ inline std::size_t measureArenaBytes(auto&& fn, int N) {
     stan::math::recover_memory();
     auto* stack = stan::math::ChainableStack::instance_;
     std::size_t before = stack->memalloc_.bytes_allocated();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     std::size_t after = stack->memalloc_.bytes_allocated();
     stan::math::recover_memory();
     return after - before;
@@ -381,10 +381,12 @@ struct BenchResult {
 template <typename F>
 BenchResult benchmark(F&& fn, int N) {
     // warm-up
-    for (int i = 0; i < std::min(N / 10, 1000); ++i) fn();
+    for (int i = 0; i < std::min(N / 10, 1000); ++i)
+        fn();
 
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     auto end = std::chrono::high_resolution_clock::now();
 
     double us = std::chrono::duration<double, std::micro>(end - start).count();
@@ -400,26 +402,30 @@ void printSection(const char* title) {
 void printMemory(const char* label, std::size_t nodes_naive, std::size_t nodes_analytical,
                  std::size_t bytes_naive, std::size_t bytes_analytical, int batch) {
     std::cout << "  Memory (" << label << "):\n";
-    std::cout << "    " << std::setw(26) << "" << std::setw(12) << "Naive" << std::setw(12) << "Analytical" << std::setw(8) << "Ratio" << "\n";
+    std::cout << "    " << std::setw(26) << "" << std::setw(12) << "Naive" << std::setw(12)
+              << "Analytical" << std::setw(8) << "Ratio" << "\n";
     std::cout << "    " << std::string(58, '-') << "\n";
-    std::cout << "    " << std::setw(26) << "Tape nodes/call"
-              << std::setw(12) << nodes_naive
-              << std::setw(12) << nodes_analytical
-              << std::setw(8) << std::setprecision(1) << (double)nodes_naive / std::max(nodes_analytical, (std::size_t)1) << "x\n";
+    std::cout << "    " << std::setw(26) << "Tape nodes/call" << std::setw(12) << nodes_naive
+              << std::setw(12) << nodes_analytical << std::setw(8) << std::setprecision(1)
+              << (double)nodes_naive / std::max(nodes_analytical, (std::size_t)1) << "x\n";
     std::cout << "    " << std::setw(26) << ("Arena bytes/" + std::to_string(batch) + " calls")
-              << std::setw(12) << bytes_naive
-              << std::setw(12) << bytes_analytical
-              << std::setw(8) << std::setprecision(1) << (double)bytes_naive / std::max(bytes_analytical, (std::size_t)1) << "x\n\n";
+              << std::setw(12) << bytes_naive << std::setw(12) << bytes_analytical << std::setw(8)
+              << std::setprecision(1)
+              << (double)bytes_naive / std::max(bytes_analytical, (std::size_t)1) << "x\n\n";
 }
 
 void printTiming(BenchResult dbl, BenchResult naive, BenchResult analytical) {
     std::cout << "  Timing:\n";
-    std::cout << "    double (no AD):  " << std::setprecision(3) << dbl.per_call_us << " us/call  (baseline)\n";
-    std::cout << "    Naive autodiff:  " << std::setprecision(3) << naive.per_call_us << " us/call  ("
-              << std::setprecision(1) << naive.per_call_us / dbl.per_call_us << "x vs double)\n";
-    std::cout << "    Analytical adj:  " << std::setprecision(3) << analytical.per_call_us << " us/call  ("
-              << std::setprecision(1) << analytical.per_call_us / dbl.per_call_us << "x vs double)\n";
-    std::cout << "    Analytical/Naive speedup: " << std::setprecision(2) << naive.per_call_us / analytical.per_call_us << "x\n\n";
+    std::cout << "    double (no AD):  " << std::setprecision(3) << dbl.per_call_us
+              << " us/call  (baseline)\n";
+    std::cout << "    Naive autodiff:  " << std::setprecision(3) << naive.per_call_us
+              << " us/call  (" << std::setprecision(1) << naive.per_call_us / dbl.per_call_us
+              << "x vs double)\n";
+    std::cout << "    Analytical adj:  " << std::setprecision(3) << analytical.per_call_us
+              << " us/call  (" << std::setprecision(1) << analytical.per_call_us / dbl.per_call_us
+              << "x vs double)\n";
+    std::cout << "    Analytical/Naive speedup: " << std::setprecision(2)
+              << naive.per_call_us / analytical.per_call_us << "x\n\n";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -441,15 +447,15 @@ void benchLinear() {
         y_vals[i] = std::sin(x_grid[i]);
     }
 
-    double x_eval = 2.5;  // evaluation point
+    double x_eval = 2.5; // evaluation point
 
     // ── Naive: library with var ──
     auto naive_once = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
-        LinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_var);
+        LinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var);
         var result = interp(x_v);
         stan::math::grad(result.vi_);
         stan::math::recover_memory();
@@ -458,7 +464,8 @@ void benchLinear() {
     // ── Analytical adjoint ──
     auto analytical_once = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
         var result = linearInterpAnalytical(x_v, x_grid, y_var);
         stan::math::grad(result.vi_);
@@ -474,19 +481,20 @@ void benchLinear() {
         }
 
         var x_n = x_eval;
-        LinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_naive);
+        LinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_naive);
         var res_n = interp(x_n);
         stan::math::grad(res_n.vi_);
 
         std::vector<double> adj_naive(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) adj_naive[i] = y_naive[i].adj();
+        for (int i = 0; i < NKNOTS; ++i)
+            adj_naive[i] = y_naive[i].adj();
         double dx_naive = x_n.adj();
         double val_naive = res_n.val();
         stan::math::recover_memory();
 
         var x_a = x_eval;
-        for (int i = 0; i < NKNOTS; ++i) y_anal[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_anal[i] = y_vals[i];
         var res_a = linearInterpAnalytical(x_a, x_grid, y_anal);
         stan::math::grad(res_a.vi_);
 
@@ -494,8 +502,7 @@ void benchLinear() {
         std::cout << "    Value:  naive=" << std::setprecision(10) << val_naive
                   << "  analytical=" << res_a.val()
                   << "  diff=" << std::abs(val_naive - res_a.val()) << "\n";
-        std::cout << "    dx/dx:  naive=" << dx_naive
-                  << "  analytical=" << x_a.adj()
+        std::cout << "    dx/dx:  naive=" << dx_naive << "  analytical=" << x_a.adj()
                   << "  diff=" << std::abs(dx_naive - x_a.adj()) << "\n";
 
         double max_adj_diff = 0;
@@ -508,24 +515,25 @@ void benchLinear() {
     // ── Memory ──
     auto naive_no_recover = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
-        LinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_var);
+        LinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var);
         var result = interp(x_v);
         (void)result;
     };
     auto analytical_no_recover = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
         var result = linearInterpAnalytical(x_v, x_grid, y_var);
         (void)result;
     };
     auto nodes_naive = countVariNodes(naive_no_recover);
-    auto nodes_anal  = countVariNodes(analytical_no_recover);
+    auto nodes_anal = countVariNodes(analytical_no_recover);
     auto bytes_naive = measureArenaBytes(naive_no_recover, MEM_BATCH);
-    auto bytes_anal  = measureArenaBytes(analytical_no_recover, MEM_BATCH);
+    auto bytes_anal = measureArenaBytes(analytical_no_recover, MEM_BATCH);
 
     printMemory("linear 1D", nodes_naive, nodes_anal, bytes_naive, bytes_anal, MEM_BATCH);
 
@@ -535,9 +543,9 @@ void benchLinear() {
         volatile double result = interp(x_eval);
         (void)result;
     };
-    auto t_dbl   = benchmark(double_once, N);
+    auto t_dbl = benchmark(double_once, N);
     auto t_naive = benchmark(naive_once, N);
-    auto t_anal  = benchmark(analytical_once, N);
+    auto t_anal = benchmark(analytical_once, N);
     printTiming(t_dbl, t_naive, t_anal);
 }
 
@@ -555,8 +563,10 @@ void benchBilinear() {
     // Grid: f(x,y) = sin(x)*cos(y) on [0,pi]x[0,pi]
     std::vector<double> x_grid(NX), y_grid(NY);
     std::vector<std::vector<double>> z_vals(NY, std::vector<double>(NX));
-    for (int i = 0; i < NX; ++i) x_grid[i] = i * M_PI / (NX - 1);
-    for (int j = 0; j < NY; ++j) y_grid[j] = j * M_PI / (NY - 1);
+    for (int i = 0; i < NX; ++i)
+        x_grid[i] = i * M_PI / (NX - 1);
+    for (int j = 0; j < NY; ++j)
+        y_grid[j] = j * M_PI / (NY - 1);
     for (int j = 0; j < NY; ++j)
         for (int i = 0; i < NX; ++i)
             z_vals[j][i] = std::sin(x_grid[i]) * std::cos(y_grid[j]);
@@ -576,10 +586,8 @@ void benchBilinear() {
     auto naive_once = [&]() {
         auto z_var = make_z_var();
         var x_v = x_eval, y_v = y_eval;
-        BilinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()),
-            std::vector<var>(y_grid.begin(), y_grid.end()),
-            z_var);
+        BilinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()),
+                                          std::vector<var>(y_grid.begin(), y_grid.end()), z_var);
         var result = interp(x_v, y_v);
         stan::math::grad(result.vi_);
         stan::math::recover_memory();
@@ -598,10 +606,8 @@ void benchBilinear() {
     {
         auto z_n = make_z_var();
         var x_n = x_eval, y_n = y_eval;
-        BilinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()),
-            std::vector<var>(y_grid.begin(), y_grid.end()),
-            z_n);
+        BilinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()),
+                                          std::vector<var>(y_grid.begin(), y_grid.end()), z_n);
         var res_n = interp(x_n, y_n);
         stan::math::grad(res_n.vi_);
 
@@ -623,7 +629,8 @@ void benchBilinear() {
                 max_diff = std::max(max_diff, std::abs(adj_naive[j][i] - z_a[j][i].adj()));
 
         std::cout << "  Correctness:\n";
-        std::cout << "    Value diff: " << std::setprecision(10) << std::abs(val_naive - res_a.val()) << "\n";
+        std::cout << "    Value diff: " << std::setprecision(10)
+                  << std::abs(val_naive - res_a.val()) << "\n";
         std::cout << "    Max |dz_adj diff|: " << max_diff << "\n\n";
         stan::math::recover_memory();
     }
@@ -632,10 +639,8 @@ void benchBilinear() {
     auto naive_no_recover = [&]() {
         auto z_var = make_z_var();
         var x_v = x_eval, y_v = y_eval;
-        BilinearInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()),
-            std::vector<var>(y_grid.begin(), y_grid.end()),
-            z_var);
+        BilinearInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()),
+                                          std::vector<var>(y_grid.begin(), y_grid.end()), z_var);
         var result = interp(x_v, y_v);
         (void)result;
     };
@@ -646,9 +651,9 @@ void benchBilinear() {
         (void)result;
     };
     auto nodes_naive = countVariNodes(naive_no_recover);
-    auto nodes_anal  = countVariNodes(analytical_no_recover);
+    auto nodes_anal = countVariNodes(analytical_no_recover);
     auto bytes_naive = measureArenaBytes(naive_no_recover, MEM_BATCH);
-    auto bytes_anal  = measureArenaBytes(analytical_no_recover, MEM_BATCH);
+    auto bytes_anal = measureArenaBytes(analytical_no_recover, MEM_BATCH);
 
     printMemory("bilinear 2D", nodes_naive, nodes_anal, bytes_naive, bytes_anal, MEM_BATCH);
 
@@ -657,9 +662,9 @@ void benchBilinear() {
         volatile double result = interp(x_eval, y_eval);
         (void)result;
     };
-    auto t_dbl   = benchmark(double_once, N);
+    auto t_dbl = benchmark(double_once, N);
     auto t_naive = benchmark(naive_once, N);
-    auto t_anal  = benchmark(analytical_once, N);
+    auto t_anal = benchmark(analytical_once, N);
     printTiming(t_dbl, t_naive, t_anal);
 }
 
@@ -686,11 +691,11 @@ void benchCubicSpline() {
 
     auto naive_once = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
-        CubicInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
-            CubicInterpolation<var>::Spline);
+        CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
+                                       CubicInterpolation<var>::Spline);
         var result = interp(x_v);
         stan::math::grad(result.vi_);
         stan::math::recover_memory();
@@ -698,7 +703,8 @@ void benchCubicSpline() {
 
     auto analytical_once = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
         var result = cubicSplineInterpAnalytical(x_v, x_grid, y_var);
         stan::math::grad(result.vi_);
@@ -714,20 +720,21 @@ void benchCubicSpline() {
         }
 
         var x_n = x_eval;
-        CubicInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_naive,
-            CubicInterpolation<var>::Spline);
+        CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_naive,
+                                       CubicInterpolation<var>::Spline);
         var res_n = interp(x_n);
         stan::math::grad(res_n.vi_);
 
         double val_naive = res_n.val();
         double dx_naive = x_n.adj();
         std::vector<double> adj_naive(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) adj_naive[i] = y_naive[i].adj();
+        for (int i = 0; i < NKNOTS; ++i)
+            adj_naive[i] = y_naive[i].adj();
         stan::math::recover_memory();
 
         var x_a = x_eval;
-        for (int i = 0; i < NKNOTS; ++i) y_anal[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_anal[i] = y_vals[i];
         var res_a = cubicSplineInterpAnalytical(x_a, x_grid, y_anal);
         stan::math::grad(res_a.vi_);
 
@@ -735,54 +742,56 @@ void benchCubicSpline() {
         std::cout << "    Value:  naive=" << std::setprecision(10) << val_naive
                   << "  analytical=" << res_a.val()
                   << "  diff=" << std::abs(val_naive - res_a.val()) << "\n";
-        std::cout << "    dval/dx:  naive=" << dx_naive
-                  << "  analytical=" << x_a.adj()
+        std::cout << "    dval/dx:  naive=" << dx_naive << "  analytical=" << x_a.adj()
                   << "  diff=" << std::abs(dx_naive - x_a.adj()) << "\n";
 
         double max_diff = 0;
         int worst_idx = 0;
         std::cout << "\n    Sensitivities dy[k] (first 5 and worst):\n";
-        std::cout << "      " << std::setw(6) << "k" << std::setw(16) << "Naive"
-                  << std::setw(16) << "Analytical" << std::setw(14) << "Abs Diff" << "\n";
+        std::cout << "      " << std::setw(6) << "k" << std::setw(16) << "Naive" << std::setw(16)
+                  << "Analytical" << std::setw(14) << "Abs Diff" << "\n";
         for (int i = 0; i < NKNOTS; ++i) {
             double d = std::abs(adj_naive[i] - y_anal[i].adj());
-            if (d > max_diff) { max_diff = d; worst_idx = i; }
+            if (d > max_diff) {
+                max_diff = d;
+                worst_idx = i;
+            }
             if (i < 5) {
-                std::cout << "      " << std::setw(6) << i
-                          << std::setw(16) << adj_naive[i]
-                          << std::setw(16) << y_anal[i].adj()
-                          << std::setw(14) << d << "\n";
+                std::cout << "      " << std::setw(6) << i << std::setw(16) << adj_naive[i]
+                          << std::setw(16) << y_anal[i].adj() << std::setw(14) << d << "\n";
             }
         }
         std::cout << "      " << std::setw(6) << worst_idx << std::setw(16) << adj_naive[worst_idx]
-                  << std::setw(16) << y_anal[worst_idx].adj()
-                  << std::setw(14) << max_diff << " (worst)\n";
-        std::cout << "\n    Max |dy_adj diff| across all " << NKNOTS << " knots: " << max_diff << "\n\n";
+                  << std::setw(16) << y_anal[worst_idx].adj() << std::setw(14) << max_diff
+                  << " (worst)\n";
+        std::cout << "\n    Max |dy_adj diff| across all " << NKNOTS << " knots: " << max_diff
+                  << "\n\n";
         stan::math::recover_memory();
     }
 
     // ── Memory ──
     auto naive_no_recover = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
-        CubicInterpolation<var> interp(
-            std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
-            CubicInterpolation<var>::Spline);
+        CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
+                                       CubicInterpolation<var>::Spline);
         var result = interp(x_v);
         (void)result;
     };
     auto analytical_no_recover = [&]() {
         std::vector<var> y_var(NKNOTS);
-        for (int i = 0; i < NKNOTS; ++i) y_var[i] = y_vals[i];
+        for (int i = 0; i < NKNOTS; ++i)
+            y_var[i] = y_vals[i];
         var x_v = x_eval;
         var result = cubicSplineInterpAnalytical(x_v, x_grid, y_var);
         (void)result;
     };
     auto nodes_naive = countVariNodes(naive_no_recover);
-    auto nodes_anal  = countVariNodes(analytical_no_recover);
+    auto nodes_anal = countVariNodes(analytical_no_recover);
     auto bytes_naive = measureArenaBytes(naive_no_recover, MEM_BATCH);
-    auto bytes_anal  = measureArenaBytes(analytical_no_recover, MEM_BATCH);
+    auto bytes_anal = measureArenaBytes(analytical_no_recover, MEM_BATCH);
 
     printMemory("cubic spline", nodes_naive, nodes_anal, bytes_naive, bytes_anal, MEM_BATCH);
 
@@ -791,9 +800,9 @@ void benchCubicSpline() {
         volatile double result = interp(x_eval);
         (void)result;
     };
-    auto t_dbl   = benchmark(double_once, N);
+    auto t_dbl = benchmark(double_once, N);
     auto t_naive = benchmark(naive_once, N);
-    auto t_anal  = benchmark(analytical_once, N);
+    auto t_anal = benchmark(analytical_once, N);
     printTiming(t_dbl, t_naive, t_anal);
 }
 

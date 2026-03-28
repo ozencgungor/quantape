@@ -6,22 +6,21 @@
  * to validate bridge accuracy.
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 // CIR parameters structure
 struct CIRParams {
-    double kappa;  // Mean reversion speed
-    double theta;  // Long-term mean
-    double sigma;  // Volatility
+    double kappa; // Mean reversion speed
+    double theta; // Long-term mean
+    double sigma; // Volatility
 
-    CIRParams(double k, double t, double s)
-        : kappa(k), theta(t), sigma(s) {}
+    CIRParams(double k, double t, double s) : kappa(k), theta(t), sigma(s) {}
 };
 
 // Global RNG for reproducibility
@@ -29,8 +28,12 @@ std::mt19937_64 rng(12345);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 /**
  * @brief Andersen's QE scheme for CIR transition
@@ -46,8 +49,7 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 
     // Mean and variance of r(t+dt) | r(t)
     double m = theta + (r_t - theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) + theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
 
     // Critical value
     double psi = s2 / (m * m);
@@ -78,8 +80,7 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 /**
  * @brief Evaluate approximate CIR transition density (Andersen-style)
  */
-double evaluateDensity_Andersen(double r_start, double r_end,
-                                double dt, const CIRParams& params) {
+double evaluateDensity_Andersen(double r_start, double r_end, double dt, const CIRParams& params) {
     double kappa = params.kappa;
     double theta = params.theta;
     double sigma = params.sigma;
@@ -88,8 +89,7 @@ double evaluateDensity_Andersen(double r_start, double r_end,
     double c = sigma * sigma / (4.0 * kappa);
 
     double m = theta + (r_start - theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) + theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
@@ -97,7 +97,8 @@ double evaluateDensity_Andersen(double r_start, double r_end,
         double b2 = 2.0 / psi - 1.0 + std::sqrt(2.0 / psi) * std::sqrt(2.0 / psi - 1.0);
         double a = m / (1.0 + b2);
 
-        if (r_end <= 0.0) return 0.0;
+        if (r_end <= 0.0)
+            return 0.0;
 
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
@@ -127,8 +128,7 @@ double evaluateDensity_Andersen(double r_start, double r_end,
 /**
  * @brief Sample CIR bridge using Andersen QE + rejection sampling
  */
-double sampleCIRBridge_AndersenRejection(double r1, double r2,
-                                         double t1, double tk, double t2,
+double sampleCIRBridge_AndersenRejection(double r1, double r2, double t1, double tk, double t2,
                                          const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
@@ -136,12 +136,10 @@ double sampleCIRBridge_AndersenRejection(double r1, double r2,
     // Find approximate maximum for normalization
     // Try several candidates and pick maximum
     double m_uncond = params.theta + (r1 - params.theta) * std::exp(-params.kappa * dt1);
-    double m_bridge = 0.5 * (r1 + r2);  // Simple midpoint
+    double m_bridge = 0.5 * (r1 + r2); // Simple midpoint
 
-    double M = std::max(
-        evaluateDensity_Andersen(m_uncond, r2, dt2, params),
-        evaluateDensity_Andersen(m_bridge, r2, dt2, params)
-    );
+    double M = std::max(evaluateDensity_Andersen(m_uncond, r2, dt2, params),
+                        evaluateDensity_Andersen(m_bridge, r2, dt2, params));
     M *= 1.5; // Safety factor
 
     const int MAX_ATTEMPTS = 100000;
@@ -166,8 +164,7 @@ double sampleCIRBridge_AndersenRejection(double r1, double r2,
 /**
  * @brief Modified bridge with drift correction (approximate but fast)
  */
-double sampleCIRBridge_AndersenModified(double r1, double r2,
-                                        double t1, double tk, double t2,
+double sampleCIRBridge_AndersenModified(double r1, double r2, double t1, double tk, double t2,
                                         const CIRParams& params) {
     double dt1 = tk - t1;
     double dt_total = t2 - t1;
@@ -193,7 +190,7 @@ void testBridgeAccuracy() {
     std::cout << "=== CIR Bridge Accuracy Test ===\n\n";
 
     // CIR parameters (typical interest rate model)
-    CIRParams params(0.5, 0.04, 0.1);  // kappa, theta, sigma
+    CIRParams params(0.5, 0.04, 0.1); // kappa, theta, sigma
 
     std::cout << "CIR Parameters:\n";
     std::cout << "  kappa (mean reversion): " << params.kappa << "\n";
@@ -202,14 +199,14 @@ void testBridgeAccuracy() {
 
     // Time grid
     const int N = 200;
-    const double dt = 7.0 / 365.25;  // Weekly steps
+    const double dt = 7.0 / 365.25; // Weekly steps
     std::vector<double> times(N);
     for (int i = 0; i < N; i++) {
         times[i] = i * dt;
     }
 
     std::cout << "Time grid: " << N << " points, dt = " << dt << " years (weekly)\n";
-    std::cout << "Total time: " << times[N-1] << " years\n\n";
+    std::cout << "Total time: " << times[N - 1] << " years\n\n";
 
     // Number of simulation paths
     const int N_PATHS = 10000;
@@ -223,8 +220,8 @@ void testBridgeAccuracy() {
     std::vector<double> rel_errors_rejection;
     std::vector<double> rel_errors_modified;
 
-    errors_rejection.reserve(N_PATHS * (N/2));
-    errors_modified.reserve(N_PATHS * (N/2));
+    errors_rejection.reserve(N_PATHS * (N / 2));
+    errors_modified.reserve(N_PATHS * (N / 2));
 
     // Simulate paths
     for (int path = 0; path < N_PATHS; path++) {
@@ -235,7 +232,7 @@ void testBridgeAccuracy() {
         std::vector<double> reference_path(N);
         reference_path[0] = r0;
         for (int i = 1; i < N; i++) {
-            reference_path[i] = sampleCIR_Andersen(reference_path[i-1], dt, params);
+            reference_path[i] = sampleCIR_Andersen(reference_path[i - 1], dt, params);
         }
 
         // 2. Coarse path: Simulate only odd indices
@@ -255,11 +252,11 @@ void testBridgeAccuracy() {
 
         // 3. Insert even points using bridge methods
         for (int i = 2; i < N; i += 2) {
-            double r_before = coarse_path[i-1];
-            double r_after = coarse_path[i+1];
-            double t_before = times[i-1];
+            double r_before = coarse_path[i - 1];
+            double r_after = coarse_path[i + 1];
+            double t_before = times[i - 1];
             double t_insert = times[i];
-            double t_after = times[i+1];
+            double t_after = times[i + 1];
 
             // Test rejection sampling bridge
             rng.seed(98765 + path * 1000 + i);
@@ -268,8 +265,8 @@ void testBridgeAccuracy() {
 
             // Test modified bridge
             rng.seed(98765 + path * 1000 + i);
-            double r_bridge_modified = sampleCIRBridge_AndersenModified(
-                r_before, r_after, t_before, t_insert, t_after, params);
+            double r_bridge_modified = sampleCIRBridge_AndersenModified(r_before, r_after, t_before,
+                                                                        t_insert, t_after, params);
 
             // Compare with reference
             double r_ref = reference_path[i];
@@ -310,20 +307,20 @@ void testBridgeAccuracy() {
         return std::make_tuple(mean, std, median, q25, q75);
     };
 
-    auto [mean_err_rej, std_err_rej, med_err_rej, q25_err_rej, q75_err_rej]
-        = compute_stats(errors_rejection);
-    auto [mean_err_mod, std_err_mod, med_err_mod, q25_err_mod, q75_err_mod]
-        = compute_stats(errors_modified);
+    auto [mean_err_rej, std_err_rej, med_err_rej, q25_err_rej, q75_err_rej] =
+        compute_stats(errors_rejection);
+    auto [mean_err_mod, std_err_mod, med_err_mod, q25_err_mod, q75_err_mod] =
+        compute_stats(errors_modified);
 
-    auto [mean_abs_rej, std_abs_rej, med_abs_rej, q25_abs_rej, q75_abs_rej]
-        = compute_stats(abs_errors_rejection);
-    auto [mean_abs_mod, std_abs_mod, med_abs_mod, q25_abs_mod, q75_abs_mod]
-        = compute_stats(abs_errors_modified);
+    auto [mean_abs_rej, std_abs_rej, med_abs_rej, q25_abs_rej, q75_abs_rej] =
+        compute_stats(abs_errors_rejection);
+    auto [mean_abs_mod, std_abs_mod, med_abs_mod, q25_abs_mod, q75_abs_mod] =
+        compute_stats(abs_errors_modified);
 
-    auto [mean_rel_rej, std_rel_rej, med_rel_rej, q25_rel_rej, q75_rel_rej]
-        = compute_stats(rel_errors_rejection);
-    auto [mean_rel_mod, std_rel_mod, med_rel_mod, q25_rel_mod, q75_rel_mod]
-        = compute_stats(rel_errors_modified);
+    auto [mean_rel_rej, std_rel_rej, med_rel_rej, q25_rel_rej, q75_rel_rej] =
+        compute_stats(rel_errors_rejection);
+    auto [mean_rel_mod, std_rel_mod, med_rel_mod, q25_rel_mod, q75_rel_mod] =
+        compute_stats(rel_errors_modified);
 
     // Print results
     std::cout << std::fixed << std::setprecision(6);
@@ -362,8 +359,7 @@ void testBridgeAccuracy() {
 
     std::cout << "=== Comparison ===\n";
     std::cout << "Rejection vs Modified:\n";
-    std::cout << "  Mean absolute error ratio: "
-              << mean_abs_mod / mean_abs_rej << "x\n";
+    std::cout << "  Mean absolute error ratio: " << mean_abs_mod / mean_abs_rej << "x\n";
     std::cout << "  Bias (rejection):          " << mean_err_rej << "\n";
     std::cout << "  Bias (modified):           " << mean_err_mod << "\n\n";
 
@@ -377,7 +373,8 @@ void testBridgeAccuracy() {
     std::cout << "the bridge doesn't systematically over/under-estimate.\n\n";
     std::cout << "Standard deviation ~" << std_err_rej << " reflects natural\n";
     std::cout << "variability when comparing different conditional distributions.\n";
-    std::cout << "This is about " << (std_err_rej / params.theta) * 100 << "% of the long-term mean.\n\n";
+    std::cout << "This is about " << (std_err_rej / params.theta) * 100
+              << "% of the long-term mean.\n\n";
 
     // Additional test: Check if bridge preserves path consistency
     std::cout << "=== Path Consistency Test ===\n";
@@ -396,8 +393,7 @@ void testBridgeAccuracy() {
 
         // Simulate t0 -> t2 directly
         rng.seed(5000 + i);
-        double r2_direct = sampleCIR_Andersen(
-            sampleCIR_Andersen(r0, dt, params), dt, params);
+        double r2_direct = sampleCIR_Andersen(sampleCIR_Andersen(r0, dt, params), dt, params);
 
         // Simulate t0 -> t2 via bridge
         rng.seed(5000 + i);
@@ -405,8 +401,8 @@ void testBridgeAccuracy() {
 
         // Now insert t1 via bridge
         rng.seed(6000 + i);
-        double r1_bridged = sampleCIRBridge_AndersenRejection(
-            r0, r2_via_coarse, t0, t1, t2, params);
+        double r1_bridged =
+            sampleCIRBridge_AndersenRejection(r0, r2_via_coarse, t0, t1, t2, params);
 
         // This should be close to r2_via_coarse by construction
         endpoint_errors.push_back(r2_via_coarse - r2_via_coarse); // Should be 0
@@ -418,7 +414,8 @@ void testBridgeAccuracy() {
     std::cout << "Bridge maintains endpoint consistency: ";
     std::cout << "(this should be near zero by construction)\n";
     std::cout << "  Mean endpoint deviation: "
-              << std::accumulate(endpoint_errors.begin(), endpoint_errors.end(), 0.0) / endpoint_errors.size()
+              << std::accumulate(endpoint_errors.begin(), endpoint_errors.end(), 0.0) /
+                     endpoint_errors.size()
               << "\n\n";
 }
 

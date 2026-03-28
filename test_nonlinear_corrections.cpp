@@ -11,13 +11,13 @@
  *   5. Effective parameter adjustment
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 struct CIRParams {
     double kappa;
@@ -29,8 +29,12 @@ std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 // --- Andersen QE scheme ---
 
@@ -41,12 +45,13 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double exp_kt = std::exp(-params.kappa * dt);
     double m = params.theta + (r_t - params.theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_t * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = (s2 > 1e-12) ? s2 / (m * m) : 0.0;
 
     if (psi <= 1.5) {
-        double b2 = (psi > 1e-12) ? 2.0 / psi - 1.0 + std::sqrt(2.0 / psi * (2.0/psi - 1.0)) : 1.0;
+        double b2 =
+            (psi > 1e-12) ? 2.0 / psi - 1.0 + std::sqrt(2.0 / psi * (2.0 / psi - 1.0)) : 1.0;
         double a = m / (1.0 + b2);
         double b = std::sqrt(b2);
         double Z = randn();
@@ -60,19 +65,23 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 }
 
 double evaluateDensity_Andersen(double r_start, double r_end, double dt, const CIRParams& params) {
-    if (dt < 1e-10) return 0.0;
-    if (params.kappa <= 1e-8) return 0.0;
+    if (dt < 1e-10)
+        return 0.0;
+    if (params.kappa <= 1e-8)
+        return 0.0;
     double exp_kt = std::exp(-params.kappa * dt);
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double m = params.theta + (r_start - params.theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_start * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = (s2 > 1e-12) ? s2 / (m * m) : 0.0;
 
     if (psi <= 1.5) {
-        double b2 = (psi > 1e-12) ? 2.0 / psi - 1.0 + std::sqrt(2.0 / psi * (2.0/psi - 1.0)) : 1.0;
+        double b2 =
+            (psi > 1e-12) ? 2.0 / psi - 1.0 + std::sqrt(2.0 / psi * (2.0 / psi - 1.0)) : 1.0;
         double a = m / (1.0 + b2);
-        if (r_end <= 1e-12) return 0.0;
+        if (r_end <= 1e-12)
+            return 0.0;
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
         double b = std::sqrt(b2);
@@ -86,27 +95,33 @@ double evaluateDensity_Andersen(double r_start, double r_end, double dt, const C
     }
 }
 
-double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double t2,
+                             const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     double m_uncond = params.theta + (r1 - params.theta) * std::exp(-params.kappa * dt1);
     double M = evaluateDensity_Andersen(m_uncond, r2, dt2, params) * 1.5;
-    if (M <= 1e-12) return m_uncond;
+    if (M <= 1e-12)
+        return m_uncond;
 
     for (int attempt = 0; attempt < 100000; attempt++) {
         double y = sampleCIR_Andersen(r1, dt1, params);
         double accept_prob = evaluateDensity_Andersen(y, r2, dt2, params) / M;
-        if (uniform_random() < accept_prob) return y;
+        if (uniform_random() < accept_prob)
+            return y;
     }
     return sampleCIR_Andersen(r1, dt1, params);
 }
 
 double get_cir_variance(double x0, double dt, const CIRParams& params) {
     const double& k = params.kappa;
-    if (k <= 1e-8) return 0.0;
+    if (k <= 1e-8)
+        return 0.0;
     const double& th = params.theta;
     const double& s = params.sigma;
     const double s2 = s * s;
@@ -125,11 +140,14 @@ double get_cir_variance(double x0, double dt, const CIRParams& params) {
  * This has CONSTANT diffusion = 1, so variance is linear in time!
  * Easier to approximate.
  */
-double bridge_Lamperti(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double bridge_Lamperti(double r1, double r2, double t1, double tk, double t2,
+                       const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     // Transform to Y space
     double Y1 = 2.0 * std::sqrt(std::max(0.0, r1)) / params.sigma;
@@ -177,11 +195,14 @@ double bridge_Lamperti(double r1, double r2, double t1, double tk, double t2, co
  *
  * Correction: Adjust the bridge mean based on "distance from equilibrium"
  */
-double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk, double t2,
+                                      const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     const double& k = params.kappa;
     const double& th = params.theta;
@@ -207,7 +228,7 @@ double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk
 
     // If r1 << theta, we should pull the mean MORE toward theta
     // Correction factor: increases with distance from equilibrium
-    double correction_factor = std::tanh(distance_from_eq);  // 0 when at equilibrium, →1 when far
+    double correction_factor = std::tanh(distance_from_eq); // 0 when at equilibrium, →1 when far
 
     // Adjust mean toward theta
     double corrected_mean = mean_x_bridge + correction_factor * 0.3 * (th - mean_x_bridge);
@@ -215,8 +236,8 @@ double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk
     // Variance correction
     double var_k2_approx = get_cir_variance(corrected_mean, dt2, params);
     double var_x_bridge = (var_1k > 1e-12 && var_k2_approx > 1e-12)
-        ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
-        : 0.0;
+                              ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
+                              : 0.0;
 
     CIRParams modified_params = params;
     if (std::abs(1.0 - exp_k_dt1) > 1e-8) {
@@ -224,8 +245,10 @@ double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk
     }
 
     double e_2kdt1 = exp_k_dt1 * exp_k_dt1;
-    double var_factor = (k > 1e-8) ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
-                                      (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2)) : 0.0;
+    double var_factor = (k > 1e-8)
+                            ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
+                               (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2))
+                            : 0.0;
 
     if (var_factor > 1e-12) {
         double s2_target = var_x_bridge / var_factor;
@@ -244,11 +267,14 @@ double bridge_MeanReversionCorrection(double r1, double r2, double t1, double tk
  *
  * For CIR: When r is small, mean reversion dominates (theta term is large relative to r)
  */
-double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double t2,
+                             const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     const double& k = params.kappa;
     const double& th = params.theta;
@@ -281,7 +307,7 @@ double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double 
     // Use ORIGINAL kappa for variance
     double var_1k = get_cir_variance(r1, dt1, params);
     double var_12 = get_cir_variance(r1, dt1 + dt2, params);
-    double cov_k2 = var_1k * std::exp(-k * dt2);  // Original kappa
+    double cov_k2 = var_1k * std::exp(-k * dt2); // Original kappa
 
     double mean_x_bridge = E_1k;
     if (var_12 > 1e-12) {
@@ -290,8 +316,8 @@ double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double 
 
     double var_k2_approx = get_cir_variance(mean_x_bridge, dt2, params);
     double var_x_bridge = (var_1k > 1e-12 && var_k2_approx > 1e-12)
-        ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
-        : 0.0;
+                              ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
+                              : 0.0;
 
     CIRParams modified_params = params;
     if (std::abs(1.0 - exp_k_dt1) > 1e-8) {
@@ -299,8 +325,10 @@ double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double 
     }
 
     double e_2kdt1 = exp_k_dt1 * exp_k_dt1;
-    double var_factor = (k > 1e-8) ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
-                                      (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2)) : 0.0;
+    double var_factor = (k > 1e-8)
+                            ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
+                               (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2))
+                            : 0.0;
 
     if (var_factor > 1e-12) {
         double s2_target = var_x_bridge / var_factor;
@@ -317,14 +345,18 @@ double bridge_EffectiveKappa(double r1, double r2, double t1, double tk, double 
  * Idea: When r1 << theta, first simulate to a closer point, then bridge.
  * This reduces the distance from equilibrium.
  */
-double bridge_TwoStep(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double bridge_TwoStep(double r1, double r2, double t1, double tk, double t2,
+                      const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     // If r1 is far from theta, use two-step approach
-    double distance_ratio = (params.theta > 1e-8) ? std::abs(r1 - params.theta) / params.theta : 0.0;
+    double distance_ratio =
+        (params.theta > 1e-8) ? std::abs(r1 - params.theta) / params.theta : 0.0;
 
     if (distance_ratio > 0.5) {
         // Split the interval [t1, tk] at tmid
@@ -344,11 +376,14 @@ double bridge_TwoStep(double r1, double r2, double t1, double tk, double t2, con
 // ============================================================================
 // Baseline: v2_corrected from previous test
 // ============================================================================
-double bridge_v2_corrected(double r1, double r2, double t1, double tk, double t2, const CIRParams& params) {
+double bridge_v2_corrected(double r1, double r2, double t1, double tk, double t2,
+                           const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     const double& k = params.kappa;
     const double& th = params.theta;
@@ -370,8 +405,8 @@ double bridge_v2_corrected(double r1, double r2, double t1, double tk, double t2
 
     double var_k2_approx = get_cir_variance(mean_x_bridge, dt2, params);
     double var_x_bridge = (var_1k > 1e-12 && var_k2_approx > 1e-12)
-        ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
-        : 0.0;
+                              ? (var_1k * var_k2_approx) / (var_1k + var_k2_approx)
+                              : 0.0;
 
     CIRParams modified_params = params;
     if (std::abs(1.0 - exp_k_dt1) > 1e-8) {
@@ -379,8 +414,10 @@ double bridge_v2_corrected(double r1, double r2, double t1, double tk, double t2
     }
 
     double e_2kdt1 = exp_k_dt1 * exp_k_dt1;
-    double var_factor = (k > 1e-8) ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
-                                      (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2)) : 0.0;
+    double var_factor = (k > 1e-8)
+                            ? ((r1 / k) * (exp_k_dt1 - e_2kdt1) +
+                               (modified_params.theta / (2.0 * k)) * std::pow(1.0 - exp_k_dt1, 2))
+                            : 0.0;
 
     if (var_factor > 1e-12) {
         double s2_target = var_x_bridge / var_factor;
@@ -397,18 +434,19 @@ double bridge_v2_corrected(double r1, double r2, double t1, double tk, double t2
 void testNonlinearCorrections() {
     std::cout << "=== Testing Nonlinear Corrections for Low r1 ===\n\n";
 
-    CIRParams params{0.1, 0.08, 0.2};  // Standard params
+    CIRParams params{0.1, 0.08, 0.2}; // Standard params
 
     // CRITICAL TEST CASE: r1 << theta
-    double r1 = 0.01;  // Much less than theta = 0.08
+    double r1 = 0.01; // Much less than theta = 0.08
     double r2 = 0.05;
     double t1 = 0.0;
     double tk = 0.5;
     double t2 = 1.0;
 
     std::cout << "Parameters:\n";
-    std::cout << "  κ = " << params.kappa << ", θ = " << params.theta << ", σ = " << params.sigma << "\n";
-    std::cout << "  r1 = " << r1 << " (ratio r1/θ = " << r1/params.theta << ")\n";
+    std::cout << "  κ = " << params.kappa << ", θ = " << params.theta << ", σ = " << params.sigma
+              << "\n";
+    std::cout << "  r1 = " << r1 << " (ratio r1/θ = " << r1 / params.theta << ")\n";
     std::cout << "  r2 = " << r2 << "\n";
     std::cout << "  Times: t1=" << t1 << ", tk=" << tk << ", t2=" << t2 << "\n\n";
 
@@ -426,7 +464,8 @@ void testNonlinearCorrections() {
     auto compute_stats = [](const std::vector<double>& data) {
         double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
         double variance = 0.0;
-        for (double x : data) variance += (x - mean) * (x - mean);
+        for (double x : data)
+            variance += (x - mean) * (x - mean);
         variance /= data.size();
         return std::make_pair(mean, variance);
     };
@@ -443,13 +482,11 @@ void testNonlinearCorrections() {
         std::function<double(double, double, double, double, double, const CIRParams&)> func;
     };
 
-    std::vector<Method> methods = {
-        {"Baseline (v2_corrected)", bridge_v2_corrected},
-        {"Lamperti Transform", bridge_Lamperti},
-        {"Mean Reversion Correction", bridge_MeanReversionCorrection},
-        {"Effective Kappa", bridge_EffectiveKappa},
-        {"Two-Step Bridge", bridge_TwoStep}
-    };
+    std::vector<Method> methods = {{"Baseline (v2_corrected)", bridge_v2_corrected},
+                                   {"Lamperti Transform", bridge_Lamperti},
+                                   {"Mean Reversion Correction", bridge_MeanReversionCorrection},
+                                   {"Effective Kappa", bridge_EffectiveKappa},
+                                   {"Two-Step Bridge", bridge_TwoStep}};
 
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "Method                         Mean        Variance    Mean Err    Var Err\n";
@@ -469,10 +506,8 @@ void testNonlinearCorrections() {
         double mean_err = (mean_exact > 1e-9) ? (mean_approx - mean_exact) / mean_exact * 100 : 0.0;
         double var_err = (var_exact > 1e-12) ? (var_approx - var_exact) / var_exact * 100 : 0.0;
 
-        std::cout << std::setw(30) << std::left << method.name
-                  << std::setw(12) << std::right << mean_approx
-                  << std::setw(12) << var_approx
-                  << std::setw(12) << mean_err << "%"
+        std::cout << std::setw(30) << std::left << method.name << std::setw(12) << std::right
+                  << mean_approx << std::setw(12) << var_approx << std::setw(12) << mean_err << "%"
                   << std::setw(11) << var_err << "%\n";
     }
 

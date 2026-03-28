@@ -1,11 +1,13 @@
 #ifndef IRVOLATILITY_H
 #define IRVOLATILITY_H
 
-#include "Markets/Descriptors/IRVolDescriptor.h"
 #include "Math/Interpolations/BicubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/IRVolDescriptor.h"
 
 namespace Markets {
 
@@ -13,8 +15,8 @@ namespace Markets {
  * @brief IR volatility types
  */
 enum class IRVolType {
-    Swaption,  ///< Swaption volatility (expiry x tenor = time to expiry x swap tenor)
-    Cap        ///< Cap/Floor volatility (expiry x tenor = time to caplet x forward rate tenor)
+    Swaption, ///< Swaption volatility (expiry x tenor = time to expiry x swap tenor)
+    Cap       ///< Cap/Floor volatility (expiry x tenor = time to caplet x forward rate tenor)
 };
 
 /**
@@ -37,8 +39,7 @@ enum class IRVolType {
  * @tparam VolType Type of IR volatility (Swaption or Cap)
  * @tparam ContainerT Container type for vol surface (default: vector<vector<DoubleT>>)
  */
-template <typename DoubleT,
-          IRVolType VolType = IRVolType::Swaption,
+template <typename DoubleT, IRVolType VolType = IRVolType::Swaption,
           typename ContainerT = std::vector<std::vector<DoubleT>>>
 class IRVolatility {
 public:
@@ -50,8 +51,7 @@ public:
      * @param descriptor Vol surface metadata
      */
     template <typename VectorT, typename SurfaceT>
-    IRVolatility(const VectorT& expiries, const VectorT& tenors,
-                 const SurfaceT& atmVolSurface,
+    IRVolatility(const VectorT& expiries, const VectorT& tenors, const SurfaceT& atmVolSurface,
                  const IRVolDescriptor& descriptor = IRVolDescriptor())
         : m_descriptor(descriptor), m_hasSmile(false) {
         // Convert to vectors
@@ -61,8 +61,7 @@ public:
 
         // Validate dimensions
         if (m_atmVolSurface.size() != m_expiries.size()) {
-            throw std::runtime_error(
-                "IRVolatility: atmVolSurface rows must match expiries size");
+            throw std::runtime_error("IRVolatility: atmVolSurface rows must match expiries size");
         }
         for (const auto& row : m_atmVolSurface) {
             if (row.size() != m_tenors.size()) {
@@ -75,23 +74,18 @@ public:
         // Note: BicubicInterpolation expects (x, y, z) where z[y_index][x_index]
         // So we pass (tenors, expiries, z) since our z is organized as z[expiry][tenor]
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
      * @brief Copy constructor
      */
     IRVolatility(const IRVolatility& other)
-        : m_descriptor(other.m_descriptor),
-          m_expiries(other.m_expiries),
-          m_tenors(other.m_tenors),
-          m_atmVolSurface(other.m_atmVolSurface),
-          m_hasSmile(other.m_hasSmile),
+        : m_descriptor(other.m_descriptor), m_expiries(other.m_expiries), m_tenors(other.m_tenors),
+          m_atmVolSurface(other.m_atmVolSurface), m_hasSmile(other.m_hasSmile),
           m_strikes(other.m_strikes) {
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -106,8 +100,7 @@ public:
             m_hasSmile = other.m_hasSmile;
             m_strikes = other.m_strikes;
             m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-                m_tenors, m_expiries, m_atmVolSurface,
-                Math::CubicInterpolation<DoubleT>::Spline);
+                m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
         }
         return *this;
     }
@@ -119,8 +112,7 @@ public:
      * @param allowExtrapolation Allow extrapolation beyond surface range
      * @return ATM volatility
      */
-    DoubleT atmVol(DoubleT expiry, DoubleT tenor,
-                   bool allowExtrapolation = true) const {
+    DoubleT atmVol(DoubleT expiry, DoubleT tenor, bool allowExtrapolation = true) const {
         // Note: interpolator is (x=tenors, y=expiries), so we call it with (tenor, expiry)
         return (*m_atmInterpolator)(tenor, expiry, allowExtrapolation);
     }
@@ -187,9 +179,7 @@ public:
     /**
      * @brief Get ATM vol surface
      */
-    const std::vector<std::vector<DoubleT>>& atmSurface() const {
-        return m_atmVolSurface;
-    }
+    const std::vector<std::vector<DoubleT>>& atmSurface() const { return m_atmVolSurface; }
 
     /**
      * @brief Scale entire surface by a scalar (multiply each element)
@@ -203,8 +193,7 @@ public:
         }
         // Recreate interpolator with scaled surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -219,8 +208,7 @@ public:
         }
         // Recreate interpolator with shifted surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -236,8 +224,7 @@ public:
         }
         // Recreate interpolator with transformed surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -257,8 +244,7 @@ public:
             m_atmVolSurface[expiryIndex][tenorIndex] + bumpSize;
         // Recreate interpolator
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**

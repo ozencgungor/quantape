@@ -6,17 +6,18 @@
 #include "Math/McFarlandNormal.h"
 #include "Math/PCGRandom.hpp"
 #include "Math/ZigguratNormal.h"
-#include <iostream>
-#include <iomanip>
+
 #include <chrono>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <random>
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-template<typename F>
+template <typename F>
 double timeNs(F&& fn, int reps = 1'000'000) {
     volatile double sink = 0;
     for (int i = 0; i < 1000; ++i)
@@ -36,10 +37,10 @@ double timeNs(F&& fn, int reps = 1'000'000) {
 
 void testStatistics() {
     std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " STATISTICAL TESTS  (N = 10,000,000)\n";
+    std::cout << " STATISTICAL TESTS  (N = 1,000,000,000)\n";
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
-    constexpr int N = 10'000'000;
+    constexpr int N = 1'000'000'000;
     pcg64 rng(12345);
     mc::McFarlandNormal<pcg64> gen(rng);
 
@@ -66,20 +67,17 @@ void testStatistics() {
 
     double mean = sum1 / N;
     double var = sum2 / N - mean * mean;
-    double skew = (sum3 / N - 3.0 * mean * sum2 / N + 2.0 * mean * mean * mean)
-                  / std::pow(var, 1.5);
-    double kurt = (sum4 / N - 4.0 * mean * sum3 / N + 6.0 * mean * mean * sum2 / N
-                   - 3.0 * mean * mean * mean * mean) / (var * var);
+    double skew =
+        (sum3 / N - 3.0 * mean * sum2 / N + 2.0 * mean * mean * mean) / std::pow(var, 1.5);
+    double kurt = (sum4 / N - 4.0 * mean * sum3 / N + 6.0 * mean * mean * sum2 / N -
+                   3.0 * mean * mean * mean * mean) /
+                  (var * var);
 
     std::cout << std::setprecision(8);
-    std::cout << "  Mean       = " << std::setw(14) << mean
-              << "   (expected: 0)\n";
-    std::cout << "  Variance   = " << std::setw(14) << var
-              << "   (expected: 1)\n";
-    std::cout << "  Skewness   = " << std::setw(14) << skew
-              << "   (expected: 0)\n";
-    std::cout << "  Kurtosis   = " << std::setw(14) << kurt
-              << "   (expected: 3)\n\n";
+    std::cout << "  Mean       = " << std::setw(14) << mean << "   (expected: 0)\n";
+    std::cout << "  Variance   = " << std::setw(14) << var << "   (expected: 1)\n";
+    std::cout << "  Skewness   = " << std::setw(14) << skew << "   (expected: 0)\n";
+    std::cout << "  Kurtosis   = " << std::setw(14) << kurt << "   (expected: 3)\n\n";
 
     double se_mean = 1.0 / std::sqrt(N);
     double se_var = std::sqrt(2.0 / N);
@@ -89,8 +87,8 @@ void testStatistics() {
     auto check = [](const char* name, double val, double expected, double se) {
         double z = std::abs(val - expected) / se;
         bool pass = z < 4.0;
-        std::cout << "  " << name << ": z = " << std::setprecision(2)
-                  << z << " sigma  " << (pass ? "PASS" : "** FAIL **") << "\n";
+        std::cout << "  " << name << ": z = " << std::setprecision(2) << z << " sigma  "
+                  << (pass ? "PASS" : "** FAIL **") << "\n";
         return pass;
     };
 
@@ -100,7 +98,8 @@ void testStatistics() {
     ok &= check("Skewness", skew, 0.0, se_skew);
     ok &= check("Kurtosis", kurt, 3.0, se_kurt);
 
-    if (ok) std::cout << "\n  All statistical tests PASSED\n";
+    if (ok)
+        std::cout << "\n  All statistical tests PASSED\n";
     std::cout << "\n";
 }
 
@@ -110,10 +109,10 @@ void testStatistics() {
 
 void testTails() {
     std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " TAIL DISTRIBUTION TEST  (N = 50,000,000)\n";
+    std::cout << " TAIL DISTRIBUTION TEST  (N = 10,000,000,000)\n";
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
-    constexpr long N = 50'000'000;
+    constexpr long N = 10'000'000'000;
     pcg64 rng(67890);
     mc::McFarlandNormal<pcg64> gen(rng);
 
@@ -123,7 +122,8 @@ void testTails() {
     for (long i = 0; i < N; ++i) {
         double x = std::abs(gen());
         for (int j = 0; j < 5; ++j) {
-            if (x > thresholds[j]) counts[j]++;
+            if (x > thresholds[j])
+                counts[j]++;
         }
     }
 
@@ -135,9 +135,8 @@ void testTails() {
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
         std::cout << "  " << std::setw(5) << thresholds[j] << " sigma"
-                  << "  " << std::setw(10) << observed_frac
-                  << "   " << std::setw(10) << expected_frac
-                  << "   " << std::setw(8) << ratio << "\n";
+                  << "  " << std::setw(10) << observed_frac << "   " << std::setw(10)
+                  << expected_frac << "   " << std::setw(8) << ratio << "\n";
     }
     std::cout << "\n";
 }
@@ -167,15 +166,15 @@ void benchmark() {
     std::normal_distribution<double> std_normal(0.0, 1.0);
 
     double mcf_pcg_ns = timeNs([&]() { return mcf_pcg(); });
-    double mcf_xo_ns  = timeNs([&]() { return mcf_xo(); });
-    double zig_ns     = timeNs([&]() { return zig(); });
-    double std_ns     = timeNs([&]() { return std_normal(mt); });
+    double mcf_xo_ns = timeNs([&]() { return mcf_xo(); });
+    double zig_ns = timeNs([&]() { return zig(); });
+    double std_ns = timeNs([&]() { return std_normal(mt); });
 
     std::cout << std::setprecision(2) << std::fixed;
     std::cout << "  McFarland + PCG64       : " << mcf_pcg_ns << " ns/sample\n";
-    std::cout << "  McFarland + Xoshiro256  : " << mcf_xo_ns  << " ns/sample\n";
-    std::cout << "  Marsaglia + Xoshiro256  : " << zig_ns     << " ns/sample\n";
-    std::cout << "  std::normal_distribution: " << std_ns     << " ns/sample\n";
+    std::cout << "  McFarland + Xoshiro256  : " << mcf_xo_ns << " ns/sample\n";
+    std::cout << "  Marsaglia + Xoshiro256  : " << zig_ns << " ns/sample\n";
+    std::cout << "  std::normal_distribution: " << std_ns << " ns/sample\n";
     std::cout << "  Speedup vs std (McF+PCG): " << std_ns / mcf_pcg_ns << "x\n";
     std::cout << "  Speedup vs std (Zig+Xo) : " << std_ns / zig_ns << "x\n\n";
 }

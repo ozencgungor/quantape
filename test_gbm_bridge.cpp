@@ -11,13 +11,13 @@
  * computable mean and variance - NO approximation needed!
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
 #include <cmath>
 #include <functional>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 // Time-dependent drift and volatility
 using DriftFunction = std::function<double(double)>;
@@ -31,13 +31,16 @@ struct GBMParams {
 std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
 
 /**
  * @brief Numerical integration using Simpson's rule
  */
 double integrate(const std::function<double(double)>& f, double a, double b, int n = 100) {
-    if (n % 2 == 1) n++;  // Simpson's rule needs even n
+    if (n % 2 == 1)
+        n++; // Simpson's rule needs even n
     double h = (b - a) / n;
     double sum = f(a) + f(b);
 
@@ -89,7 +92,8 @@ LogMoments getLogMoments(double X_start, double t1, double t2, const GBMParams& 
  *
  * For Gaussian processes, the bridge formula is exact:
  *
- * E[X(tk) | X(t1), X(t2)] = E[X(tk) | X(t1)] + Cov[X(tk), X(t2) | X(t1)] / Var[X(t2) | X(t1)] × [X(t2) - E[X(t2) | X(t1)]]
+ * E[X(tk) | X(t1), X(t2)] = E[X(tk) | X(t1)] + Cov[X(tk), X(t2) | X(t1)] / Var[X(t2) | X(t1)] ×
+ * [X(t2) - E[X(t2) | X(t1)]]
  *
  * Var[X(tk) | X(t1), X(t2)] = Var[X(tk) | X(t1)] - Cov²[X(tk), X(t2) | X(t1)] / Var[X(t2) | X(t1)]
  *
@@ -109,7 +113,7 @@ double sampleGBM_Bridge_Exact(double S1, double S2, double t1, double tk, double
     // because the increments are independent and variance is additive
     double var_1k = moments_1k.variance;
     double var_12 = moments_12.variance;
-    double cov_k2_given_1 = var_1k;  // Key property of Brownian motion!
+    double cov_k2_given_1 = var_1k; // Key property of Brownian motion!
 
     // Compute bridge mean (Kalman update formula)
     double innovation = X2 - moments_12.mean;
@@ -189,8 +193,7 @@ void testGBMBridge() {
     double tk = 0.5;
     double t1 = 1.0;
 
-    std::cout << "Scenario: S(t0=" << t0 << ") = " << S0
-              << ", S(t1=" << t1 << ") = " << S1
+    std::cout << "Scenario: S(t0=" << t0 << ") = " << S0 << ", S(t1=" << t1 << ") = " << S1
               << ", inserting at tk=" << tk << "\n\n";
 
     const int N = 50000;
@@ -201,7 +204,8 @@ void testGBMBridge() {
         samples_exact.push_back(sampleGBM_Bridge_Exact(S0, S1, t0, tk, t1, params_constant));
 
         rng.seed(1000 + i);
-        samples_simplified.push_back(sampleGBM_Bridge_Simplified(S0, S1, t0, tk, t1, params_constant));
+        samples_simplified.push_back(
+            sampleGBM_Bridge_Simplified(S0, S1, t0, tk, t1, params_constant));
 
         rng.seed(1000 + i);
         samples_unconditional.push_back(sampleGBM_Unconditional(S0, t0, tk, params_constant));
@@ -216,7 +220,8 @@ void testGBMBridge() {
 
         double mean_log = std::accumulate(log_data.begin(), log_data.end(), 0.0) / log_data.size();
         double var_log = 0.0;
-        for (double x : log_data) var_log += (x - mean_log) * (x - mean_log);
+        for (double x : log_data)
+            var_log += (x - mean_log) * (x - mean_log);
         var_log /= log_data.size();
 
         return std::make_pair(mean_log, var_log);
@@ -267,7 +272,8 @@ void testGBMBridge() {
         samples_exact.push_back(sampleGBM_Bridge_Exact(S0, S1, t0, tk, t1, params_timedep));
 
         rng.seed(2000 + i);
-        samples_simplified.push_back(sampleGBM_Bridge_Simplified(S0, S1, t0, tk, t1, params_timedep));
+        samples_simplified.push_back(
+            sampleGBM_Bridge_Simplified(S0, S1, t0, tk, t1, params_timedep));
 
         rng.seed(2000 + i);
         samples_unconditional.push_back(sampleGBM_Unconditional(S0, t0, tk, params_timedep));
@@ -281,12 +287,14 @@ void testGBMBridge() {
     auto moments_0k_td = getLogMoments(X0, t0, tk, params_timedep);
     auto moments_01_td = getLogMoments(X0, t0, t1, params_timedep);
     double cov_td = moments_0k_td.variance;
-    double theory_mean_td = moments_0k_td.mean + cov_td / moments_01_td.variance * (X1 - moments_01_td.mean);
+    double theory_mean_td =
+        moments_0k_td.mean + cov_td / moments_01_td.variance * (X1 - moments_01_td.mean);
     double theory_var_td = moments_0k_td.variance * (1.0 - cov_td / moments_01_td.variance);
 
     std::cout << "Results (in log-space):\n";
     std::cout << "Method              Mean(log)   Variance(log)  Mean Err    Var Err\n";
-    std::cout << "Theoretical:        " << theory_mean_td << "  " << theory_var_td << "  -           -\n";
+    std::cout << "Theoretical:        " << theory_mean_td << "  " << theory_var_td
+              << "  -           -\n";
     std::cout << "Exact Bridge:       " << mean_exact_td << "  " << var_exact_td << "  "
               << (mean_exact_td - theory_mean_td) / theory_mean_td * 100 << "%  "
               << (var_exact_td - theory_var_td) / theory_var_td * 100 << "%\n";
@@ -309,7 +317,8 @@ void testGBMBridge() {
 
     for (int i = 0; i < N; i++) {
         rng.seed(3000 + i);
-        samples_exact.push_back(sampleGBM_Bridge_Exact(S0, S1, t0, tk_asymm, t1_asymm, params_constant));
+        samples_exact.push_back(
+            sampleGBM_Bridge_Exact(S0, S1, t0, tk_asymm, t1_asymm, params_constant));
 
         rng.seed(3000 + i);
         samples_unconditional.push_back(sampleGBM_Unconditional(S0, t0, tk_asymm, params_constant));
@@ -321,14 +330,17 @@ void testGBMBridge() {
     auto moments_0k_asymm = getLogMoments(X0, t0, tk_asymm, params_constant);
     auto moments_01_asymm = getLogMoments(X0, t0, t1_asymm, params_constant);
     double cov_asymm = moments_0k_asymm.variance;
-    double theory_mean_asymm = moments_0k_asymm.mean + cov_asymm / moments_01_asymm.variance * (X1 - moments_01_asymm.mean);
-    double theory_var_asymm = moments_0k_asymm.variance * (1.0 - cov_asymm / moments_01_asymm.variance);
+    double theory_mean_asymm = moments_0k_asymm.mean +
+                               cov_asymm / moments_01_asymm.variance * (X1 - moments_01_asymm.mean);
+    double theory_var_asymm =
+        moments_0k_asymm.variance * (1.0 - cov_asymm / moments_01_asymm.variance);
 
     double variance_reduction = 1.0 - theory_var_asymm / moments_0k_asymm.variance;
 
     std::cout << "Results (in log-space):\n";
     std::cout << "Method              Mean(log)   Variance(log)  Mean Err    Var Err\n";
-    std::cout << "Theoretical:        " << theory_mean_asymm << "  " << theory_var_asymm << "  -           -\n";
+    std::cout << "Theoretical:        " << theory_mean_asymm << "  " << theory_var_asymm
+              << "  -           -\n";
     std::cout << "Exact Bridge:       " << mean_exact_asymm << "  " << var_exact_asymm << "  "
               << (mean_exact_asymm - theory_mean_asymm) / theory_mean_asymm * 100 << "%  "
               << (var_exact_asymm - theory_var_asymm) / theory_var_asymm * 100 << "%\n";
@@ -337,7 +349,8 @@ void testGBMBridge() {
               << (var_uncond_asymm - theory_var_asymm) / theory_var_asymm * 100 << "%\n\n";
 
     std::cout << "Variance reduction: " << variance_reduction * 100 << "%\n";
-    std::cout << "  (Bridge variance is " << (1.0 - variance_reduction) * 100 << "% of unconditional)\n\n";
+    std::cout << "  (Bridge variance is " << (1.0 - variance_reduction) * 100
+              << "% of unconditional)\n\n";
 
     std::cout << "=== Summary ===\n\n";
     std::cout << "For GBM with time-dependent drift and volatility:\n";

@@ -6,14 +6,14 @@
  * p(r(tk) | r(t1), r(t2)) by comparing empirical samples against theoretical density.
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
-#include <numeric>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <map>
+#include <numeric>
+#include <random>
+#include <vector>
 
 // CIR parameters structure
 struct CIRParams {
@@ -21,8 +21,7 @@ struct CIRParams {
     double theta;
     double sigma;
 
-    CIRParams(double k, double t, double s)
-        : kappa(k), theta(t), sigma(s) {}
+    CIRParams(double k, double t, double s) : kappa(k), theta(t), sigma(s) {}
 };
 
 // Global RNG
@@ -30,8 +29,12 @@ std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 /**
  * @brief Andersen's QE scheme for CIR transition
@@ -45,8 +48,7 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
     double exp_kt = std::exp(-kappa * dt);
 
     double m = theta + (r_t - theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) + theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
 
     double psi = s2 / (m * m);
 
@@ -73,8 +75,7 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 /**
  * @brief Evaluate CIR transition density using Andersen approximation
  */
-double evaluateDensity_Andersen(double r_start, double r_end,
-                                double dt, const CIRParams& params) {
+double evaluateDensity_Andersen(double r_start, double r_end, double dt, const CIRParams& params) {
     double kappa = params.kappa;
     double theta = params.theta;
     double sigma = params.sigma;
@@ -83,15 +84,15 @@ double evaluateDensity_Andersen(double r_start, double r_end,
     double c = sigma * sigma / (4.0 * kappa);
 
     double m = theta + (r_start - theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) + theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
         double b2 = 2.0 / psi - 1.0 + std::sqrt(2.0 / psi) * std::sqrt(2.0 / psi - 1.0);
         double a = m / (1.0 + b2);
 
-        if (r_end <= 0.0) return 0.0;
+        if (r_end <= 0.0)
+            return 0.0;
 
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
@@ -119,8 +120,7 @@ double evaluateDensity_Andersen(double r_start, double r_end,
  *
  * Uses product formula: p(y | r1, r2) ∝ p(y | r1) × p(r2 | y)
  */
-double evaluateBridgeDensity(double r1, double y, double r2,
-                             double t1, double tk, double t2,
+double evaluateBridgeDensity(double r1, double y, double r2, double t1, double tk, double t2,
                              const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
@@ -134,8 +134,7 @@ double evaluateBridgeDensity(double r1, double y, double r2,
 /**
  * @brief Sample CIR bridge using rejection sampling
  */
-double sampleCIRBridge_AndersenRejection(double r1, double r2,
-                                         double t1, double tk, double t2,
+double sampleCIRBridge_AndersenRejection(double r1, double r2, double t1, double tk, double t2,
                                          const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
@@ -144,10 +143,8 @@ double sampleCIRBridge_AndersenRejection(double r1, double r2,
     double m_uncond = params.theta + (r1 - params.theta) * std::exp(-params.kappa * dt1);
     double m_bridge = 0.5 * (r1 + r2);
 
-    double M = std::max(
-        evaluateBridgeDensity(r1, m_uncond, r2, t1, tk, t2, params),
-        evaluateBridgeDensity(r1, m_bridge, r2, t1, tk, t2, params)
-    );
+    double M = std::max(evaluateBridgeDensity(r1, m_uncond, r2, t1, tk, t2, params),
+                        evaluateBridgeDensity(r1, m_bridge, r2, t1, tk, t2, params));
     M *= 1.5;
 
     const int MAX_ATTEMPTS = 100000;
@@ -167,8 +164,7 @@ double sampleCIRBridge_AndersenRejection(double r1, double r2,
 /**
  * @brief Modified bridge with drift correction
  */
-double sampleCIRBridge_AndersenModified(double r1, double r2,
-                                        double t1, double tk, double t2,
+double sampleCIRBridge_AndersenModified(double r1, double r2, double t1, double tk, double t2,
                                         const CIRParams& params) {
     double dt1 = tk - t1;
     double dt_total = t2 - t1;
@@ -187,10 +183,9 @@ double sampleCIRBridge_AndersenModified(double r1, double r2,
 /**
  * @brief Compute numerical normalization constant for bridge density
  */
-double computeNormalizationConstant(double r1, double r2,
-                                    double t1, double tk, double t2,
-                                    const CIRParams& params,
-                                    double r_max = 1.0, int n_points = 1000) {
+double computeNormalizationConstant(double r1, double r2, double t1, double tk, double t2,
+                                    const CIRParams& params, double r_max = 1.0,
+                                    int n_points = 1000) {
     double dr = r_max / n_points;
     double integral = 0.0;
 
@@ -256,12 +251,9 @@ void testBridgeDistribution() {
     samples_unconditional.reserve(N_SAMPLES);
 
     for (int i = 0; i < N_SAMPLES; i++) {
-        samples_rejection.push_back(
-            sampleCIRBridge_AndersenRejection(r1, r2, t1, tk, t2, params));
-        samples_modified.push_back(
-            sampleCIRBridge_AndersenModified(r1, r2, t1, tk, t2, params));
-        samples_unconditional.push_back(
-            sampleCIR_Andersen(r1, tk - t1, params));
+        samples_rejection.push_back(sampleCIRBridge_AndersenRejection(r1, r2, t1, tk, t2, params));
+        samples_modified.push_back(sampleCIRBridge_AndersenModified(r1, r2, t1, tk, t2, params));
+        samples_unconditional.push_back(sampleCIR_Andersen(r1, tk - t1, params));
     }
 
     // Compute empirical moments
@@ -289,7 +281,7 @@ void testBridgeDistribution() {
     // Compute theoretical moments by numerical integration
     std::cout << "Computing theoretical moments via numerical integration...\n\n";
 
-    double r_max = 0.3;  // Integration range
+    double r_max = 0.3; // Integration range
     int n_points = 5000;
     double dr = r_max / n_points;
 
@@ -321,31 +313,39 @@ void testBridgeDistribution() {
     std::cout << "=== Moment Comparison ===\n\n";
 
     std::cout << "                      Mean        Variance    Std Dev     Skewness\n";
-    std::cout << "Theoretical:          " << theoretical_mean << "   "
-              << theoretical_variance << "   " << std::sqrt(theoretical_variance) << "   "
-              << theoretical_skewness << "\n";
-    std::cout << "Rejection Bridge:     " << mean_rej << "   "
-              << var_rej << "   " << std_rej << "   " << skew_rej << "\n";
-    std::cout << "Modified Bridge:      " << mean_mod << "   "
-              << var_mod << "   " << std_mod << "   " << skew_mod << "\n";
-    std::cout << "Unconditional:        " << mean_unc << "   "
-              << var_unc << "   " << std_unc << "   " << skew_unc << "\n\n";
+    std::cout << "Theoretical:          " << theoretical_mean << "   " << theoretical_variance
+              << "   " << std::sqrt(theoretical_variance) << "   " << theoretical_skewness << "\n";
+    std::cout << "Rejection Bridge:     " << mean_rej << "   " << var_rej << "   " << std_rej
+              << "   " << skew_rej << "\n";
+    std::cout << "Modified Bridge:      " << mean_mod << "   " << var_mod << "   " << std_mod
+              << "   " << skew_mod << "\n";
+    std::cout << "Unconditional:        " << mean_unc << "   " << var_unc << "   " << std_unc
+              << "   " << skew_unc << "\n\n";
 
     std::cout << "=== Moment Errors (vs Theoretical) ===\n\n";
     std::cout << "Rejection Bridge:\n";
-    std::cout << "  Mean error:     " << (mean_rej - theoretical_mean) / theoretical_mean * 100 << "%\n";
-    std::cout << "  Variance error: " << (var_rej - theoretical_variance) / theoretical_variance * 100 << "%\n";
-    std::cout << "  Skewness error: " << (skew_rej - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
+    std::cout << "  Mean error:     " << (mean_rej - theoretical_mean) / theoretical_mean * 100
+              << "%\n";
+    std::cout << "  Variance error: "
+              << (var_rej - theoretical_variance) / theoretical_variance * 100 << "%\n";
+    std::cout << "  Skewness error: "
+              << (skew_rej - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
 
     std::cout << "Modified Bridge:\n";
-    std::cout << "  Mean error:     " << (mean_mod - theoretical_mean) / theoretical_mean * 100 << "%\n";
-    std::cout << "  Variance error: " << (var_mod - theoretical_variance) / theoretical_variance * 100 << "%\n";
-    std::cout << "  Skewness error: " << (skew_mod - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
+    std::cout << "  Mean error:     " << (mean_mod - theoretical_mean) / theoretical_mean * 100
+              << "%\n";
+    std::cout << "  Variance error: "
+              << (var_mod - theoretical_variance) / theoretical_variance * 100 << "%\n";
+    std::cout << "  Skewness error: "
+              << (skew_mod - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
 
     std::cout << "Unconditional (WRONG - should NOT match):\n";
-    std::cout << "  Mean error:     " << (mean_unc - theoretical_mean) / theoretical_mean * 100 << "%\n";
-    std::cout << "  Variance error: " << (var_unc - theoretical_variance) / theoretical_variance * 100 << "%\n";
-    std::cout << "  Skewness error: " << (skew_unc - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
+    std::cout << "  Mean error:     " << (mean_unc - theoretical_mean) / theoretical_mean * 100
+              << "%\n";
+    std::cout << "  Variance error: "
+              << (var_unc - theoretical_variance) / theoretical_variance * 100 << "%\n";
+    std::cout << "  Skewness error: "
+              << (skew_unc - theoretical_skewness) / theoretical_skewness * 100 << "%\n\n";
 
     // Histogram comparison
     std::cout << "=== Histogram Comparison ===\n\n";
@@ -389,11 +389,9 @@ void testBridgeDistribution() {
         double empirical_mod = (double)hist_modified[i] / N_SAMPLES / bin_width;
         double empirical_unc = (double)hist_unconditional[i] / N_SAMPLES / bin_width;
 
-        std::cout << "[" << std::setw(6) << bin_start << ", "
-                  << std::setw(6) << bin_end << "]:  "
-                  << std::setw(10) << empirical_rej << "  "
-                  << std::setw(10) << empirical_mod << "  "
-                  << std::setw(10) << empirical_unc << "  "
+        std::cout << "[" << std::setw(6) << bin_start << ", " << std::setw(6) << bin_end
+                  << "]:  " << std::setw(10) << empirical_rej << "  " << std::setw(10)
+                  << empirical_mod << "  " << std::setw(10) << empirical_unc << "  "
                   << std::setw(10) << hist_theoretical[i] << "\n";
     }
 
@@ -405,7 +403,7 @@ void testBridgeDistribution() {
         for (int i = 0; i < N_BINS; i++) {
             double observed = hist[i];
             double expected = hist_theoretical[i] * bin_width * N_SAMPLES;
-            if (expected > 5.0) {  // Only use bins with sufficient expected count
+            if (expected > 5.0) { // Only use bins with sufficient expected count
                 chi2 += (observed - expected) * (observed - expected) / expected;
             }
         }

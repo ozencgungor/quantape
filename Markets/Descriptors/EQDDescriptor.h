@@ -11,30 +11,27 @@ namespace Markets {
  * Contains metadata for equity instruments
  */
 struct EQDDescriptor {
-    std::string ticker;         ///< Ticker symbol (e.g., "AAPL", "SPX")
-    std::string exchange;       ///< Exchange code (e.g., "NASDAQ", "NYSE")
-    std::string currency;       ///< Currency code (e.g., "USD", "EUR")
-    std::string referenceDate;  ///< Reference date in YYYY-MM-DD format
+    std::string ticker;        ///< Ticker symbol (e.g., "AAPL", "SPX")
+    std::string exchange;      ///< Exchange code (e.g., "NASDAQ", "NYSE")
+    std::string currency;      ///< Currency code (e.g., "USD", "EUR")
+    std::string referenceDate; ///< Reference date in YYYY-MM-DD format
 
     /**
      * @brief Default constructor
      */
-    EQDDescriptor()
-        : ticker(""), exchange(""), currency("USD"), referenceDate("") {}
+    EQDDescriptor() : ticker(""), exchange(""), currency("USD"), referenceDate("") {}
 
     /**
      * @brief Constructor with all fields
      */
-    EQDDescriptor(const std::string& tick, const std::string& exch,
-                  const std::string& ccy, const std::string& refDate = "")
+    EQDDescriptor(const std::string& tick, const std::string& exch, const std::string& ccy,
+                  const std::string& refDate = "")
         : ticker(tick), exchange(exch), currency(ccy), referenceDate(refDate) {}
 
     /**
      * @brief Get full identifier
      */
-    std::string identifier() const {
-        return ticker + "." + exchange + "." + currency;
-    }
+    std::string identifier() const { return ticker + "." + exchange + "." + currency; }
 };
 
 } // namespace Markets

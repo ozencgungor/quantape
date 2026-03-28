@@ -1,11 +1,12 @@
 #ifndef FXRATE_H
 #define FXRATE_H
 
+#include <memory>
+#include <optional>
+#include <stdexcept>
+
 #include "Markets/Curves/IRCurve.h"
 #include "Markets/Descriptors/FXDescriptor.h"
-#include <memory>
-#include <stdexcept>
-#include <optional>
 
 namespace Markets {
 
@@ -42,11 +43,8 @@ public:
      * @param descriptor FX metadata
      */
     FXRate(DoubleT spot, const IRCurve<DoubleT>& domesticCurve,
-           const IRCurve<DoubleT>& foreignCurve,
-           const FXDescriptor& descriptor = FXDescriptor())
-        : m_spot(spot),
-          m_descriptor(descriptor),
-          m_hasCurves(true),
+           const IRCurve<DoubleT>& foreignCurve, const FXDescriptor& descriptor = FXDescriptor())
+        : m_spot(spot), m_descriptor(descriptor), m_hasCurves(true),
           m_domesticCurve(std::make_unique<IRCurve<DoubleT>>(domesticCurve)),
           m_foreignCurve(std::make_unique<IRCurve<DoubleT>>(foreignCurve)) {
         // Validate spot is positive
@@ -82,9 +80,8 @@ public:
      */
     DoubleT forward(DoubleT t, bool allowExtrapolation = true) const {
         if (!m_hasCurves) {
-            throw std::runtime_error(
-                "FXRate::forward: curves not set. Use constructor with curves "
-                "or call setCurves().");
+            throw std::runtime_error("FXRate::forward: curves not set. Use constructor with curves "
+                                     "or call setCurves().");
         }
 
         DoubleT dfDom = m_domesticCurve->discountFactor(t, allowExtrapolation);
@@ -101,11 +98,9 @@ public:
      *
      * @throws std::runtime_error if curves are not set
      */
-    DoubleT domesticDiscountFactor(DoubleT t,
-                                   bool allowExtrapolation = true) const {
+    DoubleT domesticDiscountFactor(DoubleT t, bool allowExtrapolation = true) const {
         if (!m_hasCurves) {
-            throw std::runtime_error(
-                "FXRate::domesticDiscountFactor: curves not set");
+            throw std::runtime_error("FXRate::domesticDiscountFactor: curves not set");
         }
         return m_domesticCurve->discountFactor(t, allowExtrapolation);
     }
@@ -117,11 +112,9 @@ public:
      *
      * @throws std::runtime_error if curves are not set
      */
-    DoubleT foreignDiscountFactor(DoubleT t,
-                                  bool allowExtrapolation = true) const {
+    DoubleT foreignDiscountFactor(DoubleT t, bool allowExtrapolation = true) const {
         if (!m_hasCurves) {
-            throw std::runtime_error(
-                "FXRate::foreignDiscountFactor: curves not set");
+            throw std::runtime_error("FXRate::foreignDiscountFactor: curves not set");
         }
         return m_foreignCurve->discountFactor(t, allowExtrapolation);
     }
@@ -153,8 +146,7 @@ public:
     /**
      * @brief Set interest rate curves
      */
-    void setCurves(const IRCurve<DoubleT>& domesticCurve,
-                   const IRCurve<DoubleT>& foreignCurve) {
+    void setCurves(const IRCurve<DoubleT>& domesticCurve, const IRCurve<DoubleT>& foreignCurve) {
         m_domesticCurve = std::make_unique<IRCurve<DoubleT>>(domesticCurve);
         m_foreignCurve = std::make_unique<IRCurve<DoubleT>>(foreignCurve);
         m_hasCurves = true;

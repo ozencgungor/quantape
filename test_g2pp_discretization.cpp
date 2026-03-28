@@ -15,24 +15,25 @@
  *   5. Predictor-Corrector
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
-#include <array>
-#include <chrono>
 #include <Eigen/Dense>
 
-using Eigen::Vector2d;
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <random>
+#include <vector>
+
 using Eigen::Matrix2d;
+using Eigen::Vector2d;
 
 struct G2PPParams {
-    double a;      // Mean reversion speed for x
-    double b;      // Mean reversion speed for y
-    double sigma;  // Volatility of x
-    double eta;    // Volatility of y
-    double rho;    // Correlation between W₁ and W₂
+    double a;     // Mean reversion speed for x
+    double b;     // Mean reversion speed for y
+    double sigma; // Volatility of x
+    double eta;   // Volatility of y
+    double rho;   // Correlation between W₁ and W₂
 
     G2PPParams(double a_, double b_, double sig_, double eta_, double rho_)
         : a(a_), b(b_), sigma(sig_), eta(eta_), rho(rho_) {}
@@ -41,7 +42,9 @@ struct G2PPParams {
 std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
 
 // Sample correlated normals
 std::pair<double, double> sampleCorrelatedNormals(double rho) {
@@ -96,8 +99,10 @@ Vector2d step_ExponentialEuler(const Vector2d& state, double dt, const G2PPParam
     double exp_a = std::exp(-params.a * dt);
     double exp_b = std::exp(-params.b * dt);
 
-    double std_x = params.sigma * std::sqrt((1.0 - std::exp(-2.0 * params.a * dt)) / (2.0 * params.a));
-    double std_y = params.eta * std::sqrt((1.0 - std::exp(-2.0 * params.b * dt)) / (2.0 * params.b));
+    double std_x =
+        params.sigma * std::sqrt((1.0 - std::exp(-2.0 * params.a * dt)) / (2.0 * params.a));
+    double std_y =
+        params.eta * std::sqrt((1.0 - std::exp(-2.0 * params.b * dt)) / (2.0 * params.b));
 
     Vector2d new_state;
     new_state[0] = state[0] * exp_a + std_x * dW1;
@@ -268,7 +273,8 @@ TheoreticalMoments getTheoreticalMoments(const Vector2d& x0, double T, const G2P
     m.mean_y = x0[1] * exp_b;
 
     // Variance: σ²/(2a) * (1 - exp(-2aT))
-    m.var_x = (params.sigma * params.sigma) / (2.0 * params.a) * (1.0 - std::exp(-2.0 * params.a * T));
+    m.var_x =
+        (params.sigma * params.sigma) / (2.0 * params.a) * (1.0 - std::exp(-2.0 * params.a * T));
     m.var_y = (params.eta * params.eta) / (2.0 * params.b) * (1.0 - std::exp(-2.0 * params.b * T));
 
     // Covariance: ρ*σ*η/(a+b) * (1 - exp(-(a+b)*T))
@@ -316,14 +322,14 @@ void compareDiscretizationSchemes() {
         std::cout << "========================================\n\n";
 
         // Test each method
-        std::vector<std::pair<std::string, std::function<Vector2d(const Vector2d&, double, const G2PPParams&)>>> methods = {
-            {"Euler-Maruyama", step_EulerMaruyama},
-            {"Exponential Euler", step_ExponentialEuler},
-            {"Exact Simulation", step_Exact},
-            {"Milstein", step_Milstein},
-            {"Predictor-Corrector", step_PredictorCorrector},
-            {"Implicit Euler", step_ImplicitEuler}
-        };
+        std::vector<std::pair<std::string,
+                              std::function<Vector2d(const Vector2d&, double, const G2PPParams&)>>>
+            methods = {{"Euler-Maruyama", step_EulerMaruyama},
+                       {"Exponential Euler", step_ExponentialEuler},
+                       {"Exact Simulation", step_Exact},
+                       {"Milstein", step_Milstein},
+                       {"Predictor-Corrector", step_PredictorCorrector},
+                       {"Implicit Euler", step_ImplicitEuler}};
 
         for (const auto& [name, method] : methods) {
             std::vector<Vector2d> terminal_states;
@@ -349,15 +355,20 @@ void compareDiscretizationSchemes() {
 
             std::cout << name << ":\n";
             std::cout << "  E[x(T)]:       " << std::setw(10) << stats.mean_x
-                      << " (error: " << std::setw(8) << (stats.mean_x - theory.mean_x) / theory.mean_x * 100 << "%)\n";
+                      << " (error: " << std::setw(8)
+                      << (stats.mean_x - theory.mean_x) / theory.mean_x * 100 << "%)\n";
             std::cout << "  E[y(T)]:       " << std::setw(10) << stats.mean_y
-                      << " (error: " << std::setw(8) << (stats.mean_y - theory.mean_y) / theory.mean_y * 100 << "%)\n";
+                      << " (error: " << std::setw(8)
+                      << (stats.mean_y - theory.mean_y) / theory.mean_y * 100 << "%)\n";
             std::cout << "  Var[x(T)]:     " << std::setw(10) << stats.var_x
-                      << " (error: " << std::setw(8) << (stats.var_x - theory.var_x) / theory.var_x * 100 << "%)\n";
+                      << " (error: " << std::setw(8)
+                      << (stats.var_x - theory.var_x) / theory.var_x * 100 << "%)\n";
             std::cout << "  Var[y(T)]:     " << std::setw(10) << stats.var_y
-                      << " (error: " << std::setw(8) << (stats.var_y - theory.var_y) / theory.var_y * 100 << "%)\n";
+                      << " (error: " << std::setw(8)
+                      << (stats.var_y - theory.var_y) / theory.var_y * 100 << "%)\n";
             std::cout << "  Cov[x,y(T)]:   " << std::setw(10) << stats.cov_xy
-                      << " (error: " << std::setw(8) << (stats.cov_xy - theory.cov_xy) / theory.cov_xy * 100 << "%)\n";
+                      << " (error: " << std::setw(8)
+                      << (stats.cov_xy - theory.cov_xy) / theory.cov_xy * 100 << "%)\n";
             std::cout << "  Time:          " << std::setw(10) << elapsed << " ms\n\n";
         }
     }
