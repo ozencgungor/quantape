@@ -37,3 +37,4 @@ example_usage
 
 # pdfs:
 *.pdf
+.aider*

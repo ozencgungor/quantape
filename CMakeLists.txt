@@ -139,6 +139,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Models)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Math)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Markets)
 
 # Third-party includes
 include_directories(${Boost_INCLUDE_DIRS})
@@ -151,10 +152,11 @@ include_directories(${Boost_INCLUDE_DIRS})
 add_subdirectory(Models)
 add_subdirectory(ScenarioGeneration)
 add_subdirectory(Math)
+add_subdirectory(Markets)
 
 # Combine all sources and headers
 set(LIB_SOURCES ${MODEL_SOURCES_ABS} ${SCENARIO_SOURCES_ABS})
-set(LIB_HEADERS ${MODEL_HEADERS_ABS} ${SCENARIO_HEADERS_ABS} ${MATH_HEADERS_ABS})
+set(LIB_HEADERS ${MODEL_HEADERS_ABS} ${SCENARIO_HEADERS_ABS} ${MATH_HEADERS_ABS} ${MARKETS_HEADERS_ABS})
 
 # ============================================================================
 # Library target
@@ -169,6 +171,7 @@ target_include_directories(generic_MC_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Models
     ${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration
     ${CMAKE_CURRENT_SOURCE_DIR}/Math
+    ${CMAKE_CURRENT_SOURCE_DIR}/Markets
     ${Boost_INCLUDE_DIRS}
 )
 
@@ -193,6 +196,80 @@ target_link_libraries(test_math generic_MC_lib)
 # Create executable for Interpolation library tests
 add_executable(test_interpolation test_interpolation.cpp)
 target_link_libraries(test_interpolation generic_MC_lib)
+
+# Create executable for Markets library tests
+add_executable(test_markets test_markets.cpp)
+target_link_libraries(test_markets generic_MC_lib)
+
+# Create executable for CIR bridge accuracy tests
+add_executable(test_cir_bridge test_cir_bridge.cpp)
+target_link_libraries(test_cir_bridge generic_MC_lib)
+
+# Create executable for CIR bridge distribution tests
+add_executable(test_cir_bridge_distribution test_cir_bridge_distribution.cpp)
+target_link_libraries(test_cir_bridge_distribution generic_MC_lib)
+
+# Create executable for improved CIR bridge tests
+add_executable(test_improved_bridges test_improved_bridges.cpp)
+target_link_libraries(test_improved_bridges generic_MC_lib)
+
+# Create executable for theoretical bridge variance tests
+add_executable(test_theoretical_bridge_variance test_theoretical_bridge_variance.cpp)
+target_link_libraries(test_theoretical_bridge_variance generic_MC_lib)
+
+# Create executable for asymmetric bridge tests
+add_executable(test_asymmetric_bridge test_asymmetric_bridge.cpp)
+target_link_libraries(test_asymmetric_bridge generic_MC_lib)
+
+# Create executable for analytical bridge variance tests
+add_executable(test_analytical_bridge_variance test_analytical_bridge_variance.cpp)
+target_link_libraries(test_analytical_bridge_variance generic_MC_lib)
+
+# Create executable for GBM bridge tests
+add_executable(test_gbm_bridge test_gbm_bridge.cpp)
+target_link_libraries(test_gbm_bridge generic_MC_lib)
+
+# Create executable for G2++ bridge tests
+add_executable(test_g2pp_bridge test_g2pp_bridge.cpp)
+target_link_libraries(test_g2pp_bridge generic_MC_lib)
+
+# Create executable for analytical bridge tests
+add_executable(test_analytical_bridges test_analytical_bridges.cpp)
+target_link_libraries(test_analytical_bridges generic_MC_lib)
+
+# Create executable for nonlinear correction tests
+add_executable(test_nonlinear_corrections test_nonlinear_corrections.cpp)
+target_link_libraries(test_nonlinear_corrections generic_MC_lib)
+
+# Create executable for explaining effective kappa
+add_executable(explain_effective_kappa explain_effective_kappa.cpp)
+
+# Create executable for C++ references and pointers guide
+add_executable(cpp_references_pointers_guide cpp_references_pointers_guide.cpp)
+
+# Create executable for smart pointers and algorithms implementation
+add_executable(smart_pointers_and_algorithms interview_prep/smart_pointers_and_algorithms.cpp)
+
+# Create executable for special member functions demonstration
+add_executable(special_member_functions interview_prep/special_member_functions.cpp)
+
+# Create executable for new and delete explanation
+add_executable(new_and_delete_explained interview_prep/new_and_delete_explained.cpp)
+
+# Create executable for lambdas and algorithms
+add_executable(lambdas_and_algorithms interview_prep/lambdas_and_algorithms.cpp)
+
+# Create executable for advanced C++ topics
+add_executable(advanced_cpp_topics interview_prep/advanced_cpp_topics.cpp)
+
+# Create executable for numerical methods
+add_executable(numerical_methods interview_prep/numerical_methods.cpp)
+
+# Create executable for numpy patterns demonstration
+add_executable(numpy_patterns interview_prep/numpy_patterns.cpp)
+
+# Create executable for Eigen 3.4+ fancy indexing
+add_executable(eigen_fancy_indexing interview_prep/eigen_fancy_indexing.cpp)
 
 # Create executable for AD (Automatic Differentiation) tests
 add_executable(test_ad test_ad.cpp)
@@ -228,6 +305,198 @@ if(APPLE OR UNIX)
     endif()
 endif()
 
+# Create executable for Black-Scholes AD benchmark
+add_executable(test_bs_ad_bench test_bs_ad_bench.cpp)
+
+target_link_libraries(test_bs_ad_bench PUBLIC
+    generic_MC_lib
+    TBB::tbb
+    SUNDIALS::nvecserial
+    SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_bs_ad_bench PRIVATE
+    STAN_THREADS=true
+    STAN_NO_RANGE_CHECKS
+    _REENTRANT
+    TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_bs_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_bs_ad_bench PROPERTIES
+        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for interpolation AD benchmark
+add_executable(test_interp_ad_bench test_interp_ad_bench.cpp)
+
+target_link_libraries(test_interp_ad_bench PUBLIC
+    generic_MC_lib
+    TBB::tbb
+    SUNDIALS::nvecserial
+    SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_interp_ad_bench PRIVATE
+    STAN_THREADS=true
+    STAN_NO_RANGE_CHECKS
+    _REENTRANT
+    TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_interp_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_interp_ad_bench PROPERTIES
+        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for fast exp/log AD benchmark
+add_executable(test_fast_exp_log test_fast_exp_log.cpp)
+
+target_link_libraries(test_fast_exp_log PUBLIC
+    generic_MC_lib
+    TBB::tbb
+    SUNDIALS::nvecserial
+    SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_fast_exp_log PRIVATE
+    STAN_THREADS=true
+    STAN_NO_RANGE_CHECKS
+    _REENTRANT
+    TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_fast_exp_log PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_fast_exp_log PROPERTIES
+        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for bivariate normal CDF AD benchmark
+add_executable(test_bvn_ad_bench test_bvn_ad_bench.cpp)
+
+target_link_libraries(test_bvn_ad_bench PUBLIC
+    generic_MC_lib
+    TBB::tbb
+    SUNDIALS::nvecserial
+    SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_bvn_ad_bench PRIVATE
+    STAN_THREADS=true
+    STAN_NO_RANGE_CHECKS
+    _REENTRANT
+    TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_bvn_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_bvn_ad_bench PROPERTIES
+        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+
+add_executable(test_bs_hessian_bench test_bs_hessian_bench.cpp)
+
+target_link_libraries(test_bs_hessian_bench PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_bs_hessian_bench PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_bs_hessian_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_bs_hessian_bench PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for mixed hessian benchmark
+add_executable(test_mixed_hessian test_mixed_hessian.cpp)
+
+target_link_libraries(test_mixed_hessian PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_mixed_hessian PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_mixed_hessian PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_mixed_hessian PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for pricer hierarchy hessian benchmark
+add_executable(test_pricer_hessian test_pricer_hessian.cpp)
+
+target_link_libraries(test_pricer_hessian PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_pricer_hessian PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_pricer_hessian PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_pricer_hessian PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Create executable for ziggurat RNG tests
+add_executable(test_ziggurat test_ziggurat.cpp)
+target_link_libraries(test_ziggurat generic_MC_lib)
+target_compile_options(test_ziggurat PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+# Create executable for McFarland ziggurat tests
+add_executable(test_mcfarland test_mcfarland.cpp)
+target_link_libraries(test_mcfarland generic_MC_lib)
+target_compile_options(test_mcfarland PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
 # ============================================================================
 # Compiler options
 # ============================================================================
@@ -238,13 +507,39 @@ if(MSVC)
     target_compile_options(example_usage PRIVATE /W4)
     target_compile_options(test_math PRIVATE /W4)
     target_compile_options(test_interpolation PRIVATE /W4)
+    target_compile_options(test_markets PRIVATE /W4)
+    target_compile_options(test_gbm_bridge PRIVATE /W4)
+    target_compile_options(test_g2pp_bridge PRIVATE /W4)
+    target_compile_options(test_nonlinear_corrections PRIVATE /W4)
+    target_compile_options(explain_effective_kappa PRIVATE /W4)
+    target_compile_options(cpp_references_pointers_guide PRIVATE /W4)
+    target_compile_options(smart_pointers_and_algorithms PRIVATE /W4)
+    target_compile_options(special_member_functions PRIVATE /W4)
+    target_compile_options(new_and_delete_explained PRIVATE /W4)
+    target_compile_options(lambdas_and_algorithms PRIVATE /W4)
+    target_compile_options(advanced_cpp_topics PRIVATE /W4)
+    target_compile_options(numerical_methods PRIVATE /W4)
     target_compile_options(test_ad PRIVATE /W4)
 else()
-    target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -Rpass=loop-vectorize -ffast-math)
     target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_interpolation PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_ad PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_markets PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_gbm_bridge PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_g2pp_bridge PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_nonlinear_corrections PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(explain_effective_kappa PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(cpp_references_pointers_guide PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(smart_pointers_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(special_member_functions PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(new_and_delete_explained PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(lambdas_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(advanced_cpp_topics PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(numerical_methods PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(numpy_patterns PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+    target_compile_options(eigen_fancy_indexing PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+    target_compile_options(test_ad PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -Rpass=loop-vectorize -ffast-math)
 endif()
 
 # ============================================================================
