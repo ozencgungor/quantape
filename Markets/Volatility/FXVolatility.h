@@ -1,11 +1,13 @@
 #ifndef FXVOLATILITY_H
 #define FXVOLATILITY_H
 
-#include "Markets/Descriptors/FXDescriptor.h"
 #include "Math/Interpolations/BicubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/FXDescriptor.h"
 
 namespace Markets {
 
@@ -19,8 +21,7 @@ namespace Markets {
  * @tparam DoubleT Numeric type (double or stan::math::var for AD)
  * @tparam ContainerT Container type for vol surface (default: vector<vector<DoubleT>>)
  */
-template <typename DoubleT,
-          typename ContainerT = std::vector<std::vector<DoubleT>>>
+template <typename DoubleT, typename ContainerT = std::vector<std::vector<DoubleT>>>
 class FXVolatility {
 public:
     /**
@@ -33,9 +34,8 @@ public:
      * @param deltaType Type: "DELTA" or "STRIKE"
      */
     template <typename VectorT, typename SurfaceT>
-    FXVolatility(const VectorT& expiries, const VectorT& deltas,
-                 const SurfaceT& volSurface, DoubleT refSpot,
-                 const FXDescriptor& descriptor = FXDescriptor(),
+    FXVolatility(const VectorT& expiries, const VectorT& deltas, const SurfaceT& volSurface,
+                 DoubleT refSpot, const FXDescriptor& descriptor = FXDescriptor(),
                  const std::string& deltaType = "DELTA")
         : m_descriptor(descriptor), m_refSpot(refSpot), m_deltaType(deltaType) {
         // Convert to vectors
@@ -45,35 +45,28 @@ public:
 
         // Validate dimensions
         if (m_volSurface.size() != m_expiries.size()) {
-            throw std::runtime_error(
-                "FXVolatility: volSurface rows must match expiries size");
+            throw std::runtime_error("FXVolatility: volSurface rows must match expiries size");
         }
         for (const auto& row : m_volSurface) {
             if (row.size() != m_deltas.size()) {
-                throw std::runtime_error(
-                    "FXVolatility: volSurface columns must match deltas size");
+                throw std::runtime_error("FXVolatility: volSurface columns must match deltas size");
             }
         }
 
         // Create interpolator for vol surface (use Bicubic with Spline)
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
      * @brief Copy constructor
      */
     FXVolatility(const FXVolatility& other)
-        : m_descriptor(other.m_descriptor),
-          m_refSpot(other.m_refSpot),
-          m_deltaType(other.m_deltaType),
-          m_expiries(other.m_expiries),
-          m_deltas(other.m_deltas),
+        : m_descriptor(other.m_descriptor), m_refSpot(other.m_refSpot),
+          m_deltaType(other.m_deltaType), m_expiries(other.m_expiries), m_deltas(other.m_deltas),
           m_volSurface(other.m_volSurface) {
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -88,8 +81,7 @@ public:
             m_deltas = other.m_deltas;
             m_volSurface = other.m_volSurface;
             m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-                m_expiries, m_deltas, m_volSurface,
-                Math::CubicInterpolation<DoubleT>::Spline);
+                m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
         }
         return *this;
     }
@@ -101,8 +93,7 @@ public:
      * @param allowExtrapolation Allow extrapolation beyond surface range
      * @return Implied volatility
      */
-    DoubleT vol(DoubleT expiry, DoubleT delta,
-                bool allowExtrapolation = true) const {
+    DoubleT vol(DoubleT expiry, DoubleT delta, bool allowExtrapolation = true) const {
         return (*m_interpolator)(expiry, delta, allowExtrapolation);
     }
 
@@ -116,17 +107,15 @@ public:
      * Note: If surface is in delta terms, this will use delta values directly.
      * For strike-based lookups, use strikeType="STRIKE" in constructor.
      */
-    DoubleT volByStrike(DoubleT expiry, DoubleT strike,
-                        bool allowExtrapolation = true) const {
+    DoubleT volByStrike(DoubleT expiry, DoubleT strike, bool allowExtrapolation = true) const {
         if (m_deltaType == "STRIKE") {
             // Deltas are actually strikes
             return vol(expiry, strike, allowExtrapolation);
         } else {
             // Would need to convert strike to delta (requires forward, rd, rf, vol)
             // For now, throw error - this is non-trivial
-            throw std::runtime_error(
-                "FXVolatility::volByStrike: strike-to-delta conversion not "
-                "implemented. Use vol(expiry, delta) directly.");
+            throw std::runtime_error("FXVolatility::volByStrike: strike-to-delta conversion not "
+                                     "implemented. Use vol(expiry, delta) directly.");
         }
     }
 
@@ -170,9 +159,7 @@ public:
     /**
      * @brief Get vol surface
      */
-    const std::vector<std::vector<DoubleT>>& surface() const {
-        return m_volSurface;
-    }
+    const std::vector<std::vector<DoubleT>>& surface() const { return m_volSurface; }
 
     /**
      * @brief Scale entire surface by a scalar (multiply each element)
@@ -186,8 +173,7 @@ public:
         }
         // Recreate interpolator with scaled surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -202,8 +188,7 @@ public:
         }
         // Recreate interpolator with shifted surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -219,8 +204,7 @@ public:
         }
         // Recreate interpolator with transformed surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -236,12 +220,10 @@ public:
         if (deltaIndex >= m_volSurface[expiryIndex].size()) {
             throw std::runtime_error("FXVolatility::bump: invalid delta index");
         }
-        m_volSurface[expiryIndex][deltaIndex] =
-            m_volSurface[expiryIndex][deltaIndex] + bumpSize;
+        m_volSurface[expiryIndex][deltaIndex] = m_volSurface[expiryIndex][deltaIndex] + bumpSize;
         // Recreate interpolator
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -259,8 +241,7 @@ public:
         }
         // Recreate interpolator
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_expiries, m_deltas, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**

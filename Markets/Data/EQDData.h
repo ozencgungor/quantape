@@ -1,11 +1,12 @@
 #ifndef EQDDATA_H
 #define EQDDATA_H
 
+#include <memory>
+#include <stdexcept>
+
 #include "Markets/Curves/IRCurve.h"
 #include "Markets/Curves/YieldCurve.h"
 #include "Markets/Descriptors/EQDDescriptor.h"
-#include <memory>
-#include <stdexcept>
 
 namespace Markets {
 
@@ -30,8 +31,7 @@ public:
     EQDData(DoubleT spot, const YieldCurve<DoubleT>& dividendCurve,
             const IRCurve<DoubleT>& discountCurve,
             const EQDDescriptor& descriptor = EQDDescriptor())
-        : m_spot(spot),
-          m_descriptor(descriptor),
+        : m_spot(spot), m_descriptor(descriptor),
           m_dividendCurve(std::make_unique<YieldCurve<DoubleT>>(dividendCurve)),
           m_discountCurve(std::make_unique<IRCurve<DoubleT>>(discountCurve)) {
         // Validate spot is positive
@@ -102,8 +102,7 @@ public:
      * @param t Time of cash flow in years
      * @return Present value = cashflow * DF(t)
      */
-    DoubleT presentValue(DoubleT cashflow, DoubleT t,
-                         bool allowExtrapolation = true) const {
+    DoubleT presentValue(DoubleT cashflow, DoubleT t, bool allowExtrapolation = true) const {
         DoubleT df = discountFactor(t, allowExtrapolation);
         return cashflow * df;
     }

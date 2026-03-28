@@ -45,25 +45,17 @@ inline double Phi(double x) {
 // Weights and abscissae from standard tables
 constexpr int GL_N = 20;
 constexpr double GL_x[GL_N] = {
-    -0.9931285991850949, -0.9639719272779138, -0.9122344282513259,
-    -0.8391169718222188, -0.7463319064601508, -0.6360536807265150,
-    -0.5108670019508271, -0.3737060887154196, -0.2277858511416451,
-    -0.0765265211334973,
-     0.0765265211334973,  0.2277858511416451,  0.3737060887154196,
-     0.5108670019508271,  0.6360536807265150,  0.7463319064601508,
-     0.8391169718222188,  0.9122344282513259,  0.9639719272779138,
-     0.9931285991850949
-};
+    -0.9931285991850949, -0.9639719272779138, -0.9122344282513259, -0.8391169718222188,
+    -0.7463319064601508, -0.6360536807265150, -0.5108670019508271, -0.3737060887154196,
+    -0.2277858511416451, -0.0765265211334973, 0.0765265211334973,  0.2277858511416451,
+    0.3737060887154196,  0.5108670019508271,  0.6360536807265150,  0.7463319064601508,
+    0.8391169718222188,  0.9122344282513259,  0.9639719272779138,  0.9931285991850949};
 constexpr double GL_w[GL_N] = {
-     0.0176140071391521,  0.0406014298003869,  0.0626720483341091,
-     0.0832767415767048,  0.1019301198172404,  0.1181945319615184,
-     0.1316886384491766,  0.1420961093183821,  0.1491729864726037,
-     0.1527533871307258,
-     0.1527533871307258,  0.1491729864726037,  0.1420961093183821,
-     0.1316886384491766,  0.1181945319615184,  0.1019301198172404,
-     0.0832767415767048,  0.0626720483341091,  0.0406014298003869,
-     0.0176140071391521
-};
+    0.0176140071391521, 0.0406014298003869, 0.0626720483341091, 0.0832767415767048,
+    0.1019301198172404, 0.1181945319615184, 0.1316886384491766, 0.1420961093183821,
+    0.1491729864726037, 0.1527533871307258, 0.1527533871307258, 0.1491729864726037,
+    0.1420961093183821, 0.1316886384491766, 0.1181945319615184, 0.1019301198172404,
+    0.0832767415767048, 0.0626720483341091, 0.0406014298003869, 0.0176140071391521};
 
 // Core Genz algorithm for P(X > dh, Y > dk | corr = r)
 inline double bvnu(double dh, double dk, double r) {
@@ -96,7 +88,8 @@ inline double bvnu(double dh, double dk, double r) {
     } else {
         hk = 1.0;
     }
-    h = dh; k = dk;
+    h = dh;
+    k = dk;
 
     double as_val = (1.0 - r) * (1.0 + r);
     double a = std::sqrt(as_val);
@@ -107,17 +100,17 @@ inline double bvnu(double dh, double dk, double r) {
 
     double bvn_val;
     if (asr > -100.0) {
-        bvn_val = a * std::exp(asr)
-                  * (1.0 - c * (bs - as_val) * (1.0 - d * bs / 5.0) / 3.0
-                     + c * d * as_val * as_val / 5.0);
+        bvn_val =
+            a * std::exp(asr) *
+            (1.0 - c * (bs - as_val) * (1.0 - d * bs / 5.0) / 3.0 + c * d * as_val * as_val / 5.0);
     } else {
         bvn_val = 0.0;
     }
 
     if (-hk * h * k < 100.0) {
         double b = std::sqrt(bs);
-        bvn_val -= std::exp(-hk * h * k / 2.0) * std::sqrt(tp) * Phi(-b / a) * b
-                   * (1.0 - c * bs * (1.0 - d * bs / 5.0) / 3.0);
+        bvn_val -= std::exp(-hk * h * k / 2.0) * std::sqrt(tp) * Phi(-b / a) * b *
+                   (1.0 - c * bs * (1.0 - d * bs / 5.0) / 3.0);
     }
 
     a = a / 2.0;
@@ -128,9 +121,9 @@ inline double bvnu(double dh, double dk, double r) {
             double rs = std::sqrt(1.0 - xs);
             asr = -(bs / xs + hk * h * k) / 2.0;
             if (asr > -100.0) {
-                bvn_val += a * GL_w[i] * std::exp(asr)
-                           * (std::exp(-hk * h * k * (1.0 - rs) / (2.0 * (1.0 + rs))) / rs
-                              - (1.0 + c * xs * (1.0 + d * xs)));
+                bvn_val += a * GL_w[i] * std::exp(asr) *
+                           (std::exp(-hk * h * k * (1.0 - rs) / (2.0 * (1.0 + rs))) / rs -
+                            (1.0 + c * xs * (1.0 + d * xs)));
             }
         }
     }
@@ -176,11 +169,11 @@ inline double bivariateNormalPdf(double x, double y, double rho) {
 
 template <typename DoubleT>
 DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
+    using stan::math::Phi;
     using std::asin;
     using std::exp;
     using std::sin;
     using std::sqrt;
-    using stan::math::Phi;
 
     DoubleT dh = -x, dk = -y, r = rho;
 
@@ -237,9 +230,9 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
 
     DoubleT bvn_val = DoubleT(0.0);
     if (asr_val > -100.0) {
-        bvn_val = a * exp(asr)
-                  * (DoubleT(1.0) - c * (bs - as_val) * (DoubleT(1.0) - d * bs / 5.0) / 3.0
-                     + c * d * as_val * as_val / 5.0);
+        bvn_val = a * exp(asr) *
+                  (DoubleT(1.0) - c * (bs - as_val) * (DoubleT(1.0) - d * bs / 5.0) / 3.0 +
+                   c * d * as_val * as_val / 5.0);
     }
 
     double hk_hk_val;
@@ -250,8 +243,8 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
 
     if (hk_hk_val < 100.0) {
         DoubleT b = sqrt(bs);
-        bvn_val = bvn_val - exp(-hk_val * h * k / 2.0) * sqrt(tp) * Phi(-b / a) * b
-                   * (DoubleT(1.0) - c * bs * (DoubleT(1.0) - d * bs / 5.0) / 3.0);
+        bvn_val = bvn_val - exp(-hk_val * h * k / 2.0) * sqrt(tp) * Phi(-b / a) * b *
+                                (DoubleT(1.0) - c * bs * (DoubleT(1.0) - d * bs / 5.0) / 3.0);
     }
 
     a = a / 2.0;
@@ -269,9 +262,11 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
                 asr_inner_val = asr_inner.val();
 
             if (asr_inner_val > -100.0) {
-                bvn_val = bvn_val + a * bvn_detail::GL_w[i] * exp(asr_inner)
-                           * (exp(-hk_val * h * k * (DoubleT(1.0) - rs) / (DoubleT(2.0) * (DoubleT(1.0) + rs))) / rs
-                              - (DoubleT(1.0) + c * xs * (DoubleT(1.0) + d * xs)));
+                bvn_val = bvn_val + a * bvn_detail::GL_w[i] * exp(asr_inner) *
+                                        (exp(-hk_val * h * k * (DoubleT(1.0) - rs) /
+                                             (DoubleT(2.0) * (DoubleT(1.0) + rs))) /
+                                             rs -
+                                         (DoubleT(1.0) + c * xs * (DoubleT(1.0) + d * xs)));
             }
         }
     }
@@ -282,9 +277,11 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
         // Phi(-max(h,k)) — need to branch on double values
         double h_val, k_val;
         if constexpr (std::is_same_v<DoubleT, double>) {
-            h_val = h; k_val = k;
+            h_val = h;
+            k_val = k;
         } else {
-            h_val = h.val(); k_val = k.val();
+            h_val = h.val();
+            k_val = k.val();
         }
         if (h_val >= k_val)
             bvn_val = bvn_val + Phi(-h);
@@ -294,9 +291,11 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
         bvn_val = -bvn_val;
         double k_val_cmp, h_val_cmp;
         if constexpr (std::is_same_v<DoubleT, double>) {
-            k_val_cmp = k; h_val_cmp = h;
+            k_val_cmp = k;
+            h_val_cmp = h;
         } else {
-            k_val_cmp = k.val(); h_val_cmp = h.val();
+            k_val_cmp = k.val();
+            h_val_cmp = h.val();
         }
         if (k_val_cmp > h_val_cmp) {
             bvn_val = bvn_val + Phi(k) - Phi(h);
@@ -310,8 +309,10 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
     else
         bvn_check = bvn_val.val();
 
-    if (bvn_check < 0.0) return DoubleT(0.0);
-    if (bvn_check > 1.0) return DoubleT(1.0);
+    if (bvn_check < 0.0)
+        return DoubleT(0.0);
+    if (bvn_check > 1.0)
+        return DoubleT(1.0);
     return bvn_val;
 }
 
@@ -328,10 +329,9 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
 // Total: 1 tape node. The derivatives cost ~3 exp + 2 erfc calls.
 // ═══════════════════════════════════════════════════════════════════════════
 
-inline var bivariateNormalCdfAnalytical(const var& x_v, const var& y_v,
-                                        const var& rho_v) {
-    double x   = x_v.val();
-    double y   = y_v.val();
+inline var bivariateNormalCdfAnalytical(const var& x_v, const var& y_v, const var& rho_v) {
+    double x = x_v.val();
+    double y = y_v.val();
     double rho = rho_v.val();
 
     // Forward: full Genz algorithm in double
@@ -342,37 +342,38 @@ inline var bivariateNormalCdfAnalytical(const var& x_v, const var& y_v,
     double sqrt_onemrho2 = std::sqrt(onemrho2);
 
     // ∂Φ₂/∂x = φ(x) · Φ((y - ρx) / √(1-ρ²))
-    double dval_dx = bvn_detail::phi(x)
-                   * bvn_detail::Phi((y - rho * x) / sqrt_onemrho2);
+    double dval_dx = bvn_detail::phi(x) * bvn_detail::Phi((y - rho * x) / sqrt_onemrho2);
 
     // ∂Φ₂/∂y = φ(y) · Φ((x - ρy) / √(1-ρ²))
-    double dval_dy = bvn_detail::phi(y)
-                   * bvn_detail::Phi((x - rho * y) / sqrt_onemrho2);
+    double dval_dy = bvn_detail::phi(y) * bvn_detail::Phi((x - rho * y) / sqrt_onemrho2);
 
     // ∂Φ₂/∂ρ = φ₂(x, y, ρ) = bivariate normal PDF
     double dval_drho = bivariateNormalPdf(x, y, rho);
 
-    return stan::math::make_callback_var(
-        val,
-        [x_v, y_v, rho_v, dval_dx, dval_dy, dval_drho](auto& vi) {
-            double adj = vi.adj();
-            x_v.adj()   += adj * dval_dx;
-            y_v.adj()   += adj * dval_dy;
-            rho_v.adj() += adj * dval_drho;
-        });
+    return stan::math::make_callback_var(val,
+                                         [x_v, y_v, rho_v, dval_dx, dval_dy, dval_drho](auto& vi) {
+                                             double adj = vi.adj();
+                                             x_v.adj() += adj * dval_dx;
+                                             y_v.adj() += adj * dval_dy;
+                                             rho_v.adj() += adj * dval_drho;
+                                         });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BENCHMARK
 // ═══════════════════════════════════════════════════════════════════════════
 
-struct BenchResult { double per_call_us; };
+struct BenchResult {
+    double per_call_us;
+};
 
 template <typename F>
 BenchResult bench(F&& fn, int N) {
-    for (int i = 0; i < std::min(N / 10, 1000); ++i) fn();
+    for (int i = 0; i < std::min(N / 10, 1000); ++i)
+        fn();
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     auto end = std::chrono::high_resolution_clock::now();
     double us = std::chrono::duration<double, std::micro>(end - start).count();
     return {us / N};
@@ -392,7 +393,8 @@ inline std::size_t measureArenaBytes(auto&& fn, int N) {
     stan::math::recover_memory();
     auto* stack = stan::math::ChainableStack::instance_;
     std::size_t before = stack->memalloc_.bytes_allocated();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     std::size_t after = stack->memalloc_.bytes_allocated();
     stan::math::recover_memory();
     return after - before;
@@ -408,23 +410,19 @@ int main() {
     // ── 1. Correctness against known values ──
     std::cout << "── Correctness: Φ₂ values and derivatives ──\n\n";
 
-    struct TestCase { double x, y, rho; const char* label; };
+    struct TestCase {
+        double x, y, rho;
+        const char* label;
+    };
     std::vector<TestCase> cases = {
-        { 0.0,  0.0,  0.0,  "independent"     },
-        { 0.0,  0.0,  0.5,  "moderate ρ"      },
-        { 1.0, -1.0,  0.3,  "asymmetric"      },
-        {-0.5,  0.5,  0.7,  "high ρ"          },
-        { 1.5,  1.5,  0.9,  "very high ρ"     },
-        { 0.0,  0.0, -0.5,  "negative ρ"      },
-        {-2.0, -2.0,  0.5,  "deep tail"       },
-        { 2.0,  2.0,  0.8,  "upper tail"      },
+        {0.0, 0.0, 0.0, "independent"}, {0.0, 0.0, 0.5, "moderate ρ"},
+        {1.0, -1.0, 0.3, "asymmetric"}, {-0.5, 0.5, 0.7, "high ρ"},
+        {1.5, 1.5, 0.9, "very high ρ"}, {0.0, 0.0, -0.5, "negative ρ"},
+        {-2.0, -2.0, 0.5, "deep tail"}, {2.0, 2.0, 0.8, "upper tail"},
     };
 
-    std::cout << "  " << std::setw(16) << "Case"
-              << std::setw(12) << "Φ₂ value"
-              << std::setw(12) << "∂/∂x"
-              << std::setw(12) << "∂/∂y"
-              << std::setw(12) << "∂/∂ρ" << "\n";
+    std::cout << "  " << std::setw(16) << "Case" << std::setw(12) << "Φ₂ value" << std::setw(12)
+              << "∂/∂x" << std::setw(12) << "∂/∂y" << std::setw(12) << "∂/∂ρ" << "\n";
     std::cout << "  " << std::string(64, '-') << "\n";
 
     // Also verify naive vs analytical
@@ -445,16 +443,15 @@ int main() {
         double val_a = res_a.val(), dx_a = xa.adj(), dy_a = ya.adj(), drho_a = ra.adj();
         stan::math::recover_memory();
 
-        max_val_diff  = std::max(max_val_diff,  std::abs(val_n - val_a));
-        max_dx_diff   = std::max(max_dx_diff,   std::abs(dx_n - dx_a));
-        max_dy_diff   = std::max(max_dy_diff,   std::abs(dy_n - dy_a));
-        max_drho_diff = std::max(max_drho_diff,  std::abs(drho_n - drho_a));
+        max_val_diff = std::max(max_val_diff, std::abs(val_n - val_a));
+        max_dx_diff = std::max(max_dx_diff, std::abs(dx_n - dx_a));
+        max_dy_diff = std::max(max_dy_diff, std::abs(dy_n - dy_a));
+        max_drho_diff = std::max(max_drho_diff, std::abs(drho_n - drho_a));
 
-        std::cout << "  " << std::setw(16) << tc.label
-                  << std::setw(12) << std::setprecision(8) << val_a
-                  << std::setw(12) << std::setprecision(8) << dx_a
-                  << std::setw(12) << std::setprecision(8) << dy_a
-                  << std::setw(12) << std::setprecision(8) << drho_a << "\n";
+        std::cout << "  " << std::setw(16) << tc.label << std::setw(12) << std::setprecision(8)
+                  << val_a << std::setw(12) << std::setprecision(8) << dx_a << std::setw(12)
+                  << std::setprecision(8) << dy_a << std::setw(12) << std::setprecision(8) << drho_a
+                  << "\n";
     }
 
     std::cout << "\n  Max |naive - analytical| differences:\n";
@@ -470,25 +467,23 @@ int main() {
         double eps = 1e-7;
 
         double f0 = bivariateNormalCdf(x0, y0, rho0);
-        double fd_dx   = (bivariateNormalCdf(x0+eps, y0, rho0) - f0) / eps;
-        double fd_dy   = (bivariateNormalCdf(x0, y0+eps, rho0) - f0) / eps;
-        double fd_drho = (bivariateNormalCdf(x0, y0, rho0+eps) - f0) / eps;
+        double fd_dx = (bivariateNormalCdf(x0 + eps, y0, rho0) - f0) / eps;
+        double fd_dy = (bivariateNormalCdf(x0, y0 + eps, rho0) - f0) / eps;
+        double fd_drho = (bivariateNormalCdf(x0, y0, rho0 + eps) - f0) / eps;
 
         // Analytical
         var xa(x0), ya(y0), ra(rho0);
         var res = bivariateNormalCdfAnalytical(xa, ya, ra);
         stan::math::grad(res.vi_);
 
-        std::cout << "  " << std::setw(10) << "" << std::setw(16) << "Fin. Diff."
-                  << std::setw(16) << "Analytical" << std::setw(14) << "Abs Diff" << "\n";
+        std::cout << "  " << std::setw(10) << "" << std::setw(16) << "Fin. Diff." << std::setw(16)
+                  << "Analytical" << std::setw(14) << "Abs Diff" << "\n";
         std::cout << "  " << std::string(56, '-') << "\n";
 
         auto fdrow = [](const char* name, double fd, double an) {
-            std::cout << "  " << std::setw(10) << name
-                      << std::setw(16) << std::setprecision(10) << fd
-                      << std::setw(16) << an
-                      << std::setw(14) << std::scientific << std::setprecision(2)
-                      << std::abs(fd - an) << std::fixed << "\n";
+            std::cout << "  " << std::setw(10) << name << std::setw(16) << std::setprecision(10)
+                      << fd << std::setw(16) << an << std::setw(14) << std::scientific
+                      << std::setprecision(2) << std::abs(fd - an) << std::fixed << "\n";
         };
         fdrow("∂/∂x", fd_dx, xa.adj());
         fdrow("∂/∂y", fd_dy, ya.adj());
@@ -513,22 +508,22 @@ int main() {
     };
 
     auto nodes_naive = countVariNodes(naive_no_recover);
-    auto nodes_anal  = countVariNodes(analytical_no_recover);
+    auto nodes_anal = countVariNodes(analytical_no_recover);
 
     constexpr int MEM_BATCH = 500;
     auto bytes_naive = measureArenaBytes(naive_no_recover, MEM_BATCH);
-    auto bytes_anal  = measureArenaBytes(analytical_no_recover, MEM_BATCH);
+    auto bytes_anal = measureArenaBytes(analytical_no_recover, MEM_BATCH);
 
-    std::cout << "  " << std::setw(28) << "" << std::setw(12) << "Naive" << std::setw(12) << "Analytical" << std::setw(8) << "Ratio" << "\n";
+    std::cout << "  " << std::setw(28) << "" << std::setw(12) << "Naive" << std::setw(12)
+              << "Analytical" << std::setw(8) << "Ratio" << "\n";
     std::cout << "  " << std::string(60, '-') << "\n";
-    std::cout << "  " << std::setw(28) << "Tape (vari) nodes/call"
-              << std::setw(12) << nodes_naive
-              << std::setw(12) << nodes_anal
-              << std::setw(8) << std::setprecision(0) << (double)nodes_naive / std::max(nodes_anal, (std::size_t)1) << "x\n";
+    std::cout << "  " << std::setw(28) << "Tape (vari) nodes/call" << std::setw(12) << nodes_naive
+              << std::setw(12) << nodes_anal << std::setw(8) << std::setprecision(0)
+              << (double)nodes_naive / std::max(nodes_anal, (std::size_t)1) << "x\n";
     std::cout << "  " << std::setw(28) << ("Arena bytes/" + std::to_string(MEM_BATCH) + " calls")
-              << std::setw(12) << bytes_naive
-              << std::setw(12) << bytes_anal
-              << std::setw(8) << std::setprecision(1) << (double)bytes_naive / std::max(bytes_anal, (std::size_t)1) << "x\n";
+              << std::setw(12) << bytes_naive << std::setw(12) << bytes_anal << std::setw(8)
+              << std::setprecision(1) << (double)bytes_naive / std::max(bytes_anal, (std::size_t)1)
+              << "x\n";
 
     // ── 4. Timing benchmark ──
     constexpr int N = 100'000;
@@ -536,73 +531,83 @@ int main() {
     std::cout << "\n── Performance (" << N << " calls) ──\n\n";
 
     // Double baseline
-    auto t_dbl = bench([&]() {
-        volatile double r = bivariateNormalCdf(x_test, y_test, rho_test);
-        (void)r;
-    }, N);
+    auto t_dbl = bench(
+        [&]() {
+            volatile double r = bivariateNormalCdf(x_test, y_test, rho_test);
+            (void)r;
+        },
+        N);
 
     // Naive AD
-    auto t_naive = bench([&]() {
-        var x(x_test), y(y_test), rho(rho_test);
-        var res = bivariateNormalCdfNaive<var>(x, y, rho);
-        stan::math::grad(res.vi_);
-        stan::math::recover_memory();
-    }, N);
+    auto t_naive = bench(
+        [&]() {
+            var x(x_test), y(y_test), rho(rho_test);
+            var res = bivariateNormalCdfNaive<var>(x, y, rho);
+            stan::math::grad(res.vi_);
+            stan::math::recover_memory();
+        },
+        N);
 
     // Analytical AD
-    auto t_anal = bench([&]() {
-        var x(x_test), y(y_test), rho(rho_test);
-        var res = bivariateNormalCdfAnalytical(x, y, rho);
-        stan::math::grad(res.vi_);
-        stan::math::recover_memory();
-    }, N);
+    auto t_anal = bench(
+        [&]() {
+            var x(x_test), y(y_test), rho(rho_test);
+            var res = bivariateNormalCdfAnalytical(x, y, rho);
+            stan::math::grad(res.vi_);
+            stan::math::recover_memory();
+        },
+        N);
 
-    std::cout << "  double (no AD):    " << std::setprecision(3) << t_dbl.per_call_us << " us/call  (baseline)\n";
-    std::cout << "  Naive autodiff:    " << std::setprecision(3) << t_naive.per_call_us << " us/call  ("
-              << std::setprecision(1) << t_naive.per_call_us / t_dbl.per_call_us << "x vs double)\n";
-    std::cout << "  Analytical adj:    " << std::setprecision(3) << t_anal.per_call_us << " us/call  ("
-              << std::setprecision(1) << t_anal.per_call_us / t_dbl.per_call_us << "x vs double)\n";
-    std::cout << "  Analytical/Naive:  " << std::setprecision(2) << t_naive.per_call_us / t_anal.per_call_us << "x speedup\n";
+    std::cout << "  double (no AD):    " << std::setprecision(3) << t_dbl.per_call_us
+              << " us/call  (baseline)\n";
+    std::cout << "  Naive autodiff:    " << std::setprecision(3) << t_naive.per_call_us
+              << " us/call  (" << std::setprecision(1) << t_naive.per_call_us / t_dbl.per_call_us
+              << "x vs double)\n";
+    std::cout << "  Analytical adj:    " << std::setprecision(3) << t_anal.per_call_us
+              << " us/call  (" << std::setprecision(1) << t_anal.per_call_us / t_dbl.per_call_us
+              << "x vs double)\n";
+    std::cout << "  Analytical/Naive:  " << std::setprecision(2)
+              << t_naive.per_call_us / t_anal.per_call_us << "x speedup\n";
 
     // ── 5. Sweep over correlation range ──
     std::cout << "\n── Timing across ρ range ──\n\n";
-    std::cout << "  " << std::setw(8) << "ρ"
-              << std::setw(12) << "double us"
-              << std::setw(12) << "Naive us"
-              << std::setw(12) << "Anal. us"
-              << std::setw(10) << "Naive/dbl"
-              << std::setw(10) << "Anal/dbl"
-              << std::setw(10) << "Speedup" << "\n";
+    std::cout << "  " << std::setw(8) << "ρ" << std::setw(12) << "double us" << std::setw(12)
+              << "Naive us" << std::setw(12) << "Anal. us" << std::setw(10) << "Naive/dbl"
+              << std::setw(10) << "Anal/dbl" << std::setw(10) << "Speedup" << "\n";
     std::cout << "  " << std::string(74, '-') << "\n";
 
     for (double rho : {-0.9, -0.5, 0.0, 0.3, 0.5, 0.7, 0.9, 0.95}) {
-        auto td = bench([&]() {
-            volatile double r = bivariateNormalCdf(0.5, -0.3, rho);
-            (void)r;
-        }, N / 2);
+        auto td = bench(
+            [&]() {
+                volatile double r = bivariateNormalCdf(0.5, -0.3, rho);
+                (void)r;
+            },
+            N / 2);
 
-        auto tn = bench([&]() {
-            var x(0.5), y(-0.3), r(rho);
-            var res = bivariateNormalCdfNaive<var>(x, y, r);
-            stan::math::grad(res.vi_);
-            stan::math::recover_memory();
-        }, N / 2);
+        auto tn = bench(
+            [&]() {
+                var x(0.5), y(-0.3), r(rho);
+                var res = bivariateNormalCdfNaive<var>(x, y, r);
+                stan::math::grad(res.vi_);
+                stan::math::recover_memory();
+            },
+            N / 2);
 
-        auto ta = bench([&]() {
-            var x(0.5), y(-0.3), r(rho);
-            var res = bivariateNormalCdfAnalytical(x, y, r);
-            stan::math::grad(res.vi_);
-            stan::math::recover_memory();
-        }, N / 2);
+        auto ta = bench(
+            [&]() {
+                var x(0.5), y(-0.3), r(rho);
+                var res = bivariateNormalCdfAnalytical(x, y, r);
+                stan::math::grad(res.vi_);
+                stan::math::recover_memory();
+            },
+            N / 2);
 
-        std::cout << "  " << std::setw(8) << std::setprecision(2) << rho
-                  << std::setw(12) << std::setprecision(3) << td.per_call_us
-                  << std::setw(12) << tn.per_call_us
-                  << std::setw(12) << ta.per_call_us
-                  << std::setw(10) << std::setprecision(1) << tn.per_call_us / td.per_call_us
-                  << std::setw(10) << ta.per_call_us / td.per_call_us
-                  << std::setw(10) << std::setprecision(2) << tn.per_call_us / ta.per_call_us
-                  << "\n";
+        std::cout << "  " << std::setw(8) << std::setprecision(2) << rho << std::setw(12)
+                  << std::setprecision(3) << td.per_call_us << std::setw(12) << tn.per_call_us
+                  << std::setw(12) << ta.per_call_us << std::setw(10) << std::setprecision(1)
+                  << tn.per_call_us / td.per_call_us << std::setw(10)
+                  << ta.per_call_us / td.per_call_us << std::setw(10) << std::setprecision(2)
+                  << tn.per_call_us / ta.per_call_us << "\n";
     }
 
     // ── 6. Application: Gaussian copula CDO pricing ──
@@ -615,14 +620,15 @@ int main() {
     std::mt19937 rng(42);
     std::uniform_real_distribution<> barrier_dist(-2.0, 1.0);
     std::vector<double> barriers(N_NAMES);
-    for (auto& b : barriers) b = barrier_dist(rng);
+    for (auto& b : barriers)
+        b = barrier_dist(rng);
 
     double rho_copula = 0.3;
 
     auto copula_double = [&]() {
         double sum = 0;
         for (int i = 0; i < N_NAMES; ++i)
-            for (int j = i + 1; j < std::min(i + 5, N_NAMES); ++j)  // 4 nearest neighbors
+            for (int j = i + 1; j < std::min(i + 5, N_NAMES); ++j) // 4 nearest neighbors
                 sum += bivariateNormalCdf(barriers[i], barriers[j], rho_copula);
         return sum;
     };
@@ -651,16 +657,18 @@ int main() {
         stan::math::recover_memory();
     };
 
-    auto ct_dbl  = bench(copula_double, COPULA_ITERS);
+    auto ct_dbl = bench(copula_double, COPULA_ITERS);
     auto ct_naive = bench(copula_naive, COPULA_ITERS);
-    auto ct_anal  = bench(copula_analytical, COPULA_ITERS);
+    auto ct_anal = bench(copula_analytical, COPULA_ITERS);
 
-    std::cout << "  double (no AD):    " << std::setprecision(1) << ct_dbl.per_call_us << " us  (baseline)\n";
-    std::cout << "  Naive autodiff:    " << ct_naive.per_call_us << " us  ("
-              << std::setprecision(1) << ct_naive.per_call_us / ct_dbl.per_call_us << "x vs double)\n";
-    std::cout << "  Analytical adj:    " << ct_anal.per_call_us << " us  ("
-              << std::setprecision(1) << ct_anal.per_call_us / ct_dbl.per_call_us << "x vs double)\n";
-    std::cout << "  Analytical/Naive:  " << std::setprecision(2) << ct_naive.per_call_us / ct_anal.per_call_us << "x speedup\n";
+    std::cout << "  double (no AD):    " << std::setprecision(1) << ct_dbl.per_call_us
+              << " us  (baseline)\n";
+    std::cout << "  Naive autodiff:    " << ct_naive.per_call_us << " us  (" << std::setprecision(1)
+              << ct_naive.per_call_us / ct_dbl.per_call_us << "x vs double)\n";
+    std::cout << "  Analytical adj:    " << ct_anal.per_call_us << " us  (" << std::setprecision(1)
+              << ct_anal.per_call_us / ct_dbl.per_call_us << "x vs double)\n";
+    std::cout << "  Analytical/Naive:  " << std::setprecision(2)
+              << ct_naive.per_call_us / ct_anal.per_call_us << "x speedup\n";
 
     std::cout << "\n════════════════════════════════════════════════════════════════\n";
     return 0;

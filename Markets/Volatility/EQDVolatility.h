@@ -1,11 +1,13 @@
 #ifndef EQDVOLATILITY_H
 #define EQDVOLATILITY_H
 
-#include "Markets/Descriptors/EQDDescriptor.h"
 #include "Math/Interpolations/BicubicInterpolation.h"
-#include <vector>
-#include <stdexcept>
+
 #include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "Markets/Descriptors/EQDDescriptor.h"
 
 namespace Markets {
 
@@ -18,8 +20,7 @@ namespace Markets {
  * @tparam DoubleT Numeric type (double or stan::math::var for AD)
  * @tparam ContainerT Container type for vol surface (default: vector<vector<DoubleT>>)
  */
-template <typename DoubleT,
-          typename ContainerT = std::vector<std::vector<DoubleT>>>
+template <typename DoubleT, typename ContainerT = std::vector<std::vector<DoubleT>>>
 class EQDVolatility {
 public:
     /**
@@ -32,9 +33,8 @@ public:
      * @param strikeType Type of strikes: "ABSOLUTE" or "MONEYNESS"
      */
     template <typename VectorT, typename SurfaceT>
-    EQDVolatility(const VectorT& expiries, const VectorT& strikes,
-                  const SurfaceT& volSurface, DoubleT refSpot,
-                  const EQDDescriptor& descriptor = EQDDescriptor(),
+    EQDVolatility(const VectorT& expiries, const VectorT& strikes, const SurfaceT& volSurface,
+                  DoubleT refSpot, const EQDDescriptor& descriptor = EQDDescriptor(),
                   const std::string& strikeType = "ABSOLUTE")
         : m_descriptor(descriptor), m_refSpot(refSpot), m_strikeType(strikeType) {
         // Convert to vectors
@@ -62,23 +62,18 @@ public:
         // Note: BicubicInterpolation expects (x, y, z) where z[y_index][x_index]
         // So we pass (strikes, expiries, z) since our z is organized as z[expiry][strike]
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
      * @brief Copy constructor
      */
     EQDVolatility(const EQDVolatility& other)
-        : m_descriptor(other.m_descriptor),
-          m_refSpot(other.m_refSpot),
-          m_strikeType(other.m_strikeType),
-          m_expiries(other.m_expiries),
-          m_strikes(other.m_strikes),
-          m_volSurface(other.m_volSurface) {
+        : m_descriptor(other.m_descriptor), m_refSpot(other.m_refSpot),
+          m_strikeType(other.m_strikeType), m_expiries(other.m_expiries),
+          m_strikes(other.m_strikes), m_volSurface(other.m_volSurface) {
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -93,8 +88,7 @@ public:
             m_strikes = other.m_strikes;
             m_volSurface = other.m_volSurface;
             m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-                m_strikes, m_expiries, m_volSurface,
-                Math::CubicInterpolation<DoubleT>::Spline);
+                m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
         }
         return *this;
     }
@@ -106,8 +100,7 @@ public:
      * @param allowExtrapolation Allow extrapolation beyond surface range
      * @return Implied volatility
      */
-    DoubleT vol(DoubleT expiry, DoubleT strike,
-                bool allowExtrapolation = true) const {
+    DoubleT vol(DoubleT expiry, DoubleT strike, bool allowExtrapolation = true) const {
         // Note: interpolator is (x=strikes, y=expiries), so we call it with (strike, expiry)
         return (*m_interpolator)(strike, expiry, allowExtrapolation);
     }
@@ -174,9 +167,7 @@ public:
     /**
      * @brief Get vol surface
      */
-    const std::vector<std::vector<DoubleT>>& surface() const {
-        return m_volSurface;
-    }
+    const std::vector<std::vector<DoubleT>>& surface() const { return m_volSurface; }
 
     /**
      * @brief Scale entire surface by a scalar (multiply each element)
@@ -190,8 +181,7 @@ public:
         }
         // Recreate interpolator with scaled surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -206,8 +196,7 @@ public:
         }
         // Recreate interpolator with shifted surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -223,8 +212,7 @@ public:
         }
         // Recreate interpolator with transformed surface
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -240,12 +228,10 @@ public:
         if (strikeIndex >= m_volSurface[expiryIndex].size()) {
             throw std::runtime_error("EQDVolatility::bump: invalid strike index");
         }
-        m_volSurface[expiryIndex][strikeIndex] =
-            m_volSurface[expiryIndex][strikeIndex] + bumpSize;
+        m_volSurface[expiryIndex][strikeIndex] = m_volSurface[expiryIndex][strikeIndex] + bumpSize;
         // Recreate interpolator
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**
@@ -263,8 +249,7 @@ public:
         }
         // Recreate interpolator
         m_interpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_strikes, m_expiries, m_volSurface,
-            Math::CubicInterpolation<DoubleT>::Spline);
+            m_strikes, m_expiries, m_volSurface, Math::CubicInterpolation<DoubleT>::Spline);
     }
 
     /**

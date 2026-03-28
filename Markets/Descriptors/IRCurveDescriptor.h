@@ -11,9 +11,9 @@ namespace Markets {
  * Contains metadata and identification information for IR curves
  */
 struct IRCurveDescriptor {
-    std::string currency;       ///< Currency code (e.g., "USD", "EUR")
-    std::string curveName;      ///< Curve identifier (e.g., "OIS", "LIBOR3M")
-    std::string referenceDate;  ///< Reference date in YYYY-MM-DD format
+    std::string currency;      ///< Currency code (e.g., "USD", "EUR")
+    std::string curveName;     ///< Curve identifier (e.g., "OIS", "LIBOR3M")
+    std::string referenceDate; ///< Reference date in YYYY-MM-DD format
 
     /**
      * @brief Default constructor
@@ -30,9 +30,7 @@ struct IRCurveDescriptor {
     /**
      * @brief Get full curve identifier
      */
-    std::string identifier() const {
-        return currency + "." + curveName + "." + referenceDate;
-    }
+    std::string identifier() const { return currency + "." + curveName + "." + referenceDate; }
 };
 
 } // namespace Markets

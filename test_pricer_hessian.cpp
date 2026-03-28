@@ -24,9 +24,9 @@
  * The TradePricer doesn't know or care which level each pricer uses.
  */
 
+#include <Eigen/Dense>
 #include <stan/math.hpp>
 #include <stan/math/mix.hpp>
-#include <Eigen/Dense>
 
 #include <chrono>
 #include <cmath>
@@ -37,8 +37,8 @@
 #include <string>
 #include <vector>
 
-using stan::math::var;
 using stan::math::fvar;
+using stan::math::var;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MARKET ENVIRONMENT — holds market data with the active scalar type
@@ -49,9 +49,9 @@ using stan::math::fvar;
 
 template <typename T>
 struct MarketEnv {
-    std::vector<T> data;          // all market data as a flat vector
-    int n_rates = 0;              // first n_rates entries are rates
-    int n_vols = 0;               // next n_vols entries are vols
+    std::vector<T> data; // all market data as a flat vector
+    int n_rates = 0;     // first n_rates entries are rates
+    int n_vols = 0;      // next n_vols entries are vols
 
     T rate(int i) const { return data[i]; }
     T vol(int i) const { return data[n_rates + i]; }
@@ -71,9 +71,7 @@ struct PricerCRTP {
         return static_cast<const Derived*>(this)->priceImpl(env);
     }
 
-    std::string name() const {
-        return static_cast<const Derived*>(this)->nameImpl();
-    }
+    std::string name() const { return static_cast<const Derived*>(this)->nameImpl(); }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -87,9 +85,9 @@ struct PricerCRTP {
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct PricerHandle {
-    std::function<double(const MarketEnv<double>&)>       price_double;
-    std::function<var(const MarketEnv<var>&)>              price_var;
-    std::function<fvar<var>(const MarketEnv<fvar<var>>&)>  price_fvar_var;
+    std::function<double(const MarketEnv<double>&)> price_double;
+    std::function<var(const MarketEnv<var>&)> price_var;
+    std::function<fvar<var>(const MarketEnv<fvar<var>>&)> price_fvar_var;
     std::string name;
 
     template <typename Derived>
@@ -100,9 +98,7 @@ struct PricerHandle {
         h.price_double = [p = pricer](const MarketEnv<double>& e) {
             return p.template price<double>(e);
         };
-        h.price_var = [p = pricer](const MarketEnv<var>& e) {
-            return p.template price<var>(e);
-        };
+        h.price_var = [p = pricer](const MarketEnv<var>& e) { return p.template price<var>(e); };
         h.price_fvar_var = [p = pricer](const MarketEnv<fvar<var>>& e) {
             return p.template price<fvar<var>>(e);
         };
@@ -135,7 +131,7 @@ struct VanillaEuropeanPricer : PricerCRTP<VanillaEuropeanPricer> {
 
     template <typename DoubleT>
     DoubleT priceImpl(const MarketEnv<DoubleT>& env) const {
-        DoubleT S = env.rate(0) * 100.0;  // simplified: rate → spot
+        DoubleT S = env.rate(0) * 100.0; // simplified: rate → spot
         DoubleT sigma = env.vol(0);
         DoubleT r = env.rate(1);
 
@@ -150,16 +146,17 @@ struct VanillaEuropeanPricer : PricerCRTP<VanillaEuropeanPricer> {
 
 private:
     // ── Helpers ──
-    static double phi(double x) { return std::exp(-0.5*x*x) / std::sqrt(2*M_PI); }
+    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * M_PI); }
     static double Phi(double x) { return 0.5 * std::erfc(-x * M_SQRT1_2); }
 
-    struct D1D2 { double d1, d2, nd1, nd2, Nd1, Nd2, disc, sqrtT; };
+    struct D1D2 {
+        double d1, d2, nd1, nd2, Nd1, Nd2, disc, sqrtT;
+    };
     D1D2 compute(double S, double sigma, double r) const {
         double sqrtT = std::sqrt(T);
-        double d1 = (std::log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma*sqrtT);
-        double d2 = d1 - sigma*sqrtT;
-        return {d1, d2, phi(d1), phi(d2), Phi(d1), Phi(d2),
-                std::exp(-r*T), sqrtT};
+        double d1 = (std::log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+        double d2 = d1 - sigma * sqrtT;
+        return {d1, d2, phi(d1), phi(d2), Phi(d1), Phi(d2), std::exp(-r * T), sqrtT};
     }
 
     // ── double ──
@@ -175,22 +172,21 @@ private:
         double val = Sv * c.Nd1 - K * c.disc * c.Nd2;
 
         double delta = c.Nd1;
-        double vega  = Sv * c.nd1 * c.sqrtT;
-        double rho   = K * T * c.disc * c.Nd2;
+        double vega = Sv * c.nd1 * c.sqrtT;
+        double rho = K * T * c.disc * c.Nd2;
 
-        return stan::math::make_callback_var(val,
-            [S, sigma, r, delta, vega, rho](auto& vi) {
-                double a = vi.adj();
-                S.adj()     += a * delta;
-                sigma.adj() += a * vega;
-                r.adj()     += a * rho;
-            });
+        return stan::math::make_callback_var(val, [S, sigma, r, delta, vega, rho](auto& vi) {
+            double a = vi.adj();
+            S.adj() += a * delta;
+            sigma.adj() += a * vega;
+            r.adj() += a * rho;
+        });
     }
 
     // ── fvar<var>: Level 2 second-order (nested make_callback_var) ──
     fvar<var> priceFvarVar(fvar<var> S, fvar<var> sigma, fvar<var> r) const {
         var Sv = S.val_, sv = sigma.val_, rv = r.val_;
-        var Sd = S.d_,   sd = sigma.d_,   rd = r.d_;
+        var Sd = S.d_, sd = sigma.d_, rd = r.d_;
 
         double S0 = Sv.val(), s0 = sv.val(), r0 = rv.val();
         auto c = compute(S0, s0, r0);
@@ -198,33 +194,39 @@ private:
 
         // 1st order Greeks
         double delta = c.Nd1;
-        double vega  = S0 * c.nd1 * c.sqrtT;
+        double vega = S0 * c.nd1 * c.sqrtT;
         double rho_g = K * T * c.disc * c.Nd2;
 
         // 2nd order Greeks
-        double gamma_   = c.nd1 / (S0 * s0 * c.sqrtT);
-        double vanna_   = -c.nd1 * c.d2 / s0;
-        double dDdr     = c.nd1 * c.sqrtT / s0;
-        double volga_   = S0 * c.sqrtT * c.nd1 * c.d1 * c.d2 / s0;
-        double dVdr     = -S0 * T * c.d1 * c.nd1 / s0;
-        double dRdr     = -K*T*T*c.disc*c.Nd2 + K*T*c.disc*c.nd2*c.sqrtT/s0;
+        double gamma_ = c.nd1 / (S0 * s0 * c.sqrtT);
+        double vanna_ = -c.nd1 * c.d2 / s0;
+        double dDdr = c.nd1 * c.sqrtT / s0;
+        double volga_ = S0 * c.sqrtT * c.nd1 * c.d1 * c.d2 / s0;
+        double dVdr = -S0 * T * c.d1 * c.nd1 / s0;
+        double dRdr = -K * T * T * c.disc * c.Nd2 + K * T * c.disc * c.nd2 * c.sqrtT / s0;
 
         var price_var(val);
 
-        var delta_var = stan::math::make_callback_var(delta,
-            [Sv, sv, rv, gamma_, vanna_, dDdr](auto& vi) {
+        var delta_var =
+            stan::math::make_callback_var(delta, [Sv, sv, rv, gamma_, vanna_, dDdr](auto& vi) {
                 double a = vi.adj();
-                Sv.adj() += a * gamma_; sv.adj() += a * vanna_; rv.adj() += a * dDdr;
+                Sv.adj() += a * gamma_;
+                sv.adj() += a * vanna_;
+                rv.adj() += a * dDdr;
             });
-        var vega_var = stan::math::make_callback_var(vega,
-            [Sv, sv, rv, vanna_, volga_, dVdr](auto& vi) {
+        var vega_var =
+            stan::math::make_callback_var(vega, [Sv, sv, rv, vanna_, volga_, dVdr](auto& vi) {
                 double a = vi.adj();
-                Sv.adj() += a * vanna_; sv.adj() += a * volga_; rv.adj() += a * dVdr;
+                Sv.adj() += a * vanna_;
+                sv.adj() += a * volga_;
+                rv.adj() += a * dVdr;
             });
-        var rho_var = stan::math::make_callback_var(rho_g,
-            [Sv, sv, rv, dDdr, dVdr, dRdr](auto& vi) {
+        var rho_var =
+            stan::math::make_callback_var(rho_g, [Sv, sv, rv, dDdr, dVdr, dRdr](auto& vi) {
                 double a = vi.adj();
-                Sv.adj() += a * dDdr; sv.adj() += a * dVdr; rv.adj() += a * dRdr;
+                Sv.adj() += a * dDdr;
+                sv.adj() += a * dVdr;
+                rv.adj() += a * dRdr;
             });
 
         var tangent = delta_var * Sd + vega_var * sd + rho_var * rd;
@@ -252,11 +254,13 @@ struct ExoticPricer : PricerCRTP<ExoticPricer> {
         DoubleT sigma = env.vol(0);
         DoubleT r = env.rate(1);
 
-        using std::log; using std::exp; using std::sqrt;
+        using std::exp;
+        using std::log;
+        using std::sqrt;
         DoubleT sqrtT = sqrt(DoubleT(T));
-        DoubleT d1 = (log(S / K) + (r + sigma*sigma/2.0)*T) / (sigma*sqrtT);
-        DoubleT d2 = d1 - sigma*sqrtT;
-        return S * stan::math::Phi(d1) - K * exp(-r*T) * stan::math::Phi(d2);
+        DoubleT d1 = (log(S / K) + (r + sigma * sigma / 2.0) * T) / (sigma * sqrtT);
+        DoubleT d2 = d1 - sigma * sqrtT;
+        return S * stan::math::Phi(d1) - K * exp(-r * T) * stan::math::Phi(d2);
     }
 };
 
@@ -289,27 +293,27 @@ struct DigitalPricer : PricerCRTP<DigitalPricer> {
     }
 
 private:
-    static double phi(double x) { return std::exp(-0.5*x*x) / std::sqrt(2*M_PI); }
+    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * M_PI); }
     static double Phi(double x) { return 0.5 * std::erfc(-x * M_SQRT1_2); }
 
     // Digital call: PV = e^{-rT} · Φ(d₂)
     double priceNaive(double S, double sigma, double r) const {
         double sqrtT = std::sqrt(T);
-        double d2 = (std::log(S/K) + (r - 0.5*sigma*sigma)*T) / (sigma*sqrtT);
-        return std::exp(-r*T) * Phi(d2);
+        double d2 = (std::log(S / K) + (r - 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+        return std::exp(-r * T) * Phi(d2);
     }
 
     // ── var: analytical gradient (1 tape node) ──
     var priceAnalytical(var S, var sigma, var r) const {
         double Sv = S.val(), sv = sigma.val(), rv = r.val();
         double sqrtT = std::sqrt(T);
-        double d2 = (std::log(Sv/K) + (rv - 0.5*sv*sv)*T) / (sv*sqrtT);
-        double disc = std::exp(-rv*T);
+        double d2 = (std::log(Sv / K) + (rv - 0.5 * sv * sv) * T) / (sv * sqrtT);
+        double disc = std::exp(-rv * T);
         double val = disc * Phi(d2);
 
         double nd2 = phi(d2);
         double dd2_dS = 1.0 / (Sv * sv * sqrtT);
-        double dd2_dsigma = -(std::log(Sv/K) + (rv + 0.5*sv*sv)*T) / (sv*sv*sqrtT);
+        double dd2_dsigma = -(std::log(Sv / K) + (rv + 0.5 * sv * sv) * T) / (sv * sv * sqrtT);
         double dd2_dr = sqrtT / sv;
 
         double dPV_dS = disc * nd2 * dd2_dS;
@@ -317,12 +321,12 @@ private:
         double dPV_dr = -T * val + disc * nd2 * dd2_dr;
 
         return stan::math::make_callback_var(val,
-            [S, sigma, r, dPV_dS, dPV_dsigma, dPV_dr](auto& vi) {
-                double a = vi.adj();
-                S.adj()     += a * dPV_dS;
-                sigma.adj() += a * dPV_dsigma;
-                r.adj()     += a * dPV_dr;
-            });
+                                             [S, sigma, r, dPV_dS, dPV_dsigma, dPV_dr](auto& vi) {
+                                                 double a = vi.adj();
+                                                 S.adj() += a * dPV_dS;
+                                                 sigma.adj() += a * dPV_dsigma;
+                                                 r.adj() += a * dPV_dr;
+                                             });
     }
 
     // ── fvar<var>: Level 1 — gradient as var operations ──
@@ -330,24 +334,24 @@ private:
     // through them for the Hessian. No need to derive Hessian by hand.
     fvar<var> priceLevel1(fvar<var> S, fvar<var> sigma, fvar<var> r) const {
         var Sv = S.val_, sv = sigma.val_, rv = r.val_;
-        var Sd = S.d_,   sd = sigma.d_,   rd = r.d_;
+        var Sd = S.d_, sd = sigma.d_, rd = r.d_;
 
         // Value in double
         double S0 = Sv.val(), s0 = sv.val(), r0 = rv.val();
         double sqrtT = std::sqrt(T);
-        double d2_val = (std::log(S0/K) + (r0 - 0.5*s0*s0)*T) / (s0*sqrtT);
-        double val = std::exp(-r0*T) * Phi(d2_val);
+        double d2_val = (std::log(S0 / K) + (r0 - 0.5 * s0 * s0) * T) / (s0 * sqrtT);
+        double val = std::exp(-r0 * T) * Phi(d2_val);
         var price_var(val);
 
         // Gradient entries as var (AD will differentiate through these)
         // d₂ as var — depends on S, σ, r
-        var d2_var = (log(Sv / K) + (rv - sv*sv/2.0)*T) / (sv*sqrtT);
+        var d2_var = (log(Sv / K) + (rv - sv * sv / 2.0) * T) / (sv * sqrtT);
         var disc_var = exp(-rv * T);
-        var nd2_var = exp(-d2_var * d2_var / 2.0) / std::sqrt(2*M_PI);
+        var nd2_var = exp(-d2_var * d2_var / 2.0) / std::sqrt(2 * M_PI);
         var Nd2_var = stan::math::Phi(d2_var);
 
         var dd2_dS = 1.0 / (Sv * sv * sqrtT);
-        var dd2_dsigma = -(log(Sv/K) + (rv + sv*sv/2.0)*T) / (sv*sv*sqrtT);
+        var dd2_dsigma = -(log(Sv / K) + (rv + sv * sv / 2.0) * T) / (sv * sv * sqrtT);
         var dd2_dr = var(sqrtT) / sv;
 
         var grad_S = disc_var * nd2_var * dd2_dS;
@@ -373,12 +377,12 @@ public:
     // ── First-order Greeks (existing pipeline) ──
     struct FirstOrderResult {
         double pv;
-        Eigen::VectorXd greeks;  // ∂PV/∂θ_i
+        Eigen::VectorXd greeks; // ∂PV/∂θ_i
     };
 
     FirstOrderResult computeGreeks(const PricerHandle& pricer,
-                                    const std::vector<double>& market_data,
-                                    int n_rates, int n_vols) {
+                                   const std::vector<double>& market_data, int n_rates,
+                                   int n_vols) {
         int n = market_data.size();
         MarketEnv<var> env;
         env.n_rates = n_rates;
@@ -419,8 +423,8 @@ public:
     };
 
     SecondOrderResult computeHessian(const PricerHandle& pricer,
-                                      const std::vector<double>& market_data,
-                                      int n_rates, int n_vols) {
+                                     const std::vector<double>& market_data, int n_rates,
+                                     int n_vols) {
         int n = market_data.size();
         Eigen::VectorXd greeks(n);
         Eigen::MatrixXd H(n, n);
@@ -457,11 +461,10 @@ public:
     // In practice, most trades depend on only a few market data points.
     // Only compute Hessian columns for active variables.
     //
-    SecondOrderResult computeHessianSparse(
-        const PricerHandle& pricer,
-        const std::vector<double>& market_data,
-        int n_rates, int n_vols,
-        const std::vector<int>& active_indices)  // which θ_j to differentiate
+    SecondOrderResult
+    computeHessianSparse(const PricerHandle& pricer, const std::vector<double>& market_data,
+                         int n_rates, int n_vols,
+                         const std::vector<int>& active_indices) // which θ_j to differentiate
     {
         int n = market_data.size();
         int n_active = active_indices.size();
@@ -509,9 +512,11 @@ public:
 
 template <typename F>
 double bench_us(F&& fn, int N) {
-    for (int i = 0; i < std::min(N / 10, 1000); ++i) fn();
+    for (int i = 0; i < std::min(N / 10, 1000); ++i)
+        fn();
     auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     auto t1 = std::chrono::high_resolution_clock::now();
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
 }
@@ -523,7 +528,7 @@ int main() {
     std::cout << "╚═══════════════════════════════════════════════════════════════╝\n\n";
 
     // Market data: 2 rates + 1 vol = 3 parameters
-    std::vector<double> market_data = {1.05, 0.05, 0.20};  // S_proxy, r, vol
+    std::vector<double> market_data = {1.05, 0.05, 0.20}; // S_proxy, r, vol
     int n_rates = 2, n_vols = 1;
 
     // Create pricers at different analytical levels
@@ -532,7 +537,7 @@ int main() {
     DigitalPricer digital;
 
     auto h_vanilla = PricerHandle::create(vanilla);
-    auto h_exotic  = PricerHandle::create(exotic);
+    auto h_exotic = PricerHandle::create(exotic);
     auto h_digital = PricerHandle::create(digital);
 
     TradePricer tp;
@@ -556,56 +561,49 @@ int main() {
         for (int i = 0; i < so.hessian.rows(); ++i) {
             std::cout << "    [";
             for (int j = 0; j < so.hessian.cols(); ++j)
-                std::cout << std::setw(12) << std::setprecision(4) << so.hessian(i,j);
+                std::cout << std::setw(12) << std::setprecision(4) << so.hessian(i, j);
             std::cout << " ]\n";
         }
 
         // Verify gradient consistency
         double max_grad_diff = (fo.greeks - so.greeks).cwiseAbs().maxCoeff();
-        std::cout << "  Max |gradient_1st - gradient_2nd|: "
-                  << std::scientific << std::setprecision(2) << max_grad_diff
-                  << std::fixed << "\n";
+        std::cout << "  Max |gradient_1st - gradient_2nd|: " << std::scientific
+                  << std::setprecision(2) << max_grad_diff << std::fixed << "\n";
 
         // Verify Hessian symmetry
         double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
-        std::cout << "  Hessian symmetry check: " << std::scientific << max_sym
-                  << std::fixed << "\n\n";
+        std::cout << "  Hessian symmetry check: " << std::scientific << max_sym << std::fixed
+                  << "\n\n";
     }
 
     // ── Timing comparison ──
     std::cout << "── Performance ──\n\n";
     constexpr int N = 50'000;
 
-    std::cout << "  " << std::setw(35) << std::left << "Pricer" << std::right
-              << std::setw(12) << "1st order"
-              << std::setw(12) << "2nd order"
-              << std::setw(10) << "ratio\n";
+    std::cout << "  " << std::setw(35) << std::left << "Pricer" << std::right << std::setw(12)
+              << "1st order" << std::setw(12) << "2nd order" << std::setw(10) << "ratio\n";
     std::cout << "  " << std::string(69, '-') << "\n";
 
     for (auto* pricer : pricers) {
-        auto t1 = bench_us([&]() {
-            tp.computeGreeks(*pricer, market_data, n_rates, n_vols);
-        }, N);
+        auto t1 = bench_us([&]() { tp.computeGreeks(*pricer, market_data, n_rates, n_vols); }, N);
 
-        auto t2 = bench_us([&]() {
-            tp.computeHessian(*pricer, market_data, n_rates, n_vols);
-        }, N);
+        auto t2 = bench_us([&]() { tp.computeHessian(*pricer, market_data, n_rates, n_vols); }, N);
 
         std::cout << "  " << std::setw(35) << std::left << pricer->name << std::right
-                  << std::setw(10) << std::setprecision(3) << t1 << " us"
-                  << std::setw(10) << std::setprecision(3) << t2 << " us"
-                  << std::setw(8) << std::setprecision(1) << t2 / t1 << "x\n";
+                  << std::setw(10) << std::setprecision(3) << t1 << " us" << std::setw(10)
+                  << std::setprecision(3) << t2 << " us" << std::setw(8) << std::setprecision(1)
+                  << t2 / t1 << "x\n";
     }
 
     // ── Sparse Hessian demo ──
     std::cout << "\n── Sparse Hessian (only rate columns) ──\n\n";
-    std::vector<int> rate_indices = {0, 1};  // only differentiate w.r.t. rates
+    std::vector<int> rate_indices = {0, 1}; // only differentiate w.r.t. rates
     auto sparse = tp.computeHessianSparse(h_vanilla, market_data, n_rates, n_vols, rate_indices);
     std::cout << "  Hessian (only rate columns computed):\n";
     for (int i = 0; i < sparse.hessian.rows(); ++i) {
         std::cout << "    [";
         for (int j = 0; j < sparse.hessian.cols(); ++j)
-            std::cout << std::setw(12) << std::setprecision(4) << sparse.hessian(i,j);
+            std::cout << std::setw(12) << std::setprecision(4) << sparse.hessian(i, j);
         std::cout << " ]\n";
     }
     std::cout << "  (Saves " << (1 - (double)rate_indices.size() / market_data.size()) * 100

@@ -6,10 +6,11 @@
  * and market data objects with both double and AD types.
  */
 
-#include "Markets/MarketData.h"
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <vector>
+
+#include "Markets/MarketData.h"
 
 using namespace Markets;
 
@@ -73,8 +74,8 @@ void testSurvivalProbabilityCurve() {
         double sp = spCurve.survivalProb(t);
         double pd = spCurve.defaultProb(t);
         double avgHazard = spCurve.avgHazardRate(t);
-        std::cout << "  t=" << t << ": SP=" << sp << ", PD=" << pd
-                  << ", avg hazard=" << avgHazard << "\n";
+        std::cout << "  t=" << t << ": SP=" << sp << ", PD=" << pd << ", avg hazard=" << avgHazard
+                  << "\n";
     }
     std::cout << "\n";
 }
@@ -182,33 +183,35 @@ void testIRVolTypes() {
     std::vector<double> expiries = {1.0, 2.0, 5.0};
     std::vector<double> tenors = {1.0, 5.0, 10.0};
     std::vector<std::vector<double>> swaptionVols = {
-        {0.50, 0.45, 0.42},  // 1y expiry
-        {0.48, 0.43, 0.40},  // 2y expiry
-        {0.45, 0.40, 0.38}   // 5y expiry
+        {0.50, 0.45, 0.42}, // 1y expiry
+        {0.48, 0.43, 0.40}, // 2y expiry
+        {0.45, 0.40, 0.38}  // 5y expiry
     };
 
     IRVolDescriptor swaptionDesc("USD", "SWAPTION", "", "SOFR");
     SwaptionVolatility<double> swaptionSurf(expiries, tenors, swaptionVols, swaptionDesc);
 
     std::cout << "Swaption Vol Surface: " << swaptionDesc.identifier() << "\n";
-    std::cout << "  Vol type: " << (swaptionSurf.volType() == IRVolType::Swaption ? "Swaption" : "Cap") << "\n";
+    std::cout << "  Vol type: "
+              << (swaptionSurf.volType() == IRVolType::Swaption ? "Swaption" : "Cap") << "\n";
     std::cout << "  ATM vol (2y expiry, 5y tenor): " << swaptionSurf.atmVol(2.0, 5.0) << "\n\n";
 
     // Create a cap volatility surface
     std::vector<double> capExpiries = {1.0, 2.0, 5.0, 10.0};
-    std::vector<double> capTenors = {0.25, 0.5};  // 3M and 6M forward rates
+    std::vector<double> capTenors = {0.25, 0.5}; // 3M and 6M forward rates
     std::vector<std::vector<double>> capVols = {
-        {0.35, 0.34},  // 1y
-        {0.33, 0.32},  // 2y
-        {0.30, 0.29},  // 5y
-        {0.28, 0.27}   // 10y
+        {0.35, 0.34}, // 1y
+        {0.33, 0.32}, // 2y
+        {0.30, 0.29}, // 5y
+        {0.28, 0.27}  // 10y
     };
 
     IRVolDescriptor capDesc("USD", "CAPFLOOR", "", "SOFR");
     CapVolatility<double> capSurf(capExpiries, capTenors, capVols, capDesc);
 
     std::cout << "Cap Vol Surface: " << capDesc.identifier() << "\n";
-    std::cout << "  Vol type: " << (capSurf.volType() == IRVolType::Cap ? "Cap" : "Swaption") << "\n";
+    std::cout << "  Vol type: " << (capSurf.volType() == IRVolType::Cap ? "Cap" : "Swaption")
+              << "\n";
     std::cout << "  ATM vol (2y expiry, 3M tenor): " << capSurf.atmVol(2.0, 0.25) << "\n\n";
 }
 
@@ -219,9 +222,9 @@ void testVolSurfaceOperations() {
     std::vector<double> expiries = {0.5, 1.0, 2.0};
     std::vector<double> strikes = {90, 100, 110};
     std::vector<std::vector<double>> vols = {
-        {0.25, 0.20, 0.22},  // 0.5y
-        {0.23, 0.18, 0.20},  // 1y
-        {0.21, 0.16, 0.18}   // 2y
+        {0.25, 0.20, 0.22}, // 0.5y
+        {0.23, 0.18, 0.20}, // 1y
+        {0.21, 0.16, 0.18}  // 2y
     };
 
     EQDDescriptor desc("TEST", "EQUITY", "USD");
@@ -255,8 +258,8 @@ void testVolSurfaceOperations() {
     EQDVolatility<double> volSurf4 = volSurf;
     volSurf4.applyFunctionWithCoords([](double v, double expiry, double strike) {
         // Add smile: increase vol for out-of-money options
-        double moneyness = strike / 100.0;  // spot = 100
-        double smileAdj = 0.01 * std::abs(moneyness - 1.0);  // OTM adjustment
+        double moneyness = strike / 100.0;                  // spot = 100
+        double smileAdj = 0.01 * std::abs(moneyness - 1.0); // OTM adjustment
         return v + smileAdj;
     });
     std::cout << "  ATM (100): " << volSurf4.vol(1.0, 100.0) << "\n";
@@ -266,7 +269,7 @@ void testVolSurfaceOperations() {
     // Test 5: Bump specific point
     std::cout << "Test 5: Bump specific point (1y, 100 strike)\n";
     EQDVolatility<double> volSurf5 = volSurf;
-    volSurf5.bump(1, 1, 0.05);  // expiry index 1 (1y), strike index 1 (100)
+    volSurf5.bump(1, 1, 0.05); // expiry index 1 (1y), strike index 1 (100)
     std::cout << "  After bumping by 0.05: " << volSurf5.vol(1.0, 100.0) << "\n";
     std::cout << "  Expected: " << 0.18 + 0.05 << "\n";
     std::cout << "  Nearby point (1y, 90): " << volSurf5.vol(1.0, 90.0)
@@ -275,8 +278,8 @@ void testVolSurfaceOperations() {
     // Test 6: Operator overloads
     std::cout << "Test 6: Operator overloads\n";
     EQDVolatility<double> volSurf6 = volSurf;
-    volSurf6 *= 1.2;  // Scale by 1.2
-    volSurf6 += 0.005;  // Shift by 50 bp
+    volSurf6 *= 1.2;   // Scale by 1.2
+    volSurf6 += 0.005; // Shift by 50 bp
     std::cout << "  After *= 1.2 and += 0.005: " << volSurf6.vol(1.0, 100.0) << "\n";
     std::cout << "  Expected: " << 0.18 * 1.2 + 0.005 << "\n\n";
 }

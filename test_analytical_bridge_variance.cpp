@@ -6,13 +6,13 @@
  * the bridge variance without numerical integration, using moment matching.
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 struct CIRParams {
     double kappa;
@@ -25,8 +25,12 @@ std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 /**
  * @brief Analytical CIR conditional moments
@@ -42,8 +46,8 @@ ConditionalMoments getConditionalMoments(double r_start, double dt, const CIRPar
 
     ConditionalMoments moments;
     moments.mean = params.theta + (r_start - params.theta) * exp_kt;
-    moments.variance = r_start * c * exp_kt * (1.0 - exp_kt) +
-                       params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    moments.variance =
+        r_start * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
 
     return moments;
 }
@@ -93,8 +97,8 @@ double analyticalBridgeVariance_Kalman(double r1, double r2, double dt1, double 
     auto moments_1k = getConditionalMoments(r1, dt1, params);
     auto moments_12 = getConditionalMoments(r1, dt1 + dt2, params);
 
-    double var_1k = moments_1k.variance;  // Var[r(tk) | r(t1)]
-    double var_12 = moments_12.variance;  // Var[r(t2) | r(t1)]
+    double var_1k = moments_1k.variance; // Var[r(tk) | r(t1)]
+    double var_12 = moments_12.variance; // Var[r(t2) | r(t1)]
 
     // For CIR, the covariance propagates as:
     // Cov[r(tk), r(t2) | r(t1)] ≈ Var[r(tk) | r(t1)] × exp(-κ·dt2)
@@ -125,7 +129,7 @@ double analyticalBridgeVariance_Kalman(double r1, double r2, double dt1, double 
  * - Precision_backward = information from r(t2) about r(tk)
  */
 double analyticalBridgeVariance_Precision(double r1, double r2, double dt1, double dt2,
-                                         const CIRParams& params) {
+                                          const CIRParams& params) {
     // Forward variance: Var[r(tk) | r(t1)]
     auto moments_forward = getConditionalMoments(r1, dt1, params);
     double var_forward = moments_forward.variance;
@@ -141,7 +145,8 @@ double analyticalBridgeVariance_Precision(double r1, double r2, double dt1, doub
 
     // Approximate backward variance (this is heuristic):
     // The information from r(t2) is weighted by how much r(tk) influences r(t2)
-    auto moments_k2 = getConditionalMoments(r2, dt2, params);  // This uses r2, but conceptually backwards
+    auto moments_k2 =
+        getConditionalMoments(r2, dt2, params); // This uses r2, but conceptually backwards
     double var_backward = moments_k2.variance;
 
     // Precision addition (harmonic-like combination)
@@ -161,9 +166,9 @@ double analyticalBridgeVariance_Precision(double r1, double r2, double dt1, doub
  * the ratio of forward and total variances.
  */
 double analyticalBridgeVariance_Simple(double r1, double r2, double dt1, double dt2,
-                                      const CIRParams& params) {
+                                       const CIRParams& params) {
     auto moments_1k = getConditionalMoments(r1, dt1, params);
-    auto moments_k2 = getConditionalMoments(r1, dt2, params);  // Using r1 as proxy
+    auto moments_k2 = getConditionalMoments(r1, dt2, params); // Using r1 as proxy
 
     double var_1k = moments_1k.variance;
     double var_k2 = moments_k2.variance;
@@ -183,8 +188,8 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double exp_kt = std::exp(-params.kappa * dt);
     double m = params.theta + (r_t - params.theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_t * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
@@ -202,18 +207,20 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 }
 
 double evaluateDensity_Andersen(double r_start, double r_end, double dt, const CIRParams& params) {
-    if (dt < 1e-10) return 0.0;
+    if (dt < 1e-10)
+        return 0.0;
     double exp_kt = std::exp(-params.kappa * dt);
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double m = params.theta + (r_start - params.theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_start * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
         double b2 = 2.0 / psi - 1.0 + std::sqrt(2.0 / psi) * std::sqrt(2.0 / psi - 1.0);
         double a = m / (1.0 + b2);
-        if (r_end <= 0.0) return 0.0;
+        if (r_end <= 0.0)
+            return 0.0;
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
         double b = std::sqrt(b2);
@@ -231,8 +238,10 @@ double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double 
                              const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     double m_uncond = params.theta + (r1 - params.theta) * std::exp(-params.kappa * dt1);
     double M = evaluateDensity_Andersen(m_uncond, r2, dt2, params) * 1.5;
@@ -240,14 +249,14 @@ double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double 
     for (int attempt = 0; attempt < 100000; attempt++) {
         double y = sampleCIR_Andersen(r1, dt1, params);
         double accept_prob = evaluateDensity_Andersen(y, r2, dt2, params) / M;
-        if (uniform_random() < accept_prob) return y;
+        if (uniform_random() < accept_prob)
+            return y;
     }
     return sampleCIR_Andersen(r1, dt1, params);
 }
 
 double bridge_AnalyticalVariance(double r1, double r2, double t1, double tk, double t2,
-                                 const CIRParams& params,
-                                 const std::string& method = "simple") {
+                                 const CIRParams& params, const std::string& method = "simple") {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
 
@@ -260,7 +269,7 @@ double bridge_AnalyticalVariance(double r1, double r2, double t1, double tk, dou
         bridge_variance = analyticalBridgeVariance_Kalman(r1, r2, dt1, dt2, params);
     } else if (method == "precision") {
         bridge_variance = analyticalBridgeVariance_Precision(r1, r2, dt1, dt2, params);
-    } else {  // "simple"
+    } else { // "simple"
         bridge_variance = analyticalBridgeVariance_Simple(r1, r2, dt1, dt2, params);
     }
 
@@ -291,7 +300,7 @@ void testAnalyticalVariance() {
 
     std::vector<TestCase> cases = {
         {"Symmetric midpoint", 0.03, 0.05, 0.125, 0.125},
-        {"Asymmetric (near t1)", 0.03, 0.05, 0.019165, 0.230835},  // 1 week vs 3 months
+        {"Asymmetric (near t1)", 0.03, 0.05, 0.019165, 0.230835}, // 1 week vs 3 months
         {"Asymmetric (near t2)", 0.03, 0.05, 0.23, 0.02},
     };
 
@@ -299,13 +308,18 @@ void testAnalyticalVariance() {
 
     for (const auto& test : cases) {
         std::cout << "=== " << test.name << " ===\n";
-        std::cout << "r1=" << test.r1 << ", r2=" << test.r2 << ", dt1=" << test.dt1 << ", dt2=" << test.dt2 << "\n\n";
+        std::cout << "r1=" << test.r1 << ", r2=" << test.r2 << ", dt1=" << test.dt1
+                  << ", dt2=" << test.dt2 << "\n\n";
 
         // Compute analytical predictions
-        double bridge_mean_analytical = analyticalBridgeMean(test.r1, test.r2, test.dt1, test.dt2, params);
-        double bridge_var_kalman = analyticalBridgeVariance_Kalman(test.r1, test.r2, test.dt1, test.dt2, params);
-        double bridge_var_precision = analyticalBridgeVariance_Precision(test.r1, test.r2, test.dt1, test.dt2, params);
-        double bridge_var_simple = analyticalBridgeVariance_Simple(test.r1, test.r2, test.dt1, test.dt2, params);
+        double bridge_mean_analytical =
+            analyticalBridgeMean(test.r1, test.r2, test.dt1, test.dt2, params);
+        double bridge_var_kalman =
+            analyticalBridgeVariance_Kalman(test.r1, test.r2, test.dt1, test.dt2, params);
+        double bridge_var_precision =
+            analyticalBridgeVariance_Precision(test.r1, test.r2, test.dt1, test.dt2, params);
+        double bridge_var_simple =
+            analyticalBridgeVariance_Simple(test.r1, test.r2, test.dt1, test.dt2, params);
 
         auto uncond = getConditionalMoments(test.r1, test.dt1, params);
 
@@ -326,22 +340,27 @@ void testAnalyticalVariance() {
 
         for (int i = 0; i < N; i++) {
             rng.seed(1000 + i);
-            samples_exact.push_back(sampleCIRBridge_Exact(test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params));
+            samples_exact.push_back(
+                sampleCIRBridge_Exact(test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params));
 
             rng.seed(1000 + i);
-            samples_kalman.push_back(bridge_AnalyticalVariance(test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "kalman"));
+            samples_kalman.push_back(bridge_AnalyticalVariance(
+                test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "kalman"));
 
             rng.seed(1000 + i);
-            samples_precision.push_back(bridge_AnalyticalVariance(test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "precision"));
+            samples_precision.push_back(bridge_AnalyticalVariance(
+                test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "precision"));
 
             rng.seed(1000 + i);
-            samples_simple.push_back(bridge_AnalyticalVariance(test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "simple"));
+            samples_simple.push_back(bridge_AnalyticalVariance(
+                test.r1, test.r2, 0, test.dt1, test.dt1 + test.dt2, params, "simple"));
         }
 
         auto compute_stats = [](const std::vector<double>& data) {
             double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
             double var = 0.0;
-            for (double x : data) var += (x - mean) * (x - mean);
+            for (double x : data)
+                var += (x - mean) * (x - mean);
             var /= data.size();
             return std::make_pair(mean, var);
         };
@@ -353,7 +372,8 @@ void testAnalyticalVariance() {
 
         std::cout << "Empirical results (" << N << " samples):\n";
         std::cout << "Method              Mean        Variance    Mean Err    Var Err\n";
-        std::cout << "Exact:              " << mean_exact << "  " << var_exact << "  0.00%       0.00%\n";
+        std::cout << "Exact:              " << mean_exact << "  " << var_exact
+                  << "  0.00%       0.00%\n";
         std::cout << "Kalman:             " << mean_kalman << "  " << var_kalman << "  "
                   << (mean_kalman - mean_exact) / mean_exact * 100 << "%  "
                   << (var_kalman - var_exact) / var_exact * 100 << "%\n";

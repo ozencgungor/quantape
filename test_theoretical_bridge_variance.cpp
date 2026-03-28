@@ -6,13 +6,13 @@
  * theoretical variance of p(r(tk) | r(t1), r(t2)) and derive the correction.
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 struct CIRParams {
     double kappa;
@@ -25,15 +25,19 @@ std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double exp_kt = std::exp(-params.kappa * dt);
     double m = params.theta + (r_t - params.theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_t * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
@@ -54,14 +58,15 @@ double evaluateDensity_Andersen(double r_start, double r_end, double dt, const C
     double exp_kt = std::exp(-params.kappa * dt);
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double m = params.theta + (r_start - params.theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_start * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
         double b2 = 2.0 / psi - 1.0 + std::sqrt(2.0 / psi) * std::sqrt(2.0 / psi - 1.0);
         double a = m / (1.0 + b2);
-        if (r_end <= 0.0) return 0.0;
+        if (r_end <= 0.0)
+            return 0.0;
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
         double b = std::sqrt(b2);
@@ -75,8 +80,7 @@ double evaluateDensity_Andersen(double r_start, double r_end, double dt, const C
     }
 }
 
-double evaluateBridgeDensity(double r1, double y, double r2,
-                             double t1, double tk, double t2,
+double evaluateBridgeDensity(double r1, double y, double r2, double t1, double tk, double t2,
                              const CIRParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
@@ -93,9 +97,8 @@ struct BridgeMoments {
     double second_moment;
 };
 
-BridgeMoments computeTheoreticalBridgeMoments(double r1, double r2,
-                                               double t1, double tk, double t2,
-                                               const CIRParams& params) {
+BridgeMoments computeTheoreticalBridgeMoments(double r1, double r2, double t1, double tk, double t2,
+                                              const CIRParams& params) {
     double r_max = 0.3;
     int n_points = 10000;
     double dr = r_max / n_points;
@@ -145,8 +148,8 @@ UnconditionalMoments computeUnconditionalMoments(double r_t, double dt, const CI
 
     UnconditionalMoments moments;
     moments.mean = params.theta + (r_t - params.theta) * exp_kt;
-    moments.variance = r_t * c * exp_kt * (1.0 - exp_kt) +
-                       params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    moments.variance =
+        r_t * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
 
     return moments;
 }
@@ -154,8 +157,7 @@ UnconditionalMoments computeUnconditionalMoments(double r_t, double dt, const CI
 /**
  * @brief Optimal bridge with theoretically derived variance correction
  */
-double bridge_TheoreticalVariance(double r1, double r2,
-                                  double t1, double tk, double t2,
+double bridge_TheoreticalVariance(double r1, double r2, double t1, double tk, double t2,
                                   const CIRParams& params) {
     double dt1 = tk - t1;
 
@@ -194,7 +196,8 @@ double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double 
     for (int attempt = 0; attempt < 100000; attempt++) {
         double y = sampleCIR_Andersen(r1, dt1, params);
         double accept_prob = evaluateDensity_Andersen(y, r2, dt2, params) / M;
-        if (uniform_random() < accept_prob) return y;
+        if (uniform_random() < accept_prob)
+            return y;
     }
     return sampleCIR_Andersen(r1, dt1, params);
 }
@@ -298,7 +301,8 @@ void testTheoreticalVariance() {
     auto compute_moments = [](const std::vector<double>& data) {
         double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
         double variance = 0.0;
-        for (double x : data) variance += (x - mean) * (x - mean);
+        for (double x : data)
+            variance += (x - mean) * (x - mean);
         variance /= data.size();
         return std::make_pair(mean, variance);
     };
@@ -311,8 +315,8 @@ void testTheoreticalVariance() {
 
     std::cout << "=== Empirical Results ===\n\n";
     std::cout << "Method                          Mean        Variance    Mean Err    Var Err\n";
-    std::cout << "Exact (Rejection):              " << mean_exact << "   " << var_exact
-              << "   " << 0.0 << "%     " << 0.0 << "%\n";
+    std::cout << "Exact (Rejection):              " << mean_exact << "   " << var_exact << "   "
+              << 0.0 << "%     " << 0.0 << "%\n";
     std::cout << "Theoretical Variance:           " << mean_theoretical << "   " << var_theoretical
               << "   " << (mean_theoretical - mean_exact) / mean_exact * 100 << "%     "
               << (var_theoretical - var_exact) / var_exact * 100 << "%\n";
@@ -334,23 +338,30 @@ void testTheoreticalVariance() {
     std::cout << "Exact rejection sampling (empirical):\n";
     std::cout << "  Mean:     " << mean_exact << "\n";
     std::cout << "  Variance: " << var_exact << "\n";
-    std::cout << "  Mean error:     " << (mean_exact - bridge_theory.mean) / bridge_theory.mean * 100 << "%\n";
-    std::cout << "  Variance error: " << (var_exact - bridge_theory.variance) / bridge_theory.variance * 100 << "%\n\n";
+    std::cout << "  Mean error:     "
+              << (mean_exact - bridge_theory.mean) / bridge_theory.mean * 100 << "%\n";
+    std::cout << "  Variance error: "
+              << (var_exact - bridge_theory.variance) / bridge_theory.variance * 100 << "%\n\n";
 
     std::cout << "Theoretical variance correction (empirical):\n";
     std::cout << "  Mean:     " << mean_theoretical << "\n";
     std::cout << "  Variance: " << var_theoretical << "\n";
-    std::cout << "  Mean error:     " << (mean_theoretical - bridge_theory.mean) / bridge_theory.mean * 100 << "%\n";
-    std::cout << "  Variance error: " << (var_theoretical - bridge_theory.variance) / bridge_theory.variance * 100 << "%\n\n";
+    std::cout << "  Mean error:     "
+              << (mean_theoretical - bridge_theory.mean) / bridge_theory.mean * 100 << "%\n";
+    std::cout << "  Variance error: "
+              << (var_theoretical - bridge_theory.variance) / bridge_theory.variance * 100
+              << "%\n\n";
 
     std::cout << "=== Conclusion ===\n\n";
     std::cout << "The theoretically derived variance ratio is " << variance_ratio << "\n";
     std::cout << "This should be used instead of ad-hoc factors like 0.6\n\n";
 
     std::cout << "Theoretical method vs Exact:\n";
-    std::cout << "  Variance error: " << std::abs((var_theoretical - var_exact) / var_exact * 100) << "%\n";
+    std::cout << "  Variance error: " << std::abs((var_theoretical - var_exact) / var_exact * 100)
+              << "%\n";
     std::cout << "Ad-hoc factor=0.6 vs Exact:\n";
-    std::cout << "  Variance error: " << std::abs((var_adhoc_06 - var_exact) / var_exact * 100) << "%\n\n";
+    std::cout << "  Variance error: " << std::abs((var_adhoc_06 - var_exact) / var_exact * 100)
+              << "%\n\n";
 
     if (std::abs(variance_ratio - 0.6) < 0.05) {
         std::cout << "Note: For this scenario, the theoretical ratio ≈ 0.6, so ad-hoc\n";
