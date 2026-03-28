@@ -11,16 +11,15 @@ namespace Markets {
  * Contains metadata for yield curves (dividends, repo, etc.)
  */
 struct YieldCurveDescriptor {
-    std::string currency;       ///< Currency code (e.g., "USD", "EUR")
-    std::string curveName;      ///< Curve identifier (e.g., "DIV", "REPO")
-    std::string referenceDate;  ///< Reference date in YYYY-MM-DD format
-    std::string curveType;      ///< Type: "DIVIDEND", "REPO", etc.
+    std::string currency;      ///< Currency code (e.g., "USD", "EUR")
+    std::string curveName;     ///< Curve identifier (e.g., "DIV", "REPO")
+    std::string referenceDate; ///< Reference date in YYYY-MM-DD format
+    std::string curveType;     ///< Type: "DIVIDEND", "REPO", etc.
 
     /**
      * @brief Default constructor
      */
-    YieldCurveDescriptor()
-        : currency("USD"), curveName(""), referenceDate(""), curveType("") {}
+    YieldCurveDescriptor() : currency("USD"), curveName(""), referenceDate(""), curveType("") {}
 
     /**
      * @brief Constructor with all fields
@@ -32,9 +31,7 @@ struct YieldCurveDescriptor {
     /**
      * @brief Get full curve identifier
      */
-    std::string identifier() const {
-        return currency + "." + curveName + "." + referenceDate;
-    }
+    std::string identifier() const { return currency + "." + curveName + "." + referenceDate; }
 };
 
 } // namespace Markets

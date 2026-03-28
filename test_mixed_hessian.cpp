@@ -26,9 +26,9 @@
  * — giving the Hessian automatically, regardless of how J was computed.
  */
 
+#include <Eigen/Dense>
 #include <stan/math.hpp>
 #include <stan/math/mix.hpp>
-#include <Eigen/Dense>
 
 #include <chrono>
 #include <cmath>
@@ -36,8 +36,8 @@
 #include <iostream>
 #include <vector>
 
-using stan::math::var;
 using stan::math::fvar;
+using stan::math::var;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GENERIC HELPER: ad_apply
@@ -72,30 +72,28 @@ using stan::math::fvar;
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct CurveInterp {
-    std::vector<double> times;   // pillar times
-    int n;                       // number of pillars
+    std::vector<double> times; // pillar times
+    int n;                     // number of pillars
 
     // ── double: just compute ──
     double eval(double T, const std::vector<double>& rates) const {
         int seg = locate(T);
-        double t = (T - times[seg]) / (times[seg+1] - times[seg]);
-        return (1.0 - t) * rates[seg] + t * rates[seg+1];
+        double t = (T - times[seg]) / (times[seg + 1] - times[seg]);
+        return (1.0 - t) * rates[seg] + t * rates[seg + 1];
     }
 
     // ── var: analytical adjoint (1 tape node) ──
     // Gradient: ∂Y/∂y_i = (1-t) if i==seg, t if i==seg+1, 0 otherwise
     var eval(double T, const std::vector<var>& rates) const {
         int seg = locate(T);
-        double t = (T - times[seg]) / (times[seg+1] - times[seg]);
-        double val = (1.0 - t) * rates[seg].val() + t * rates[seg+1].val();
+        double t = (T - times[seg]) / (times[seg + 1] - times[seg]);
+        double val = (1.0 - t) * rates[seg].val() + t * rates[seg + 1].val();
 
-        return stan::math::make_callback_var(
-            val,
-            [seg, t, &rates](auto& vi) {
-                double a = vi.adj();
-                rates[seg].adj()   += a * (1.0 - t);
-                rates[seg+1].adj() += a * t;
-            });
+        return stan::math::make_callback_var(val, [seg, t, &rates](auto& vi) {
+            double a = vi.adj();
+            rates[seg].adj() += a * (1.0 - t);
+            rates[seg + 1].adj() += a * t;
+        });
     }
 
     // ── fvar<var>: gradient as var operations ──
@@ -104,25 +102,26 @@ struct CurveInterp {
     // where the gradient depends on the knot values (and thus is non-trivial var).
     fvar<var> eval(double T, const std::vector<fvar<var>>& rates) const {
         int seg = locate(T);
-        double t = (T - times[seg]) / (times[seg+1] - times[seg]);
+        double t = (T - times[seg]) / (times[seg + 1] - times[seg]);
 
         // Value as var
-        var val = (1.0 - t) * rates[seg].val_ + t * rates[seg+1].val_;
+        var val = (1.0 - t) * rates[seg].val_ + t * rates[seg + 1].val_;
 
         // Gradient entries as var (for linear interp, these are constants;
         // for cubic spline, they'd involve var operations through the solve)
-        var grad_seg   = var(1.0 - t);  // ∂Y/∂y_seg
-        var grad_seg1  = var(t);        // ∂Y/∂y_{seg+1}
+        var grad_seg = var(1.0 - t); // ∂Y/∂y_seg
+        var grad_seg1 = var(t);      // ∂Y/∂y_{seg+1}
 
         // Tangent = Σ (∂Y/∂y_i) * dy_i
-        var tangent = grad_seg * rates[seg].d_ + grad_seg1 * rates[seg+1].d_;
+        var tangent = grad_seg * rates[seg].d_ + grad_seg1 * rates[seg + 1].d_;
 
         return fvar<var>(val, tangent);
     }
 
     int locate(double T) const {
         for (int i = 0; i < n - 1; ++i)
-            if (T <= times[i+1]) return i;
+            if (T <= times[i + 1])
+                return i;
         return n - 2;
     }
 };
@@ -147,17 +146,18 @@ struct CubicSplineInterp {
         int nm = n;
         vector<double> h(nm - 1);
         for (int i = 0; i < nm - 1; ++i)
-            h[i] = times[i+1] - times[i];
+            h[i] = times[i + 1] - times[i];
 
         // Natural spline: M[0] = M[n-1] = 0
         // Tridiagonal system for M[1..n-2]
         int m = nm - 2;
-        if (m <= 0) return vector<T>(nm, T(0.0));
+        if (m <= 0)
+            return vector<T>(nm, T(0.0));
 
         vector<T> rhs(m);
         for (int i = 0; i < m; ++i) {
-            T d_left  = (y[i+1] - y[i]) / h[i];
-            T d_right = (y[i+2] - y[i+1]) / h[i+1];
+            T d_left = (y[i + 1] - y[i]) / h[i];
+            T d_right = (y[i + 2] - y[i + 1]) / h[i + 1];
             rhs[i] = 6.0 * (d_right - d_left);
         }
 
@@ -167,35 +167,33 @@ struct CubicSplineInterp {
         diag[0] = 2.0 * (h[0] + h[1]);
         upper[0] = h[1];
         for (int i = 1; i < m; ++i) {
-            double ratio = h[i] / diag[i-1];
-            diag[i] = 2.0 * (h[i] + h[i+1]) - ratio * upper[i-1];
-            upper[i] = (i < m - 1) ? h[i+1] : 0.0;
-            rhs2[i] = rhs2[i] - ratio * rhs2[i-1];
+            double ratio = h[i] / diag[i - 1];
+            diag[i] = 2.0 * (h[i] + h[i + 1]) - ratio * upper[i - 1];
+            upper[i] = (i < m - 1) ? h[i + 1] : 0.0;
+            rhs2[i] = rhs2[i] - ratio * rhs2[i - 1];
         }
 
         vector<T> M(nm, T(0.0));
-        M[m] = rhs2[m-1] / diag[m-1];
+        M[m] = rhs2[m - 1] / diag[m - 1];
         for (int i = m - 2; i >= 0; --i)
-            M[i+1] = (rhs2[i] - upper[i] * M[i+2]) / diag[i];
+            M[i + 1] = (rhs2[i] - upper[i] * M[i + 2]) / diag[i];
 
         return M;
     }
 
     // Evaluate cubic spline at point T
     template <typename T>
-    T eval_impl(double Tval, const std::vector<T>& y,
-                const std::vector<T>& M) const {
+    T eval_impl(double Tval, const std::vector<T>& y, const std::vector<T>& M) const {
         int seg = locate(Tval);
-        double h = times[seg+1] - times[seg];
+        double h = times[seg + 1] - times[seg];
         double t = (Tval - times[seg]) / h;
         double omt = 1.0 - t;
 
         // Cubic spline formula:
         // S(x) = (1-t)*y[i] + t*y[i+1]
         //      + h²/6 * [(omt³ - omt)*M[i] + (t³ - t)*M[i+1]]
-        T val = omt * y[seg] + t * y[seg+1]
-              + (h*h/6.0) * ((omt*omt*omt - omt) * M[seg]
-                            + (t*t*t - t) * M[seg+1]);
+        T val = omt * y[seg] + t * y[seg + 1] +
+                (h * h / 6.0) * ((omt * omt * omt - omt) * M[seg] + (t * t * t - t) * M[seg + 1]);
         return val;
     }
 
@@ -225,7 +223,8 @@ struct CubicSplineInterp {
 
     int locate(double T) const {
         for (int i = 0; i < n - 1; ++i)
-            if (T <= times[i+1]) return i;
+            if (T <= times[i + 1])
+                return i;
         return n - 2;
     }
 };
@@ -241,7 +240,7 @@ struct CubicSplineInterp {
 namespace bs_layer {
 
 inline double phi(double x) {
-    return std::exp(-0.5*x*x) / std::sqrt(2.0*M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
 }
 inline double Phi(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);
@@ -250,86 +249,80 @@ inline double Phi(double x) {
 // ── double ──
 double price(double S, double sigma, double r, double K, double T) {
     double sqrtT = std::sqrt(T);
-    double d1 = (std::log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma*sqrtT);
-    double d2 = d1 - sigma*sqrtT;
-    return S * Phi(d1) - K * std::exp(-r*T) * Phi(d2);
+    double d1 = (std::log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+    double d2 = d1 - sigma * sqrtT;
+    return S * Phi(d1) - K * std::exp(-r * T) * Phi(d2);
 }
 
 // ── var: analytical adjoint (1 tape node) ──
 var price(var S, var sigma, var r, double K, double T) {
     double Sv = S.val(), sv = sigma.val(), rv = r.val();
     double sqrtT = std::sqrt(T);
-    double d1 = (std::log(Sv/K) + (rv + 0.5*sv*sv)*T) / (sv*sqrtT);
-    double d2 = d1 - sv*sqrtT;
+    double d1 = (std::log(Sv / K) + (rv + 0.5 * sv * sv) * T) / (sv * sqrtT);
+    double d2 = d1 - sv * sqrtT;
     double nd1 = phi(d1), Nd1 = Phi(d1), Nd2 = Phi(d2);
-    double disc = std::exp(-rv*T);
-    double val = Sv*Nd1 - K*disc*Nd2;
+    double disc = std::exp(-rv * T);
+    double val = Sv * Nd1 - K * disc * Nd2;
 
     double delta = Nd1;
-    double vega  = Sv * nd1 * sqrtT;
-    double rho   = K * T * disc * Nd2;
+    double vega = Sv * nd1 * sqrtT;
+    double rho = K * T * disc * Nd2;
 
-    return stan::math::make_callback_var(
-        val,
-        [S, sigma, r, delta, vega, rho](auto& vi) {
-            double a = vi.adj();
-            S.adj()     += a * delta;
-            sigma.adj() += a * vega;
-            r.adj()     += a * rho;
-        });
+    return stan::math::make_callback_var(val, [S, sigma, r, delta, vega, rho](auto& vi) {
+        double a = vi.adj();
+        S.adj() += a * delta;
+        sigma.adj() += a * vega;
+        r.adj() += a * rho;
+    });
 }
 
 // ── fvar<var>: nested analytical (Level 2) ──
 // Each Greek is a make_callback_var with second-order Greeks.
 // Total: 3 callbacks + 5 arithmetic = 8 var nodes per hessian column.
-fvar<var> price(fvar<var> S, fvar<var> sigma, fvar<var> r,
-                double K, double T) {
+fvar<var> price(fvar<var> S, fvar<var> sigma, fvar<var> r, double K, double T) {
     var Sv = S.val_, sv = sigma.val_, rv = r.val_;
-    var Sd = S.d_,   sd = sigma.d_,   rd = r.d_;
+    var Sd = S.d_, sd = sigma.d_, rd = r.d_;
 
     double S0 = Sv.val(), s0 = sv.val(), r0 = rv.val();
     double sqrtT = std::sqrt(T);
-    double d1 = (std::log(S0/K) + (r0 + 0.5*s0*s0)*T) / (s0*sqrtT);
-    double d2 = d1 - s0*sqrtT;
+    double d1 = (std::log(S0 / K) + (r0 + 0.5 * s0 * s0) * T) / (s0 * sqrtT);
+    double d2 = d1 - s0 * sqrtT;
     double nd1 = phi(d1), nd2 = phi(d2), Nd1 = Phi(d1), Nd2 = Phi(d2);
-    double disc = std::exp(-r0*T);
+    double disc = std::exp(-r0 * T);
 
-    double val   = S0*Nd1 - K*disc*Nd2;
+    double val = S0 * Nd1 - K * disc * Nd2;
     double delta = Nd1;
-    double vega  = S0 * nd1 * sqrtT;
+    double vega = S0 * nd1 * sqrtT;
     double rho_g = K * T * disc * Nd2;
 
     // Second-order Greeks
-    double gamma_    = nd1 / (S0 * s0 * sqrtT);
-    double vanna_    = -nd1 * d2 / s0;
+    double gamma_ = nd1 / (S0 * s0 * sqrtT);
+    double vanna_ = -nd1 * d2 / s0;
     double dDelta_dr = nd1 * sqrtT / s0;
-    double volga_    = S0 * sqrtT * nd1 * d1 * d2 / s0;
-    double dVega_dr  = -S0 * T * d1 * nd1 / s0;
-    double dRho_dr   = -K*T*T*disc*Nd2 + K*T*disc*nd2*sqrtT/s0;
+    double volga_ = S0 * sqrtT * nd1 * d1 * d2 / s0;
+    double dVega_dr = -S0 * T * d1 * nd1 / s0;
+    double dRho_dr = -K * T * T * disc * Nd2 + K * T * disc * nd2 * sqrtT / s0;
 
     var price_var(val);
 
-    var delta_var = stan::math::make_callback_var(
-        delta,
-        [Sv, sv, rv, gamma_, vanna_, dDelta_dr](auto& vi) {
+    var delta_var =
+        stan::math::make_callback_var(delta, [Sv, sv, rv, gamma_, vanna_, dDelta_dr](auto& vi) {
             double a = vi.adj();
             Sv.adj() += a * gamma_;
             sv.adj() += a * vanna_;
             rv.adj() += a * dDelta_dr;
         });
 
-    var vega_var = stan::math::make_callback_var(
-        vega,
-        [Sv, sv, rv, vanna_, volga_, dVega_dr](auto& vi) {
+    var vega_var =
+        stan::math::make_callback_var(vega, [Sv, sv, rv, vanna_, volga_, dVega_dr](auto& vi) {
             double a = vi.adj();
             Sv.adj() += a * vanna_;
             sv.adj() += a * volga_;
             rv.adj() += a * dVega_dr;
         });
 
-    var rho_var = stan::math::make_callback_var(
-        rho_g,
-        [Sv, sv, rv, dDelta_dr, dVega_dr, dRho_dr](auto& vi) {
+    var rho_var =
+        stan::math::make_callback_var(rho_g, [Sv, sv, rv, dDelta_dr, dVega_dr, dRho_dr](auto& vi) {
             double a = vi.adj();
             Sv.adj() += a * dDelta_dr;
             sv.adj() += a * dVega_dr;
@@ -353,14 +346,15 @@ fvar<var> price(fvar<var> S, fvar<var> sigma, fvar<var> r,
 template <typename InterpType>
 struct PricingChainFunctor {
     const InterpType& curve;
-    double eval_time;  // time to evaluate curve
+    double eval_time; // time to evaluate curve
     double vol, K, T;
 
     template <typename Scalar>
     Scalar operator()(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& rates_vec) const {
         int n = rates_vec.size();
         std::vector<Scalar> rates(n);
-        for (int i = 0; i < n; ++i) rates[i] = rates_vec(i);
+        for (int i = 0; i < n; ++i)
+            rates[i] = rates_vec(i);
 
         // Layer 1: curve interpolation
         Scalar fwd = curve.eval(eval_time, rates);
@@ -368,7 +362,7 @@ struct PricingChainFunctor {
         // Layer 2: BS price
         // vol is a constant here (not differentiated)
         Scalar vol_s(vol);
-        Scalar r_s = fwd;  // using curve rate as risk-free rate too (simplified)
+        Scalar r_s = fwd; // using curve rate as risk-free rate too (simplified)
         return bs_layer::price(fwd * 100.0, vol_s, r_s, K, T);
     }
 };
@@ -386,19 +380,19 @@ struct NaiveChainFunctor {
         int n = rates_vec.size();
         int seg = 0;
         for (int i = 0; i < n - 1; ++i)
-            if (eval_time <= curve.times[i+1]) { seg = i; break; }
-        double t = (eval_time - curve.times[seg])
-                 / (curve.times[seg+1] - curve.times[seg]);
-        Scalar fwd = (1.0 - t) * rates_vec(seg) + t * rates_vec(seg+1);
+            if (eval_time <= curve.times[i + 1]) {
+                seg = i;
+                break;
+            }
+        double t = (eval_time - curve.times[seg]) / (curve.times[seg + 1] - curve.times[seg]);
+        Scalar fwd = (1.0 - t) * rates_vec(seg) + t * rates_vec(seg + 1);
 
         Scalar S = fwd * 100.0;
         Scalar sigma(vol), r = fwd;
         Scalar sqrtT_ = stan::math::sqrt(Scalar(T));
-        Scalar d1 = (stan::math::log(S / K)
-                    + (r + sigma*sigma/2.0)*T) / (sigma*sqrtT_);
-        Scalar d2 = d1 - sigma*sqrtT_;
-        return S * stan::math::Phi(d1)
-               - K * stan::math::exp(-r*T) * stan::math::Phi(d2);
+        Scalar d1 = (stan::math::log(S / K) + (r + sigma * sigma / 2.0) * T) / (sigma * sqrtT_);
+        Scalar d2 = d1 - sigma * sqrtT_;
+        return S * stan::math::Phi(d1) - K * stan::math::exp(-r * T) * stan::math::Phi(d2);
     }
 };
 
@@ -408,9 +402,11 @@ struct NaiveChainFunctor {
 
 template <typename F>
 double bench_us(F&& fn, int N) {
-    for (int i = 0; i < std::min(N / 10, 1000); ++i) fn();
+    for (int i = 0; i < std::min(N / 10, 1000); ++i)
+        fn();
     auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < N; ++i) fn();
+    for (int i = 0; i < N; ++i)
+        fn();
     auto t1 = std::chrono::high_resolution_clock::now();
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
 }
@@ -418,7 +414,7 @@ double bench_us(F&& fn, int N) {
 int main() {
     std::cout << std::fixed;
     std::cout << "╔═══════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain      ║\n";
+    std::cout << "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain       ║\n";
     std::cout << "╚═══════════════════════════════════════════════════════════════╝\n\n";
 
     // Setup: 6-pillar yield curve
@@ -426,7 +422,7 @@ int main() {
     std::vector<double> pillar_times = {0.25, 0.5, 1.0, 2.0, 5.0, 10.0};
     std::vector<double> pillar_rates = {0.02, 0.025, 0.03, 0.035, 0.04, 0.045};
 
-    double eval_T = 1.5;  // evaluate at T=1.5 (between pillars 2 and 3)
+    double eval_T = 1.5; // evaluate at T=1.5 (between pillars 2 and 3)
     // Curve rate ~3.25% → S = rate*100 ≈ 3.25, so set K near ATM
     double vol = 0.30, K = 3.3, T_opt = 1.0;
 
@@ -435,13 +431,14 @@ int main() {
 
     CurveInterp linear_curve{pillar_times, N_PILLARS};
 
-    PricingChainFunctor<CurveInterp> linear_functor{
-        linear_curve, eval_T, vol, K, T_opt};
+    PricingChainFunctor<CurveInterp> linear_functor{linear_curve, eval_T, vol, K, T_opt};
 
     Eigen::VectorXd x(N_PILLARS);
-    for (int i = 0; i < N_PILLARS; ++i) x(i) = pillar_rates[i];
+    for (int i = 0; i < N_PILLARS; ++i)
+        x(i) = pillar_rates[i];
 
-    double fx; Eigen::VectorXd grad(N_PILLARS);
+    double fx;
+    Eigen::VectorXd grad(N_PILLARS);
     Eigen::MatrixXd H(N_PILLARS, N_PILLARS);
 
     stan::math::hessian(linear_functor, x, fx, grad, H);
@@ -457,8 +454,8 @@ int main() {
     for (int i = 0; i < N_PILLARS; ++i) {
         std::cout << "    [";
         for (int j = 0; j < N_PILLARS; ++j) {
-            if (std::abs(H(i,j)) > 1e-10)
-                std::cout << std::setw(10) << std::setprecision(2) << H(i,j);
+            if (std::abs(H(i, j)) > 1e-10)
+                std::cout << std::setw(10) << std::setprecision(2) << H(i, j);
             else
                 std::cout << std::setw(10) << ".";
         }
@@ -471,18 +468,23 @@ int main() {
     for (int i = 0; i < N_PILLARS; ++i) {
         for (int j = i; j < N_PILLARS; ++j) {
             Eigen::VectorXd xpp = x, xpm = x, xmp = x, xmm = x;
-            xpp(i) += eps; xpp(j) += eps;
-            xpm(i) += eps; xpm(j) -= eps;
-            xmp(i) -= eps; xmp(j) += eps;
-            xmm(i) -= eps; xmm(j) -= eps;
+            xpp(i) += eps;
+            xpp(j) += eps;
+            xpm(i) += eps;
+            xpm(j) -= eps;
+            xmp(i) -= eps;
+            xmp(j) += eps;
+            xmm(i) -= eps;
+            xmm(j) -= eps;
             auto f = [&](const Eigen::VectorXd& v) {
                 std::vector<double> r(N_PILLARS);
-                for (int k = 0; k < N_PILLARS; ++k) r[k] = v(k);
+                for (int k = 0; k < N_PILLARS; ++k)
+                    r[k] = v(k);
                 double fwd = linear_curve.eval(eval_T, r);
-                return bs_layer::price(fwd*100, vol, fwd, K, T_opt);
+                return bs_layer::price(fwd * 100, vol, fwd, K, T_opt);
             };
-            H_fd(i,j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4*eps*eps);
-            H_fd(j,i) = H_fd(i,j);
+            H_fd(i, j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * eps * eps);
+            H_fd(j, i) = H_fd(i, j);
         }
     }
     std::cout << "\n  Max |H_AD - H_fd|: " << std::scientific << std::setprecision(2)
@@ -493,10 +495,10 @@ int main() {
 
     CubicSplineInterp spline_curve{pillar_times, N_PILLARS};
 
-    PricingChainFunctor<CubicSplineInterp> spline_functor{
-        spline_curve, eval_T, vol, K, T_opt};
+    PricingChainFunctor<CubicSplineInterp> spline_functor{spline_curve, eval_T, vol, K, T_opt};
 
-    double fx2; Eigen::VectorXd grad2(N_PILLARS);
+    double fx2;
+    Eigen::VectorXd grad2(N_PILLARS);
     Eigen::MatrixXd H2(N_PILLARS, N_PILLARS);
 
     stan::math::hessian(spline_functor, x, fx2, grad2, H2);
@@ -511,7 +513,7 @@ int main() {
     for (int i = 0; i < N_PILLARS; ++i) {
         std::cout << "    [";
         for (int j = 0; j < N_PILLARS; ++j)
-            std::cout << std::setw(10) << std::setprecision(2) << H2(i,j);
+            std::cout << std::setw(10) << std::setprecision(2) << H2(i, j);
         std::cout << " ]\n";
     }
 
@@ -520,18 +522,23 @@ int main() {
     for (int i = 0; i < N_PILLARS; ++i) {
         for (int j = i; j < N_PILLARS; ++j) {
             Eigen::VectorXd xpp = x, xpm = x, xmp = x, xmm = x;
-            xpp(i) += eps; xpp(j) += eps;
-            xpm(i) += eps; xpm(j) -= eps;
-            xmp(i) -= eps; xmp(j) += eps;
-            xmm(i) -= eps; xmm(j) -= eps;
+            xpp(i) += eps;
+            xpp(j) += eps;
+            xpm(i) += eps;
+            xpm(j) -= eps;
+            xmp(i) -= eps;
+            xmp(j) += eps;
+            xmm(i) -= eps;
+            xmm(j) -= eps;
             auto f = [&](const Eigen::VectorXd& v) {
                 std::vector<double> r(N_PILLARS);
-                for (int k = 0; k < N_PILLARS; ++k) r[k] = v(k);
+                for (int k = 0; k < N_PILLARS; ++k)
+                    r[k] = v(k);
                 double fwd = spline_curve.eval(eval_T, r);
-                return bs_layer::price(fwd*100, vol, fwd, K, T_opt);
+                return bs_layer::price(fwd * 100, vol, fwd, K, T_opt);
             };
-            H2_fd(i,j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4*eps*eps);
-            H2_fd(j,i) = H2_fd(i,j);
+            H2_fd(i, j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * eps * eps);
+            H2_fd(j, i) = H2_fd(i, j);
         }
     }
     std::cout << "\n  Max |H_AD - H_fd|: " << std::scientific << std::setprecision(2)
@@ -541,37 +548,51 @@ int main() {
     std::cout << "\n── Performance ──\n\n";
     constexpr int BENCH_N = 50'000;
 
-    auto t_linear = bench_us([&]() {
-        double f_; Eigen::VectorXd g_(N_PILLARS); Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
-        stan::math::hessian(linear_functor, x, f_, g_, H_);
-    }, BENCH_N);
+    auto t_linear = bench_us(
+        [&]() {
+            double f_;
+            Eigen::VectorXd g_(N_PILLARS);
+            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            stan::math::hessian(linear_functor, x, f_, g_, H_);
+        },
+        BENCH_N);
 
-    auto t_spline = bench_us([&]() {
-        double f_; Eigen::VectorXd g_(N_PILLARS); Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
-        stan::math::hessian(spline_functor, x, f_, g_, H_);
-    }, BENCH_N);
+    auto t_spline = bench_us(
+        [&]() {
+            double f_;
+            Eigen::VectorXd g_(N_PILLARS);
+            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            stan::math::hessian(spline_functor, x, f_, g_, H_);
+        },
+        BENCH_N);
 
     // Compare: fully naive BS (no analytical derivatives at all)
     NaiveChainFunctor naive_functor{linear_curve, eval_T, vol, K, T_opt};
-    auto t_naive = bench_us([&]() {
-        double f_; Eigen::VectorXd g_(N_PILLARS); Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
-        stan::math::hessian(naive_functor, x, f_, g_, H_);
-    }, BENCH_N);
+    auto t_naive = bench_us(
+        [&]() {
+            double f_;
+            Eigen::VectorXd g_(N_PILLARS);
+            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            stan::math::hessian(naive_functor, x, f_, g_, H_);
+        },
+        BENCH_N);
 
     // Verify naive gives same answer
-    double fx_naive; Eigen::VectorXd g_naive(N_PILLARS); Eigen::MatrixXd H_naive(N_PILLARS, N_PILLARS);
+    double fx_naive;
+    Eigen::VectorXd g_naive(N_PILLARS);
+    Eigen::MatrixXd H_naive(N_PILLARS, N_PILLARS);
     stan::math::hessian(naive_functor, x, fx_naive, g_naive, H_naive);
     std::cout << "  Max |H_naive - H_mixed|: " << std::scientific << std::setprecision(2)
               << (H_naive - H).cwiseAbs().maxCoeff() << std::fixed << "\n\n";
 
-    std::cout << "  " << std::setw(35) << std::left << "Approach" << std::right
-              << std::setw(10) << "us/call" << std::setw(12) << "vs Naive\n";
+    std::cout << "  " << std::setw(35) << std::left << "Approach" << std::right << std::setw(10)
+              << "us/call" << std::setw(12) << "vs Naive\n";
     std::cout << "  " << std::string(57, '-') << "\n";
 
     auto row = [&](const char* name, double t) {
-        std::cout << "  " << std::setw(35) << std::left << name << std::right
-                  << std::setw(10) << std::setprecision(3) << t
-                  << std::setw(10) << std::setprecision(2) << t_naive / t << "x\n";
+        std::cout << "  " << std::setw(35) << std::left << name << std::right << std::setw(10)
+                  << std::setprecision(3) << t << std::setw(10) << std::setprecision(2)
+                  << t_naive / t << "x\n";
     };
 
     row("Naive (all fvar<var>)", t_naive);
@@ -587,8 +608,8 @@ int main() {
     std::cout << "                         gradient-as-var for 2nd order\n";
     std::cout << "  Level 2 (full analyt): make_callback_var at both levels\n\n";
     std::cout << "  ┌─────────────┐   ┌──────────────┐   ┌─────────┐\n";
-    std::cout << "  │ Rate Pillars│──▶│ Curve Interp  │──▶│   BS    │──▶ PV\n";
-    std::cout << "  │   (input)   │   │ Level 0/1     │   │ Level 2 │\n";
+    std::cout << "  │ Rate Pillars│──▶│ Curve Interp │──▶│   BS    │──▶ PV\n";
+    std::cout << "  │   (input)   │   │ Level 0/1    │   │ Level 2 │\n";
     std::cout << "  └─────────────┘   └──────────────┘   └─────────┘\n";
     std::cout << "       θ               g(θ)              f(g(θ))\n\n";
     std::cout << "  H_total = J_g^T · H_f · J_g  +  Σ_a (∂f/∂g_a) · H_g_a\n";

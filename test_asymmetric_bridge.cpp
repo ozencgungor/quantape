@@ -6,13 +6,13 @@
  * E.g., t0=0, t1=0.25, tk=7/365.25 (1 week into 3 months)
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+#include <random>
+#include <vector>
 
 struct CIRParams {
     double kappa;
@@ -25,15 +25,19 @@ std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
-double uniform_random() { return uniform_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
+double uniform_random() {
+    return uniform_dist(rng);
+}
 
 double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double exp_kt = std::exp(-params.kappa * dt);
     double m = params.theta + (r_t - params.theta) * exp_kt;
-    double s2 = r_t * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_t * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
@@ -51,19 +55,21 @@ double sampleCIR_Andersen(double r_t, double dt, const CIRParams& params) {
 }
 
 double evaluateDensity_Andersen(double r_start, double r_end, double dt, const CIRParams& params) {
-    if (dt < 1e-10) return 0.0; // Avoid numerical issues
+    if (dt < 1e-10)
+        return 0.0; // Avoid numerical issues
 
     double exp_kt = std::exp(-params.kappa * dt);
     double c = params.sigma * params.sigma / (4.0 * params.kappa);
     double m = params.theta + (r_start - params.theta) * exp_kt;
-    double s2 = r_start * c * exp_kt * (1.0 - exp_kt) +
-                params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
+    double s2 =
+        r_start * c * exp_kt * (1.0 - exp_kt) + params.theta * c * (1.0 - exp_kt) * (1.0 - exp_kt);
     double psi = s2 / (m * m);
 
     if (psi <= 1.5) {
         double b2 = 2.0 / psi - 1.0 + std::sqrt(2.0 / psi) * std::sqrt(2.0 / psi - 1.0);
         double a = m / (1.0 + b2);
-        if (r_end <= 0.0) return 0.0;
+        if (r_end <= 0.0)
+            return 0.0;
         double sqrt_r = std::sqrt(r_end);
         double sqrt_a = std::sqrt(a);
         double b = std::sqrt(b2);
@@ -97,7 +103,8 @@ double sampleCIRBridge_Exact(double r1, double r2, double t1, double tk, double 
     for (int attempt = 0; attempt < 100000; attempt++) {
         double y = sampleCIR_Andersen(r1, dt1, params);
         double accept_prob = evaluateDensity_Andersen(y, r2, dt2, params) / M;
-        if (uniform_random() < accept_prob) return y;
+        if (uniform_random() < accept_prob)
+            return y;
     }
     return sampleCIR_Andersen(r1, dt1, params);
 }
@@ -108,8 +115,10 @@ double bridge_AdaptiveVariance(double r1, double r2, double t1, double tk, doubl
     double dt2 = t2 - tk;
     double dt_total = t2 - t1;
 
-    if (dt1 < 1e-8) return r1;
-    if (dt2 < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if (dt2 < 1e-8)
+        return r2;
 
     double alpha = dt1 / dt_total;
 
@@ -132,11 +141,12 @@ double bridge_AdaptiveVariance(double r1, double r2, double t1, double tk, doubl
     // Maximum constraint at middle (alpha=0.5)
 
     // Variance reduction is maximum at midpoint, minimum at endpoints
-    double asymmetry_factor = 4.0 * alpha * (1.0 - alpha);  // Quadratic, peaks at 0.5
-    double base_reduction = 0.6;  // Maximum reduction at midpoint
-    double endpoint_reduction = 0.95;  // Almost no reduction at endpoints
+    double asymmetry_factor = 4.0 * alpha * (1.0 - alpha); // Quadratic, peaks at 0.5
+    double base_reduction = 0.6;                           // Maximum reduction at midpoint
+    double endpoint_reduction = 0.95;                      // Almost no reduction at endpoints
 
-    double variance_factor = endpoint_reduction + (base_reduction - endpoint_reduction) * asymmetry_factor;
+    double variance_factor =
+        endpoint_reduction + (base_reduction - endpoint_reduction) * asymmetry_factor;
 
     modified.sigma = params.sigma * std::sqrt(variance_factor);
 
@@ -148,8 +158,10 @@ double bridge_SimpleVariance(double r1, double r2, double t1, double tk, double 
     double dt1 = tk - t1;
     double dt_total = t2 - t1;
 
-    if (dt1 < 1e-8) return r1;
-    if ((t2 - tk) < 1e-8) return r2;
+    if (dt1 < 1e-8)
+        return r1;
+    if ((t2 - tk) < 1e-8)
+        return r2;
 
     double exp_k1 = std::exp(-params.kappa * dt1);
     double exp_k2 = std::exp(-params.kappa * (t2 - tk));
@@ -176,27 +188,27 @@ void testAsymmetricBridge() {
     double r0 = 0.03;
     double r1 = 0.05;
     double t0 = 0.0;
-    double t1 = 0.25;  // 3 months
+    double t1 = 0.25; // 3 months
 
     std::vector<double> insertion_times = {
-        7.0/365.25,      // 1 week (very close to t0)
-        14.0/365.25,     // 2 weeks
-        30.0/365.25,     // 1 month
-        60.0/365.25,     // 2 months
-        0.125,           // Middle point
-        0.20,            // Close to t1
-        0.24             // Very close to t1
+        7.0 / 365.25,  // 1 week (very close to t0)
+        14.0 / 365.25, // 2 weeks
+        30.0 / 365.25, // 1 month
+        60.0 / 365.25, // 2 months
+        0.125,         // Middle point
+        0.20,          // Close to t1
+        0.24           // Very close to t1
     };
 
     const int N_SAMPLES = 50000;
 
-    std::cout << "Scenario: r(t0=" << t0 << ") = " << r0
-              << ", r(t1=" << t1 << ") = " << r1 << "\n\n";
+    std::cout << "Scenario: r(t0=" << t0 << ") = " << r0 << ", r(t1=" << t1 << ") = " << r1
+              << "\n\n";
 
     std::cout << std::fixed << std::setprecision(6);
 
     for (double tk : insertion_times) {
-        double alpha = tk / t1;  // Position in interval
+        double alpha = tk / t1; // Position in interval
         double dt1 = tk - t0;
         double dt2 = t1 - tk;
 
@@ -208,7 +220,7 @@ void testAsymmetricBridge() {
         std::cout << "\n";
         std::cout << "Position: " << alpha * 100 << "% through interval\n";
         std::cout << "dt1 = " << dt1 << ", dt2 = " << dt2 << "\n";
-        std::cout << "Asymmetry ratio: dt1/dt2 = " << dt1/dt2 << "\n\n";
+        std::cout << "Asymmetry ratio: dt1/dt2 = " << dt1 / dt2 << "\n\n";
 
         // Generate samples
         std::vector<double> samples_exact;
@@ -238,7 +250,8 @@ void testAsymmetricBridge() {
         auto compute_stats = [](const std::vector<double>& data) {
             double mean = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
             double variance = 0.0;
-            for (double x : data) variance += (x - mean) * (x - mean);
+            for (double x : data)
+                variance += (x - mean) * (x - mean);
             variance /= data.size();
             return std::make_pair(mean, variance);
         };
@@ -254,17 +267,17 @@ void testAsymmetricBridge() {
                   << std::setw(10) << var_exact << "  " << std::setw(10) << 0.0 << "%  "
                   << std::setw(10) << 0.0 << "%\n";
         std::cout << "Simple (factor=0.6):      " << std::setw(10) << mean_simple << "  "
-                  << std::setw(10) << var_simple << "  "
-                  << std::setw(10) << (mean_simple - mean_exact)/mean_exact*100 << "%  "
-                  << std::setw(10) << (var_simple - var_exact)/var_exact*100 << "%\n";
+                  << std::setw(10) << var_simple << "  " << std::setw(10)
+                  << (mean_simple - mean_exact) / mean_exact * 100 << "%  " << std::setw(10)
+                  << (var_simple - var_exact) / var_exact * 100 << "%\n";
         std::cout << "Adaptive variance:        " << std::setw(10) << mean_adaptive << "  "
-                  << std::setw(10) << var_adaptive << "  "
-                  << std::setw(10) << (mean_adaptive - mean_exact)/mean_exact*100 << "%  "
-                  << std::setw(10) << (var_adaptive - var_exact)/var_exact*100 << "%\n";
+                  << std::setw(10) << var_adaptive << "  " << std::setw(10)
+                  << (mean_adaptive - mean_exact) / mean_exact * 100 << "%  " << std::setw(10)
+                  << (var_adaptive - var_exact) / var_exact * 100 << "%\n";
         std::cout << "Unconditional:            " << std::setw(10) << mean_uncond << "  "
-                  << std::setw(10) << var_uncond << "  "
-                  << std::setw(10) << (mean_uncond - mean_exact)/mean_exact*100 << "%  "
-                  << std::setw(10) << (var_uncond - var_exact)/var_exact*100 << "%\n";
+                  << std::setw(10) << var_uncond << "  " << std::setw(10)
+                  << (mean_uncond - mean_exact) / mean_exact * 100 << "%  " << std::setw(10)
+                  << (var_uncond - var_exact) / var_exact * 100 << "%\n";
 
         // Compute actual variance reduction
         double variance_reduction_exact = 1.0 - (var_exact / var_uncond);

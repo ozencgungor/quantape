@@ -12,23 +12,24 @@
  * bivariate Gaussian. This means the bridge is EXACT!
  */
 
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <random>
-#include <cmath>
-#include <array>
 #include <Eigen/Dense>
 
-using Eigen::Vector2d;
+#include <array>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <random>
+#include <vector>
+
 using Eigen::Matrix2d;
+using Eigen::Vector2d;
 
 struct G2PPParams {
-    double a;      // Mean reversion speed for x
-    double b;      // Mean reversion speed for y
-    double sigma;  // Volatility of x
-    double eta;    // Volatility of y
-    double rho;    // Correlation between W₁ and W₂
+    double a;     // Mean reversion speed for x
+    double b;     // Mean reversion speed for y
+    double sigma; // Volatility of x
+    double eta;   // Volatility of y
+    double rho;   // Correlation between W₁ and W₂
 
     G2PPParams(double a_, double b_, double sig_, double eta_, double rho_)
         : a(a_), b(b_), sigma(sig_), eta(eta_), rho(rho_) {}
@@ -37,7 +38,9 @@ struct G2PPParams {
 std::mt19937_64 rng(42);
 std::normal_distribution<double> normal_dist(0.0, 1.0);
 
-double randn() { return normal_dist(rng); }
+double randn() {
+    return normal_dist(rng);
+}
 
 // Sample correlated normals with correlation rho
 std::pair<double, double> sampleCorrelatedNormals(double rho) {
@@ -80,7 +83,7 @@ OUMoments getOUMoments(double x0, double dt, double a, double sigma) {
  * This is because: x(t2) = x(tk)*exp(-a*(t2-tk)) + noise
  */
 double getOUCovariance(double x0, double tk, double t2, double a, double sigma) {
-    double dt1 = tk;  // Assuming t1 = 0 for simplicity
+    double dt1 = tk; // Assuming t1 = 0 for simplicity
     auto moments_tk = getOUMoments(x0, dt1, a, sigma);
 
     double dt2 = t2 - tk;
@@ -93,7 +96,7 @@ double getOUCovariance(double x0, double tk, double t2, double a, double sigma) 
  * Joint conditional moments for the 2-factor system
  */
 struct JointMoments {
-    Vector2d mean;      // [E[x], E[y]]
+    Vector2d mean;       // [E[x], E[y]]
     Matrix2d covariance; // [[Var(x), Cov(x,y)], [Cov(x,y), Var(y)]]
 };
 
@@ -129,7 +132,7 @@ JointMoments getJointMoments(const Vector2d& state0, double dt, const G2PPParams
  * Cross-covariance matrix between state(tk) and state(t2) given state(t1)
  */
 Matrix2d getJointCrossCovariance(const Vector2d& state1, double dt1, double dt2,
-                                  const G2PPParams& params) {
+                                 const G2PPParams& params) {
     // This is Cov[(x(tk), y(tk)), (x(t2), y(t2)) | (x(t1), y(t1))]
 
     Matrix2d cross_cov;
@@ -140,12 +143,12 @@ Matrix2d getJointCrossCovariance(const Vector2d& state1, double dt1, double dt2,
     double exp_a = std::exp(-params.a * dt2);
     double exp_b = std::exp(-params.b * dt2);
 
-    cross_cov(0, 0) = moments_tk.covariance(0, 0) * exp_a;  // Cov[x(tk), x(t2)]
-    cross_cov(1, 1) = moments_tk.covariance(1, 1) * exp_b;  // Cov[y(tk), y(t2)]
+    cross_cov(0, 0) = moments_tk.covariance(0, 0) * exp_a; // Cov[x(tk), x(t2)]
+    cross_cov(1, 1) = moments_tk.covariance(1, 1) * exp_b; // Cov[y(tk), y(t2)]
 
     // Cross terms: Cov[x(tk), y(t2)] and Cov[y(tk), x(t2)]
-    cross_cov(0, 1) = moments_tk.covariance(0, 1) * exp_b;  // Cov[x(tk), y(t2)]
-    cross_cov(1, 0) = moments_tk.covariance(0, 1) * exp_a;  // Cov[y(tk), x(t2)]
+    cross_cov(0, 1) = moments_tk.covariance(0, 1) * exp_b; // Cov[x(tk), y(t2)]
+    cross_cov(1, 0) = moments_tk.covariance(0, 1) * exp_a; // Cov[y(tk), x(t2)]
 
     return cross_cov;
 }
@@ -183,20 +186,21 @@ Vector2d sampleG2PP_Unconditional(const Vector2d& state, double dt, const G2PPPa
  *
  * where K = Cov[state(tk), state(t2) | state(t1)] * Var[state(t2) | state(t1)]^{-1}
  */
-Vector2d sampleG2PP_Bridge_Exact(const Vector2d& state1, const Vector2d& state2,
-                                  double t1, double tk, double t2,
-                                  const G2PPParams& params) {
+Vector2d sampleG2PP_Bridge_Exact(const Vector2d& state1, const Vector2d& state2, double t1,
+                                 double tk, double t2, const G2PPParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
     double dt_total = t2 - t1;
 
     // Handle edge cases
-    if (dt1 < 1e-10) return state1;
-    if (dt2 < 1e-10) return state2;
+    if (dt1 < 1e-10)
+        return state1;
+    if (dt2 < 1e-10)
+        return state2;
 
     // Step 1: Compute unconditional moments
-    auto moments_tk = getJointMoments(state1, dt1, params);          // p(state(tk) | state(t1))
-    auto moments_t2 = getJointMoments(state1, dt_total, params);     // p(state(t2) | state(t1))
+    auto moments_tk = getJointMoments(state1, dt1, params);      // p(state(tk) | state(t1))
+    auto moments_t2 = getJointMoments(state1, dt_total, params); // p(state(t2) | state(t1))
 
     // Step 2: Compute cross-covariance
     Matrix2d cross_cov = getJointCrossCovariance(state1, dt1, dt2, params);
@@ -228,9 +232,8 @@ Vector2d sampleG2PP_Bridge_Exact(const Vector2d& state1, const Vector2d& state2,
 /**
  * Compute theoretical bridge moments using analytical formulas
  */
-JointMoments getTheoreticalBridgeMoments(const Vector2d& state1, const Vector2d& state2,
-                                          double t1, double tk, double t2,
-                                          const G2PPParams& params) {
+JointMoments getTheoreticalBridgeMoments(const Vector2d& state1, const Vector2d& state2, double t1,
+                                         double tk, double t2, const G2PPParams& params) {
     double dt1 = tk - t1;
     double dt2 = t2 - tk;
     double dt_total = t2 - t1;
@@ -278,8 +281,10 @@ void testG2PPBridge() {
         double t2 = 1.0;
 
         std::cout << "Scenario:\n";
-        std::cout << "  (x(t1), y(t1)) = (" << state1[0] << ", " << state1[1] << ") at t1 = " << t1 << "\n";
-        std::cout << "  (x(t2), y(t2)) = (" << state2[0] << ", " << state2[1] << ") at t2 = " << t2 << "\n";
+        std::cout << "  (x(t1), y(t1)) = (" << state1[0] << ", " << state1[1] << ") at t1 = " << t1
+                  << "\n";
+        std::cout << "  (x(t2), y(t2)) = (" << state2[0] << ", " << state2[1] << ") at t2 = " << t2
+                  << "\n";
         std::cout << "  Inserting at tk = " << tk << "\n\n";
 
         // Theoretical moments
@@ -317,7 +322,8 @@ void testG2PPBridge() {
         std::cout << "  x: " << emp_mean[0]
                   << " (error: " << (emp_mean[0] - theory.mean[0]) / theory.mean[0] * 100 << "%)\n";
         std::cout << "  y: " << emp_mean[1]
-                  << " (error: " << (emp_mean[1] - theory.mean[1]) / theory.mean[1] * 100 << "%)\n\n";
+                  << " (error: " << (emp_mean[1] - theory.mean[1]) / theory.mean[1] * 100
+                  << "%)\n\n";
 
         std::cout << "Theoretical Bridge Covariance:\n";
         std::cout << "  Var(x):     " << theory.covariance(0, 0) << "\n";
@@ -325,12 +331,15 @@ void testG2PPBridge() {
         std::cout << "  Cov(x, y):  " << theory.covariance(0, 1) << "\n\n";
 
         std::cout << "Empirical Bridge Covariance:\n";
-        std::cout << "  Var(x):     " << emp_cov(0, 0)
-                  << " (error: " << (emp_cov(0, 0) - theory.covariance(0, 0)) / theory.covariance(0, 0) * 100 << "%)\n";
-        std::cout << "  Var(y):     " << emp_cov(1, 1)
-                  << " (error: " << (emp_cov(1, 1) - theory.covariance(1, 1)) / theory.covariance(1, 1) * 100 << "%)\n";
-        std::cout << "  Cov(x, y):  " << emp_cov(0, 1)
-                  << " (error: " << (emp_cov(0, 1) - theory.covariance(0, 1)) / theory.covariance(0, 1) * 100 << "%)\n\n";
+        std::cout << "  Var(x):     " << emp_cov(0, 0) << " (error: "
+                  << (emp_cov(0, 0) - theory.covariance(0, 0)) / theory.covariance(0, 0) * 100
+                  << "%)\n";
+        std::cout << "  Var(y):     " << emp_cov(1, 1) << " (error: "
+                  << (emp_cov(1, 1) - theory.covariance(1, 1)) / theory.covariance(1, 1) * 100
+                  << "%)\n";
+        std::cout << "  Cov(x, y):  " << emp_cov(0, 1) << " (error: "
+                  << (emp_cov(0, 1) - theory.covariance(0, 1)) / theory.covariance(0, 1) * 100
+                  << "%)\n\n";
     }
 
     // Test 2: Asymmetric bridge
@@ -339,12 +348,14 @@ void testG2PPBridge() {
         Vector2d state1(0.02, -0.01);
         Vector2d state2(0.015, 0.005);
         double t1 = 0.0;
-        double tk = 7.0 / 365.25;  // 1 week
-        double t2 = 0.25;           // 3 months
+        double tk = 7.0 / 365.25; // 1 week
+        double t2 = 0.25;         // 3 months
 
         std::cout << "Scenario:\n";
-        std::cout << "  (x(t1), y(t1)) = (" << state1[0] << ", " << state1[1] << ") at t1 = " << t1 << "\n";
-        std::cout << "  (x(t2), y(t2)) = (" << state2[0] << ", " << state2[1] << ") at t2 = " << t2 << "\n";
+        std::cout << "  (x(t1), y(t1)) = (" << state1[0] << ", " << state1[1] << ") at t1 = " << t1
+                  << "\n";
+        std::cout << "  (x(t2), y(t2)) = (" << state2[0] << ", " << state2[1] << ") at t2 = " << t2
+                  << "\n";
         std::cout << "  Inserting at tk = " << tk << " (" << tk * 365.25 << " days)\n\n";
 
         auto theory = getTheoreticalBridgeMoments(state1, state2, t1, tk, t2, params);
@@ -375,9 +386,15 @@ void testG2PPBridge() {
         std::cout << "  y: " << (emp_mean[1] - theory.mean[1]) / theory.mean[1] * 100 << "%\n\n";
 
         std::cout << "Covariance errors:\n";
-        std::cout << "  Var(x):     " << (emp_cov(0, 0) - theory.covariance(0, 0)) / theory.covariance(0, 0) * 100 << "%\n";
-        std::cout << "  Var(y):     " << (emp_cov(1, 1) - theory.covariance(1, 1)) / theory.covariance(1, 1) * 100 << "%\n";
-        std::cout << "  Cov(x, y):  " << (emp_cov(0, 1) - theory.covariance(0, 1)) / theory.covariance(0, 1) * 100 << "%\n\n";
+        std::cout << "  Var(x):     "
+                  << (emp_cov(0, 0) - theory.covariance(0, 0)) / theory.covariance(0, 0) * 100
+                  << "%\n";
+        std::cout << "  Var(y):     "
+                  << (emp_cov(1, 1) - theory.covariance(1, 1)) / theory.covariance(1, 1) * 100
+                  << "%\n";
+        std::cout << "  Cov(x, y):  "
+                  << (emp_cov(0, 1) - theory.covariance(0, 1)) / theory.covariance(0, 1) * 100
+                  << "%\n\n";
     }
 
     // Test 3: Compare with unconditional

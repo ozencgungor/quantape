@@ -4,20 +4,21 @@
  */
 
 #include "Math/ZigguratNormal.h"
-#include <iostream>
-#include <iomanip>
+
+#include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <random>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
-#include <algorithm>
+#include <random>
 #include <vector>
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-template<typename F>
+template <typename F>
 double timeNs(F&& fn, int reps = 1'000'000) {
     // Warmup
     volatile double sink = 0;
@@ -58,8 +59,7 @@ void testTableGeneration() {
 
     std::cout << "  Verification:\n";
     std::cout << "    max area rel error = " << v.max_area_error << "\n";
-    std::cout << "    closure error      = " << v.closure_error
-              << "  (|y[N] - 1|)\n";
+    std::cout << "    closure error      = " << v.closure_error << "  (|y[N] - 1|)\n";
     std::cout << "    max f(x) error     = " << v.max_f_error << "\n";
     std::cout << "    max f^{-1} error   = " << v.max_finv_error << "\n";
     std::cout << "    monotone x?        = " << (v.monotone_x ? "YES" : "NO") << "\n";
@@ -126,20 +126,17 @@ void testStatistics() {
 
     double mean = sum1 / N;
     double var = sum2 / N - mean * mean;
-    double skew = (sum3 / N - 3.0 * mean * sum2 / N + 2.0 * mean * mean * mean)
-                  / std::pow(var, 1.5);
-    double kurt = (sum4 / N - 4.0 * mean * sum3 / N + 6.0 * mean * mean * sum2 / N
-                   - 3.0 * mean * mean * mean * mean) / (var * var);
+    double skew =
+        (sum3 / N - 3.0 * mean * sum2 / N + 2.0 * mean * mean * mean) / std::pow(var, 1.5);
+    double kurt = (sum4 / N - 4.0 * mean * sum3 / N + 6.0 * mean * mean * sum2 / N -
+                   3.0 * mean * mean * mean * mean) /
+                  (var * var);
 
     std::cout << std::setprecision(8);
-    std::cout << "  Mean       = " << std::setw(14) << mean
-              << "   (expected: 0)\n";
-    std::cout << "  Variance   = " << std::setw(14) << var
-              << "   (expected: 1)\n";
-    std::cout << "  Skewness   = " << std::setw(14) << skew
-              << "   (expected: 0)\n";
-    std::cout << "  Kurtosis   = " << std::setw(14) << kurt
-              << "   (expected: 3)\n\n";
+    std::cout << "  Mean       = " << std::setw(14) << mean << "   (expected: 0)\n";
+    std::cout << "  Variance   = " << std::setw(14) << var << "   (expected: 1)\n";
+    std::cout << "  Skewness   = " << std::setw(14) << skew << "   (expected: 0)\n";
+    std::cout << "  Kurtosis   = " << std::setw(14) << kurt << "   (expected: 3)\n\n";
 
     // Standard errors (for N=10M)
     double se_mean = 1.0 / std::sqrt(N);
@@ -149,9 +146,9 @@ void testStatistics() {
 
     auto check = [](const char* name, double val, double expected, double se) {
         double z = std::abs(val - expected) / se;
-        bool pass = z < 4.0;  // 4-sigma tolerance
-        std::cout << "  " << name << ": z = " << std::setprecision(2)
-                  << z << " sigma  " << (pass ? "PASS" : "** FAIL **") << "\n";
+        bool pass = z < 4.0; // 4-sigma tolerance
+        std::cout << "  " << name << ": z = " << std::setprecision(2) << z << " sigma  "
+                  << (pass ? "PASS" : "** FAIL **") << "\n";
         return pass;
     };
 
@@ -161,7 +158,8 @@ void testStatistics() {
     ok &= check("Skewness", skew, 0.0, se_skew);
     ok &= check("Kurtosis", kurt, 3.0, se_kurt);
 
-    if (ok) std::cout << "\n  All statistical tests PASSED\n";
+    if (ok)
+        std::cout << "\n  All statistical tests PASSED\n";
     std::cout << "\n";
 }
 
@@ -184,7 +182,8 @@ void testTails() {
     for (long i = 0; i < N; ++i) {
         double x = std::abs(zig());
         for (int j = 0; j < 5; ++j) {
-            if (x > thresholds[j]) counts[j]++;
+            if (x > thresholds[j])
+                counts[j]++;
         }
     }
 
@@ -196,9 +195,8 @@ void testTails() {
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
         std::cout << "  " << std::setw(5) << thresholds[j] << " sigma"
-                  << "  " << std::setw(10) << observed_frac
-                  << "   " << std::setw(10) << expected_frac
-                  << "   " << std::setw(8) << ratio << "\n";
+                  << "  " << std::setw(10) << observed_frac << "   " << std::setw(10)
+                  << expected_frac << "   " << std::setw(8) << ratio << "\n";
     }
     std::cout << "\n";
 }

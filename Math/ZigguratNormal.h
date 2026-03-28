@@ -42,14 +42,14 @@ struct ZigguratTables {
     double x[N];
     // y[0] = f(r), y[1]..y[N-2] from recurrence, y[N-1] close to 1
     double y[N];
-    double A;             // v = common layer area
-    double r;             // tail cutoff
+    double A; // v = common layer area
+    double r; // tail cutoff
 
     // Precomputed for fast sampling (Marsaglia convention):
     //   Layer 0: wtab[0] = (v/y[0]) / 2^63,  ktab[0] = r·y[0]/v · 2^63
     //   Layer i: wtab[i] = x[i-1] / 2^63,    ktab[i] = x[i]/x[i-1] · 2^63
     uint64_t ktab[N];
-    double   wtab[N];
+    double wtab[N];
 };
 
 /// Compute ziggurat tables via bisection on the closure condition.
@@ -64,7 +64,7 @@ inline ZigguratTables generateZigguratTables() {
     ZigguratTables tab{};
     constexpr int N = ZigguratTables::N;
 
-    auto f  = [](double x) { return std::exp(-0.5 * x * x); };
+    auto f = [](double x) { return std::exp(-0.5 * x * x); };
 
     auto finv = [](double y) -> double {
         if (y >= 0.9)
@@ -94,7 +94,8 @@ inline ZigguratTables generateZigguratTables() {
         double xi = r;
         for (int i = 0; i < N - 2; ++i) {
             yi += v / xi;
-            if (yi >= 1.0) return 1.0;
+            if (yi >= 1.0)
+                return 1.0;
             xi = finv(yi);
         }
         return yi + v / xi - 1.0;
@@ -126,7 +127,8 @@ inline ZigguratTables generateZigguratTables() {
 
     for (int i = 1; i <= N - 2; ++i) {
         double yi = tab.y[i - 1] + v / tab.x[i - 1];
-        if (yi > 1.0) yi = 1.0;
+        if (yi > 1.0)
+            yi = 1.0;
         tab.y[i] = yi;
         tab.x[i] = finv(yi);
     }
@@ -135,7 +137,8 @@ inline ZigguratTables generateZigguratTables() {
     tab.x[N - 1] = 0.0;
     // y[N-1]: compute from closure (should be ≈ 1 - v/x[N-2])
     tab.y[N - 1] = tab.y[N - 2] + v / tab.x[N - 2];
-    if (tab.y[N - 1] > 1.0) tab.y[N - 1] = 1.0;
+    if (tab.y[N - 1] > 1.0)
+        tab.y[N - 1] = 1.0;
 
     // ── Step 3: Compute fast-path tables (Marsaglia convention) ──
     //
@@ -180,12 +183,12 @@ inline ZigguratTables generateZigguratTables() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct ZigguratVerification {
-    double max_area_error;        // max |area[i] - A| / A
-    double closure_error;         // |top_area - A| / A
-    double max_f_error;           // max |y[i] - exp(-x[i]²/2)|
-    double max_finv_error;        // max |x[i] - sqrt(-2*log(y[i]))|
-    bool   monotone_x;           // x[0] > x[1] > ... > x[N-1]
-    bool   monotone_y;           // y[0] < y[1] < ... < y[N-1]
+    double max_area_error; // max |area[i] - A| / A
+    double closure_error;  // |top_area - A| / A
+    double max_f_error;    // max |y[i] - exp(-x[i]²/2)|
+    double max_finv_error; // max |x[i] - sqrt(-2*log(y[i]))|
+    bool monotone_x;       // x[0] > x[1] > ... > x[N-1]
+    bool monotone_y;       // y[0] < y[1] < ... < y[N-1]
 };
 
 inline ZigguratVerification verifyZigguratTables(const ZigguratTables& tab) {
@@ -198,8 +201,7 @@ inline ZigguratVerification verifyZigguratTables(const ZigguratTables& tab) {
     const double A = tab.A;
 
     // Check base layer area: x[0]*y[0] + tail = v
-    double base_area = tab.x[0] * tab.y[0]
-                     + sqrt_pi_over_2 * std::erfc(tab.x[0] * M_SQRT1_2);
+    double base_area = tab.x[0] * tab.y[0] + sqrt_pi_over_2 * std::erfc(tab.x[0] * M_SQRT1_2);
     vr.max_area_error = std::abs(base_area - A) / A;
 
     // Check interior layers: layer i has rectangle [0,x[i-1]] × [y[i-1],y[i]]
@@ -218,23 +220,24 @@ inline ZigguratVerification verifyZigguratTables(const ZigguratTables& tab) {
     // f consistency and inverse consistency
     vr.max_f_error = 0;
     vr.max_finv_error = 0;
-    for (int i = 0; i < N - 1; ++i) {  // skip sentinel x[N-1]=0
+    for (int i = 0; i < N - 1; ++i) { // skip sentinel x[N-1]=0
         double f_xi = std::exp(-0.5 * tab.x[i] * tab.x[i]);
         vr.max_f_error = std::max(vr.max_f_error, std::abs(tab.y[i] - f_xi));
 
         if (tab.y[i] > 0 && tab.y[i] < 1) {
             double x_from_y = std::sqrt(-2.0 * std::log(tab.y[i]));
-            vr.max_finv_error = std::max(vr.max_finv_error,
-                                         std::abs(tab.x[i] - x_from_y));
+            vr.max_finv_error = std::max(vr.max_finv_error, std::abs(tab.x[i] - x_from_y));
         }
     }
 
     // Monotonicity (only for x[0]..x[N-2], since x[N-1]=0 is sentinel)
     for (int i = 0; i < N - 2; ++i) {
-        if (tab.x[i] <= tab.x[i + 1]) vr.monotone_x = false;
+        if (tab.x[i] <= tab.x[i + 1])
+            vr.monotone_x = false;
     }
     for (int i = 0; i < N - 2; ++i) {
-        if (tab.y[i] >= tab.y[i + 1]) vr.monotone_y = false;
+        if (tab.y[i] >= tab.y[i + 1])
+            vr.monotone_y = false;
     }
 
     return vr;
@@ -265,20 +268,19 @@ struct Xoshiro256ss {
     }
 
     uint64_t operator()() {
-        auto rotl = [](uint64_t x, int k) -> uint64_t {
-            return (x << k) | (x >> (64 - k));
-        };
+        auto rotl = [](uint64_t x, int k) -> uint64_t { return (x << k) | (x >> (64 - k)); };
         const uint64_t result = rotl(s[1] * 5, 7) * 9;
         const uint64_t t = s[1] << 17;
-        s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3];
+        s[2] ^= s[0];
+        s[3] ^= s[1];
+        s[1] ^= s[2];
+        s[0] ^= s[3];
         s[2] ^= t;
         s[3] = rotl(s[3], 45);
         return result;
     }
 
-    double uniform01() {
-        return static_cast<double>((*this)() >> 11) * 0x1.0p-53;
-    }
+    double uniform01() { return static_cast<double>((*this)() >> 11) * 0x1.0p-53; }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -287,8 +289,7 @@ struct Xoshiro256ss {
 
 class ZigguratNormal {
 public:
-    explicit ZigguratNormal(uint64_t seed = 42)
-        : tab_(generateZigguratTables()), rng_(seed) {}
+    explicit ZigguratNormal(uint64_t seed = 42) : tab_(generateZigguratTables()), rng_(seed) {}
 
     /// Generate one standard normal variate
     double operator()() {
@@ -311,7 +312,7 @@ public:
                 // If |x| >= r: sample from exponential tail beyond r.
                 double abs_x = std::abs(x);
                 if (abs_x < tab_.r)
-                    return x;  // under the curve in base rectangle
+                    return x; // under the curve in base rectangle
                 double tail_x = sampleTail();
                 return (s < 0) ? -tail_x : tail_x;
             }
@@ -324,7 +325,7 @@ public:
             if (i < ZigguratTables::N - 1)
                 y_hi = tab_.y[i];
             else
-                y_hi = 1.0;  // top layer
+                y_hi = 1.0; // top layer
             double y_test = y_lo + rng_.uniform01() * (y_hi - y_lo);
             if (y_test < std::exp(-0.5 * abs_x * abs_x))
                 return x;

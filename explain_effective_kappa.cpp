@@ -6,9 +6,9 @@
  * level r is NOT constant - it depends on where r is relative to θ.
  */
 
-#include <iostream>
-#include <iomanip>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 
 void explainEffectiveKappa() {
     std::cout << "=== Understanding Effective Kappa ===\n\n";
@@ -25,14 +25,15 @@ void explainEffectiveKappa() {
     // Analyze different r values
     std::cout << std::fixed << std::setprecision(6);
     std::cout << "r         θ-r       Drift κ(θ-r)  Diffusion σ√r  Drift/r      Rel. Strength\n";
-    std::cout << "--------------------------------------------------------------------------------\n";
+    std::cout
+        << "--------------------------------------------------------------------------------\n";
 
     std::vector<double> r_values = {0.01, 0.02, 0.04, 0.08, 0.12, 0.16, 0.20};
 
     for (double r : r_values) {
         double drift_abs = kappa * (theta - r);  // Absolute drift
         double diffusion = sigma * std::sqrt(r); // Diffusion coefficient
-        double drift_relative = drift_abs / r;    // Drift relative to current level
+        double drift_relative = drift_abs / r;   // Drift relative to current level
 
         // Signal-to-noise ratio: drift / diffusion
         double snr = (diffusion > 1e-8) ? std::abs(drift_abs) / diffusion : 0.0;
@@ -50,12 +51,9 @@ void explainEffectiveKappa() {
             strength = "Strong downward pull";
         }
 
-        std::cout << std::setw(8) << r << "  "
-                  << std::setw(8) << (theta - r) << "  "
-                  << std::setw(12) << drift_abs << "  "
-                  << std::setw(14) << diffusion << "  "
-                  << std::setw(12) << drift_relative << "  "
-                  << strength << "\n";
+        std::cout << std::setw(8) << r << "  " << std::setw(8) << (theta - r) << "  "
+                  << std::setw(12) << drift_abs << "  " << std::setw(14) << diffusion << "  "
+                  << std::setw(12) << drift_relative << "  " << strength << "\n";
     }
 
     std::cout << "\n\nKey Observations:\n\n";
