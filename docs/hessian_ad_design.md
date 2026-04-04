@@ -144,6 +144,10 @@ PricerA<double>::priceTrade(sd)
 
 ### 2.3 Data Flow — Hessian (fvar\<var\>)
 
+The pricer and `ScenarioData<double>` already exist and have been stepped to the current (path, timestep). The Hessian functor references the live pricer to capture its accumulated state via `rebind<T>()`, and uses the live ScenarioData's node mappings to construct a fresh `ScenarioData<T>`.
+
+**Important**: `ScenarioData` has deleted copy constructors — we never copy a ScenarioData. The AD-typed `ScenarioData<T>` is constructed from scratch using the node mappings (structural metadata) from the live `ScenarioData<double>`.
+
 ```
 sd.packMarketData()                        → Eigen::VectorXd x  (snapshot from generators)
     ↓
@@ -151,11 +155,16 @@ stan::math::hessian(functor, x, ...)       [internally, for each column i:]
     ↓ constructs fvar<var> vector from x, seeding tangent in direction e_i
     ↓ calls functor(x_fvar_var)
         ↓
-        ScenarioData<fvar<var>> sd_ad;
+        ScenarioData<fvar<var>> sd_ad(node_mappings);  // new, from mappings (NOT copied)
         sd_ad.loadFromVector(x_fvar_var);
             ↓ builds EQDVol<fvar<var>>, EQDSpot<fvar<var>>, IRCurve<fvar<var>>
             ↓ from the fvar<var> vector elements (these are the AD leaves)
-        PricerA<fvar<var>>::priceTrade(sd_ad)
+        pricer.rebind<fvar<var>>()
+            ↓ creates PricerA<fvar<var>> with state copied from live PricerA<double>
+            ↓ accumulated DoubleT state (e.g., running averages) → value_of → T constant
+            ↓ plain state (bools, ints, doubles) → copied directly
+        pricer_ad.loadScenarioData(sd_ad)
+        pricer_ad.priceTrade(sd_ad)
             ↓ calls sd_ad.getEQDVol("AAPL").vol(T, K) → fvar<var>
             ↓ calls sd_ad.getEQDSpot("AAPL").forward(T) → fvar<var>
             ↓ calls sd_ad.getIRCurve("USD").discountFactor(T) → fvar<var>
@@ -198,20 +207,36 @@ The pricer code is identical in both flows. The only difference is the type `Dou
          │    → return to pricer                  │
          └───────────────────────────────────────┘
 
-         ┌───────────────────────────────────────┐
-         │  ScenarioData<fvar<var>> (for Hessian) │
-         │  (temporary, created inside functor)   │
-         │                                        │
-         │  m_loadedFromVector = true              │
-         │  m_generators: [] (empty, not used)     │
-         │                                         │
-         │  m_eqdVols: {"AAPL" → EQDVol<fvar<var>>}│
-         │  m_eqdSpots: {"AAPL" → EQDSpot<fvar<var>>}│
-         │  m_irCurves: {"USD" → IRCurve<fvar<var>>}│
-         │                                         │
-         │  getEQDVol("AAPL"):                     │
-         │    return m_eqdVols.at("AAPL")          │
-         └─────────────────────────────────────────┘
+         ┌─────────────────────────────────────────────┐
+         │  ScenarioData<fvar<var>> (for Hessian)       │
+         │  (temporary, created inside functor from     │
+         │   node_mappings — NOT copied from sd<double>)│
+         │                                              │
+         │  Copy ctor: DELETED                          │
+         │  Constructed via: ScenarioData<T>(mappings)  │
+         │  m_loadedFromVector = true                   │
+         │  m_generators: [] (empty, not used)          │
+         │                                              │
+         │  m_eqdVols: {"AAPL" → EQDVol<fvar<var>>}    │
+         │  m_eqdSpots: {"AAPL" → EQDSpot<fvar<var>>}  │
+         │  m_irCurves: {"USD" → IRCurve<fvar<var>>}    │
+         │                                              │
+         │  getEQDVol("AAPL"):                          │
+         │    return m_eqdVols.at("AAPL")               │
+         └──────────────────────────────────────────────┘
+
+         ┌──────────────────────────────────────────────┐
+         │  PricerA<fvar<var>> (for Hessian)             │
+         │  (created via pricer_double.rebind<T>())      │
+         │                                               │
+         │  Config: copied as-is (pure doubles/enums)    │
+         │  DoubleT state: value_of → promoted to T      │
+         │    e.g., running_avg: double 103.5 → T(103.5) │
+         │    (constant on AD tape, zero tangent)         │
+         │  Plain state: copied directly                  │
+         │    e.g., barrier_breached: false                │
+         │    e.g., fixing_count: 5                       │
+         └───────────────────────────────────────────────┘
 ```
 
 ---
@@ -560,112 +585,178 @@ class ScenarioData {
 
 ## 4. The Hessian Functor
 
-### 4.1 Implementation
+### 4.1 Design Principle
+
+The pricer and `ScenarioData<double>` are instantiated **outside** the functor, in the normal pricing loop. By the time the Hessian is computed at a given (path, timestep), the pricer already holds whatever accumulated state it needs (barrier flags, running averages, exercise history). The functor's job is narrow:
+
+1. Build a `ScenarioData<T>` from the AD vector (using node mappings, **not** copying the live ScenarioData — copy constructors are deleted)
+2. Create a `Pricer<T>` via `rebind<T>()` from the live `Pricer<double>`, which copies all accumulated state
+3. Call `loadScenarioData` + `priceTrade` on the AD-typed objects
+
+The functor does **not** own the pricer or the ScenarioData. It holds references to them.
+
+### 4.2 Implementation
 
 ```cpp
-template<template<typename> class PricerType, typename TradeConfig>
+template<template<typename> class PricerType>
 struct HessianFunctor {
-    // Blueprint: carries the structural information (which descriptors, layouts)
-    // Does NOT carry generator pointers — those are not needed in the AD path.
-    std::vector<NodeMapping> node_mappings;
-    TradeConfig config;
+    // References to live objects — the functor does not own these.
+    const PricerType<double>& live_pricer;
+    const std::vector<NodeMapping>& node_mappings;  // from sd.nodeMappings()
 
     template<typename T>
     T operator()(const Eigen::Matrix<T, Eigen::Dynamic, 1>& x) const {
-        // 1. Create a ScenarioData<T> with the same descriptor structure
-        ScenarioData<T> sd(node_mappings);
+        // 1. Construct ScenarioData<T> from node mappings (NOT copied from sd<double>)
+        ScenarioData<T> sd_ad(node_mappings);
 
-        // 2. Populate ADTemplates from the AD vector
-        sd.loadFromVector(x);
+        // 2. Populate ADTemplates from the AD vector — these are the AD leaves
+        sd_ad.loadFromVector(x);
 
-        // 3. Create pricer with the trade configuration and price
-        PricerType<T> pricer(config);
-        pricer.loadScenarioDataForTrade(sd);
-        return pricer.priceTrade(sd);
+        // 3. Rebind pricer: creates PricerType<T> with accumulated state from live pricer
+        //    - Config (strings, doubles, enums): copied as-is
+        //    - Plain state (bools, ints): copied as-is
+        //    - DoubleT state (running sums, cached values): value_of → T(constant)
+        auto pricer_ad = live_pricer.template rebind<T>();
+
+        // 4. Load market data and price — identical to the normal pricing path
+        pricer_ad.loadScenarioData(sd_ad);
+        return pricer_ad.priceTrade(sd_ad);
     }
 };
 
-// Factory: captures the structural info from the live ScenarioData<double>
-template<template<typename> class PricerType, typename TradeConfig>
-auto makeHessianFunctor(const ScenarioData<double>& sd,
-                         const TradeConfig& config) {
-    return HessianFunctor<PricerType, TradeConfig>{
-        sd.nodeMappings(),
-        config
-    };
+// Factory: captures references to the live pricer and ScenarioData structure
+template<template<typename> class PricerType>
+HessianFunctor<PricerType> makeHessianFunctor(
+    const PricerType<double>& pricer,
+    const ScenarioData<double>& sd)
+{
+    return HessianFunctor<PricerType>{pricer, sd.nodeMappings()};
 }
 ```
 
-### 4.2 Why This Works — Step by Step
+### 4.3 Why This Works — Step by Step
 
 1. **`stan::math::hessian`** calls `functor(x)` with `T = fvar<var>`.
-2. The functor creates `ScenarioData<fvar<var>>` with the same descriptor structure as the original `ScenarioData<double>` (same tickers, same grid sizes, same ordering).
-3. `loadFromVector` builds `EQDVol<fvar<var>>`, `IRCurve<fvar<var>>`, etc. from the AD vector. The vol surface entries, spot prices, and curve node values are `fvar<var>` — these are the AD leaves that will be differentiated.
-4. The pricer is instantiated as `PricerA<fvar<var>>`. This compiles because the pricer is a template that uses only standard arithmetic on `DoubleT`, and Stan Math overloads all standard math functions for `fvar<var>`.
-5. Inside the pricer, every call to `sd.getEQDVol("AAPL").vol(T, K)` returns `fvar<var>`. Every `+`, `*`, `exp`, `log`, `Phi`, interpolation lookup — all operate on `fvar<var>`.
+2. The functor constructs `ScenarioData<fvar<var>>` from node mappings — same descriptor structure as the live `ScenarioData<double>` (same tickers, same grid sizes, same ordering). **No copy** of the live ScenarioData occurs.
+3. `loadFromVector` builds `EQDVol<fvar<var>>`, `IRCurve<fvar<var>>`, etc. from the AD vector. The vol surface entries, spot prices, and curve node values are `fvar<var>` — these are the AD leaves.
+4. `rebind<fvar<var>>()` creates a `PricerA<fvar<var>>` carrying the live pricer's accumulated state. Any `DoubleT`-typed state (e.g., `running_avg`) is extracted via `stan::math::value_of` and promoted to a `fvar<var>` constant — on the tape but with zero tangent, so it does not contribute to derivatives.
+5. `loadScenarioData` and `priceTrade` run exactly as in the normal pricing path, but with `fvar<var>` arithmetic.
 6. The pricer returns `fvar<var>`, which `stan::math::hessian` unpacks into the price, gradient, and one Hessian column.
 7. Steps 1–6 repeat $N$ times (once per market data node), each time with a different forward-mode seed direction.
 
-### 4.3 The TradeConfig Requirement
+### 4.4 The `rebind<T>()` Requirement
 
-The functor must reconstruct the pricer inside `operator()` with a potentially different `DoubleT`. This requires separating pricer configuration from market data:
+Each pricer must provide a method to create a differently-typed copy of itself. This is the **only new requirement** on pricers for Hessian support.
 
 ```cpp
-// Trade configuration — everything the pricer needs that is NOT market data.
-// Pure data. No DoubleT. No pointers to generators or AD templates.
-struct EquityOptionConfig {
-    std::string underlying;    // "AAPL"
-    double strike;             // 100.0 — fixed, not differentiated
-    double maturity;           // 1.0 — fixed, not differentiated
-    std::string pay_currency;  // "USD"
-    OptionType type;           // Call or Put
-};
-
-struct EquitySwapConfig {
-    std::string underlying;
-    std::vector<double> fixing_dates;
-    std::vector<double> payment_dates;
-    double notional;
-    std::string pay_currency;
-};
-
-struct StructuredNoteConfig {
-    std::vector<LegConfig> legs;   // each leg has its own config
-    std::string pay_currency;
-    // barriers, knockouts, coupons, etc. — all as plain doubles or enums
-};
-
-// Pricer takes config in constructor, market data from ScenarioData
 template<typename DoubleT>
-class EquityOptionPricer : public PricerBase<DoubleT> {
-    EquityOptionConfig m_config;
-
+class PricerBase {
 public:
-    explicit EquityOptionPricer(const EquityOptionConfig& config)
-        : m_config(config) {}
+    virtual DoubleT priceTrade(ScenarioData<DoubleT>& sd) = 0;
+    virtual void loadScenarioData(ScenarioData<DoubleT>& sd) = 0;
 
-    void loadScenarioDataForTrade(ScenarioData<DoubleT>& sd) override {
-        sd.addEQDVol(m_config.underlying);
-        sd.addEQDSpot(m_config.underlying);
-        sd.addIRCurve(m_config.pay_currency);
-    }
-
-    DoubleT priceTrade(ScenarioData<DoubleT>& sd) override {
-        auto vol = sd.getEQDVol(m_config.underlying);
-        auto spot = sd.getEQDSpot(m_config.underlying);
-        auto curve = sd.getIRCurve(m_config.pay_currency);
-
-        DoubleT S = spot.forward(m_config.maturity);
-        DoubleT sigma = vol.vol(m_config.maturity, m_config.strike);
-        DoubleT df = curve.discountFactor(m_config.maturity);
-        // ... BS formula or tree or MC in DoubleT ...
-    }
+    // New: create a PricerType<T> carrying this pricer's accumulated state.
+    // Default implementation works for stateless pricers.
+    template<typename T>
+    PricerBase<T> rebind() const;  // see below for how this is implemented
 };
 ```
 
-**Critical point**: The strike, maturity, fixing dates, etc. are `double` — they are contractual terms, not market data. They are not differentiated. Only the values read from ScenarioData (spot, vol, rates) are `DoubleT` and flow through the AD tape.
+**Why not a virtual method?** `rebind<T>()` is a template — it cannot be virtual. Instead, each concrete pricer provides a converting constructor:
 
-### 4.4 What if the Pricer Creates Helpers?
+```cpp
+template<typename DoubleT>
+class AsianPricer : public PricerBase<DoubleT> {
+    // Config (plain data — never DoubleT)
+    std::string m_underlying;
+    std::vector<double> m_fixing_dates;
+    double m_strike;
+
+    // Accumulated state — may include DoubleT members
+    DoubleT m_running_sum = DoubleT(0.0);
+    int m_fixing_count = 0;
+    DoubleT m_max_spot = DoubleT(0.0);       // for lookback-asian hybrids
+    bool m_knocked_in = false;
+
+public:
+    // Normal constructor
+    AsianPricer(const std::string& underlying,
+                const std::vector<double>& fixing_dates,
+                double strike)
+        : m_underlying(underlying), m_fixing_dates(fixing_dates), m_strike(strike) {}
+
+    // Converting constructor — creates AsianPricer<T> from AsianPricer<OtherT>
+    template<typename OtherT>
+    explicit AsianPricer(const AsianPricer<OtherT>& other)
+        : m_underlying(other.underlying())
+        , m_fixing_dates(other.fixingDates())
+        , m_strike(other.strike())
+        // DoubleT state: extract double via value_of, promote to T as constant
+        , m_running_sum(DoubleT(stan::math::value_of(other.runningSum())))
+        , m_fixing_count(other.fixingCount())
+        , m_max_spot(DoubleT(stan::math::value_of(other.maxSpot())))
+        , m_knocked_in(other.knockedIn())
+    {}
+
+    // rebind: convenience wrapper around the converting constructor
+    template<typename T>
+    AsianPricer<T> rebind() const {
+        return AsianPricer<T>(*this);
+    }
+
+    // ... priceTrade, loadScenarioData as before ...
+};
+```
+
+**What `stan::math::value_of` does**: Extracts the plain `double` from any AD type:
+- `value_of(double d)` → `d`
+- `value_of(var v)` → `v.val()` (the double)
+- `value_of(fvar<var> fv)` → `value_of(fv.val())` → double
+
+The extracted double, when promoted to `T(double_value)`, becomes a **constant** on the AD tape — it has zero tangent and will not produce adjoint contributions. This is exactly right: past fixings are realized history, not current market data.
+
+#### 4.4.1 State Categories in `rebind`
+
+| State type | Example | How to copy |
+|------------|---------|-------------|
+| Config (plain doubles, strings, enums) | strike, dates, currency | Copy directly |
+| Counter/flag state (int, bool) | fixing_count, barrier_breached | Copy directly |
+| `DoubleT` state (accumulated values) | running_sum, max_spot | `value_of` → `T(constant)` |
+| Cached market data (`DoubleT`) | m_currentSpot, m_currentVol | **Skip** — `loadScenarioData` will overwrite these from `sd_ad` |
+
+The last category is important: if a pricer caches market data from `loadScenarioData` into member variables, those caches will be overwritten when `loadScenarioData(sd_ad)` is called with the AD-typed ScenarioData. So they don't need special handling in `rebind`.
+
+#### 4.4.2 Stateless Pricers — Zero Effort
+
+For stateless pricers (the majority — vanilla options, swaps, swaptions), `rebind` is trivial because there's no accumulated state:
+
+```cpp
+template<typename DoubleT>
+class EquityOptionPricer : public PricerBase<DoubleT> {
+    std::string m_underlying;
+    double m_strike, m_maturity;
+    OptionType m_type;
+
+public:
+    // Converting constructor — just copies config
+    template<typename OtherT>
+    explicit EquityOptionPricer(const EquityOptionPricer<OtherT>& other)
+        : m_underlying(other.underlying())
+        , m_strike(other.strike())
+        , m_maturity(other.maturity())
+        , m_type(other.type())
+    {}
+
+    template<typename T>
+    EquityOptionPricer<T> rebind() const { return EquityOptionPricer<T>(*this); }
+
+    // ...
+};
+```
+
+For these pricers, `rebind` is mechanical — a CRTP base or macro could generate it. But since each pricer already knows its own members, a simple converting constructor is the most explicit and debuggable approach.
+
+### 4.5 What if the Pricer Creates Helpers?
 
 Many pricers delegate to helper functions or objects. These must also be templated:
 
@@ -700,6 +791,16 @@ struct BlackScholesCalculator {
 
 As long as these helpers use `DoubleT` consistently, they compile with `fvar<var>` automatically.
 
+### 4.6 Path-Dependent State: What the Hessian Measures
+
+When the Hessian is computed at timestep $t$ on path $m$, the pricer has already accumulated state from timesteps $0, \ldots, t-1$. The `rebind` copies this state as constants. The Hessian therefore measures:
+
+$$H_{ij} = \frac{\partial^2}{\partial m_i \partial m_j} \text{Price}(\text{market data at } t \mid \text{path history } 0..t\!-\!1)$$
+
+This is the economically meaningful quantity: *"given what has already happened on this path, how does the price respond to perturbations in today's market data?"* Past fixings, barrier events, and exercise decisions are sunk — they are not market data you have sensitivity to.
+
+If you need sensitivity to a past fixing (e.g., for a reset-in-advance swap), that fixing's value should be part of the current ScenarioData's packed vector, not accumulated pricer state.
+
 ---
 
 ## 5. Call Site Integration
@@ -716,27 +817,24 @@ sd.addEQDSpot("AAPL", spot_gen);
 sd.addIRCurve("USD", curve_gen);
 sd.buildSensitivityRegistry();       // builds name list and node mappings
 
-EquityOptionConfig config{"AAPL", 100.0, 1.0, "USD", OptionType::Call};
+EquityOptionPricer<double> pricer("AAPL", 100.0, 1.0, "USD", OptionType::Call);
 
 // ═══════════════════════════════════════════════════════════════
-// In the MC loop
+// In the MC loop (pricer and sd already exist, pricer has accumulated state)
 // ═══════════════════════════════════════════════════════════════
 sd.setScenarioTimepoint(path, timepoint);
-
-// Normal pricing (fast, double only, reads from generators)
-EquityOptionPricer<double> pricer(config);
-pricer.loadScenarioDataForTrade(sd);
+pricer.loadScenarioData(sd);
 double pv = pricer.priceTrade(sd);
 
 // ═══════════════════════════════════════════════════════════════
-// Hessian computation at this path/timepoint
+// Hessian computation at this (path, timepoint)
 // ═══════════════════════════════════════════════════════════════
 
 // Step 1: Snapshot current market data from generators to flat vector
 Eigen::VectorXd x = sd.packMarketData();
 
-// Step 2: Build functor (captures descriptor structure + trade config)
-auto functor = makeHessianFunctor<EquityOptionPricer>(sd, config);
+// Step 2: Build functor (references the live pricer + sd's node mappings)
+auto functor = makeHessianFunctor<EquityOptionPricer>(pricer, sd);
 
 // Step 3: Compute
 double fx;
@@ -763,7 +861,7 @@ When only first-order sensitivities are needed, use `stan::math::gradient` inste
 // Same functor works for both gradient and hessian.
 // gradient() instantiates with T = var.
 // hessian() instantiates with T = fvar<var>.
-auto functor = makeHessianFunctor<EquityOptionPricer>(sd, config);
+auto functor = makeHessianFunctor<EquityOptionPricer>(pricer, sd);
 Eigen::VectorXd x = sd.packMarketData();
 
 double fx;
@@ -784,17 +882,17 @@ struct SensitivityResult {
     Eigen::MatrixXd hessian;             // N×N second-order (empty if FIRST)
 };
 
-template<template<typename> class PricerType, typename TradeConfig>
+template<template<typename> class PricerType>
 SensitivityResult calculateSensitivities(
+    const PricerType<double>& pricer,
     ScenarioData<double>& sd,
-    const TradeConfig& config,
     SensitivityOrder order = SensitivityOrder::FIRST)
 {
     SensitivityResult result;
     result.names = sd.sensitivityNames();
 
     Eigen::VectorXd x = sd.packMarketData();
-    auto functor = makeHessianFunctor<PricerType>(sd, config);
+    auto functor = makeHessianFunctor<PricerType>(pricer, sd);
 
     if (order == SensitivityOrder::FIRST) {
         stan::math::gradient(functor, x, result.price, result.gradient);
@@ -809,31 +907,47 @@ SensitivityResult calculateSensitivities(
 
 ### 5.4 Integration with the MC Loop
 
+The pricer and ScenarioData are instantiated once before the double loop. The pricer accumulates state across timesteps naturally. The Hessian functor is built fresh at each (path, timestep) where sensitivities are needed, referencing the live pricer at that point.
+
 ```cpp
+// Setup (once per trade)
+ScenarioData<double> sd;
+// ... add generators ...
+sd.buildSensitivityRegistry();
+
+EquityOptionPricer<double> pricer("AAPL", 100.0, 1.0, "USD", OptionType::Call);
+
 for (int path = 0; path < N_paths; ++path) {
+    // Reset pricer state at start of each path (if path-dependent)
+    pricer.resetPathState();
+
     for (int tp = 0; tp < N_timepoints; ++tp) {
         sd.setScenarioTimepoint(path, tp);
+        pricer.loadScenarioData(sd);
 
         // Always: price (fast, double only)
+        // Pricer updates its internal state (barriers, fixings, etc.)
         double pv = pricer.priceTrade(sd);
         accumulate_exposure(path, tp, pv);
 
         // Conditionally: first-order Greeks
         if (need_greeks(path, tp)) {
             auto sens = calculateSensitivities<EquityOptionPricer>(
-                sd, config, SensitivityOrder::FIRST);
+                pricer, sd, SensitivityOrder::FIRST);
             accumulate_greeks(path, tp, sens);
         }
 
         // Rarely: full Hessian (e.g., t=0 only, or for PnL explain)
         if (need_hessian(path, tp)) {
             auto sens = calculateSensitivities<EquityOptionPricer>(
-                sd, config, SensitivityOrder::SECOND);
+                pricer, sd, SensitivityOrder::SECOND);
             accumulate_hessian(path, tp, sens);
         }
     }
 }
 ```
+
+**Note on ordering**: The Hessian call uses `rebind` to create a separate `Pricer<fvar<var>>` — it does **not** mutate the live `Pricer<double>`. The live pricer's state is unaffected by the Hessian computation, so the normal pricing loop continues correctly.
 
 ---
 
@@ -1156,13 +1270,315 @@ void parallel_hessian(const F& f, const Eigen::VectorXd& x,
 
 ---
 
-## 8. AD-Safe Math Functions
+## 8. Analytical Primitives for Hot-Path Functions
+
+For frequently called functions whose analytical derivatives are known (Black-Scholes, interpolations, SABR approximation), we can register them as Stan Math primitives with hand-coded partials. This short-circuits the AD tape: instead of recording every intermediate operation, Stan records a **single node** with pre-supplied adjoints.
+
+**No design changes required.** The pricer calls `bs_call(F, K, sigma, df, T)` as before — the compiler dispatches to the right overload based on `DoubleT`. The functor, `rebind`, `packMarketData`, `loadFromVector` — all unchanged.
+
+### 8.1 Mechanism: How Stan Math Primitives Work
+
+#### 8.1.1 First Order — `var` overload via `precomputed_gradients`
+
+For a function $f(x_1, \ldots, x_n)$ where we know $\partial f / \partial x_i$ analytically, `precomputed_gradients` registers a single `var` node whose adjoints are the supplied partials:
+
+```cpp
+inline stan::math::var bs_call(const stan::math::var& F,
+                                const stan::math::var& K,
+                                const stan::math::var& sigma,
+                                const stan::math::var& df,
+                                double T) {
+    // Extract doubles
+    double f = F.val(), k = K.val(), s = sigma.val(), d = df.val();
+    double sqrtT = std::sqrt(T);
+    double d1 = (std::log(f / k) + 0.5 * s * s * T) / (s * sqrtT);
+    double d2 = d1 - s * sqrtT;
+    double Nd1 = 0.5 * std::erfc(-d1 * M_SQRT1_2);
+    double Nd2 = 0.5 * std::erfc(-d2 * M_SQRT1_2);
+    double nd1 = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
+
+    // Value
+    double price = d * (f * Nd1 - k * Nd2);
+
+    // Analytical first-order partials
+    double dP_dF     = d * Nd1;                  // delta
+    double dP_dK     = -d * Nd2;                 // dual delta
+    double dP_dsigma = d * f * nd1 * sqrtT;      // vega
+    double dP_ddf    = f * Nd1 - k * Nd2;        // undiscounted price
+
+    return stan::math::precomputed_gradients(
+        price,
+        {F, K, sigma, df},
+        {dP_dF, dP_dK, dP_dsigma, dP_ddf}
+    );
+}
+```
+
+**Tape cost**: 1 node (the `precomputed_gradients` node) vs ~30 nodes for the full formula. Reverse pass reads 4 pre-stored doubles instead of backpropagating through `log`, `erfc`, `exp`, `sqrt`, etc.
+
+This overload is selected when the pricer runs with `DoubleT = var` (i.e., `stan::math::gradient` calls).
+
+#### 8.1.2 Second Order — `fvar<var>` overload
+
+For `stan::math::hessian`, the inputs are `fvar<var>`. The strategy: compute value and first-order partials as **`var` expressions** (not doubles), then assemble the `fvar<var>` return using the chain rule. Reverse mode differentiates through the partials to get second derivatives.
+
+```cpp
+inline stan::math::fvar<stan::math::var> bs_call(
+    const stan::math::fvar<stan::math::var>& F,
+    const stan::math::fvar<stan::math::var>& K,
+    const stan::math::fvar<stan::math::var>& sigma,
+    const stan::math::fvar<stan::math::var>& df,
+    double T)
+{
+    using stan::math::var;
+    using stan::math::fvar;
+
+    // Extract var components — these go on the reverse tape
+    var f = F.val(), k = K.val(), s = sigma.val(), d = df.val();
+
+    // Compute intermediates in var arithmetic (small tape)
+    var sqrtT_v(std::sqrt(T));
+    var d1 = (log(f / k) + 0.5 * s * s * T) / (s * sqrtT_v);
+    var d2 = d1 - s * sqrtT_v;
+    var Nd1 = stan::math::Phi(d1);
+    var Nd2 = stan::math::Phi(d2);
+    var nd1 = exp(-0.5 * d1 * d1) / sqrt(2.0 * M_PI);
+
+    // Value (var)
+    var price = d * (f * Nd1 - k * Nd2);
+
+    // Partials as var — each is a small expression (~2-3 tape nodes)
+    var dP_dF     = d * Nd1;
+    var dP_dK     = -d * Nd2;
+    var dP_dsigma = d * f * nd1 * sqrtT_v;
+    var dP_ddf    = f * Nd1 - k * Nd2;
+
+    // Forward tangent via chain rule: df/dx_i * dx_i/dt (where t is the seed direction)
+    var tangent = dP_dF * F.d_ + dP_dK * K.d_
+                + dP_dsigma * sigma.d_ + dP_ddf * df.d_;
+
+    return fvar<var>(price, tangent);
+}
+```
+
+When `hessian()` calls `grad()` on `tangent`, it differentiates through `Nd1`, `nd1`, `d1`, etc. — these are simple `var` expressions, so the second-order tape is small.
+
+**Why this gives correct second derivatives**: The `tangent` is $\sum_i (\partial f / \partial x_i) \cdot \dot{x}_i$, where each partial is a `var` that depends on the inputs. Reverse-mode differentiating `tangent` w.r.t. all inputs gives $\sum_i (\partial^2 f / \partial x_j \partial x_i) \cdot \dot{x}_i$ — exactly column $j$ of the Hessian times the seed direction. This is mathematically identical to what happens when the full formula is expanded, but with a much smaller tape.
+
+#### 8.1.3 Double overload (normal pricing)
+
+```cpp
+inline double bs_call(double F, double K, double sigma, double df, double T) {
+    double sqrtT = std::sqrt(T);
+    double d1 = (std::log(F / K) + 0.5 * sigma * sigma * T) / (sigma * sqrtT);
+    double d2 = d1 - sigma * sqrtT;
+    return df * (F * 0.5 * std::erfc(-d1 * M_SQRT1_2)
+               - K * 0.5 * std::erfc(-d2 * M_SQRT1_2));
+}
+```
+
+All three overloads coexist. The compiler picks the right one based on `DoubleT`.
+
+### 8.2 Tape Size Comparison
+
+| Function | Naive tape nodes | Analytical primitive tape nodes | Speedup factor |
+|----------|-----------------|-------------------------------|---------------|
+| BS call/put | ~60 | ~15 | ~4× |
+| BS digital (call/put) | ~40 | ~8 | ~5× |
+| Normal (Bachelier) call | ~30 | ~8 | ~4× |
+| SABR implied vol (Hagan) | ~120 | ~20 | ~6× |
+| Barrier correction (Broadie-Glasserman) | ~80 | ~15 | ~5× |
+| Cubic spline eval (given coefficients) | ~15 | ~5 | ~3× |
+
+The speedup factor applies to **each `fvar<var>` sweep** — so for $N = 200$ Hessian columns, a 4× reduction per sweep compounds to 4× overall Hessian speedup for that subexpression.
+
+### 8.3 Which Functions to Prioritize
+
+Prioritize by **call frequency × tape node count**:
+
+1. **Black-Scholes family** (call, put, digital call/put, straddle) — called at every (path, timestep) in MC, ~60 nodes each. Highest impact.
+2. **Normal (Bachelier) model** — same call pattern, simpler partials.
+3. **Cubic spline evaluation** — called for every interpolation lookup (vol surface, yield curve). Each lookup is ~15 nodes but called dozens of times per pricing. Aggregate impact is large.
+4. **SABR/SVI implied vol** — ~120 nodes, called during vol surface construction. High per-call impact.
+5. **Barrier corrections** — Broadie-Glasserman continuity correction, moderately complex.
+6. **CDF/PDF compositions** — `Phi(x)`, `exp(-x²)` chains that appear in many closed-form pricers.
+
+### 8.4 Implementation Pattern for Other Functions
+
+The pattern is always the same three overloads:
+
+```cpp
+// 1. double — fast, no tape
+inline double my_func(double x1, double x2, ...) {
+    // direct computation
+}
+
+// 2. var — precomputed_gradients with analytical partials
+inline stan::math::var my_func(const stan::math::var& x1,
+                                const stan::math::var& x2, ...) {
+    double v1 = x1.val(), v2 = x2.val();
+    double value = /* analytical */;
+    double df_dx1 = /* analytical */;
+    double df_dx2 = /* analytical */;
+    return stan::math::precomputed_gradients(value, {x1, x2}, {df_dx1, df_dx2});
+}
+
+// 3. fvar<var> — partials as var, forward tangent via chain rule
+inline stan::math::fvar<stan::math::var> my_func(
+    const stan::math::fvar<stan::math::var>& x1,
+    const stan::math::fvar<stan::math::var>& x2, ...)
+{
+    using stan::math::var;
+    var v1 = x1.val(), v2 = x2.val();
+
+    // Compute value and partials in var arithmetic
+    var value = /* same formula, but in var */;
+    var df_dx1 = /* partial w.r.t. x1, in var */;
+    var df_dx2 = /* partial w.r.t. x2, in var */;
+
+    // Forward tangent
+    var tangent = df_dx1 * x1.d_ + df_dx2 * x2.d_;
+
+    return stan::math::fvar<var>(value, tangent);
+}
+```
+
+**Key detail for `fvar<var>` overload**: The partials must be computed in `var` arithmetic (not double), because reverse mode needs to differentiate through them. If you used `double` partials, the Hessian would be zero (no tape to differentiate).
+
+### 8.5 Example: Digital Call
+
+```cpp
+// Digital call: pays 1 if S > K at expiry
+// Value = df * N(d2)
+// dP/dF = df * n(d2) / (F * sigma * sqrt(T))
+// dP/dsigma = -df * n(d2) * d1 / sigma
+
+inline stan::math::fvar<stan::math::var> digital_call(
+    const stan::math::fvar<stan::math::var>& F,
+    const stan::math::fvar<stan::math::var>& K,
+    const stan::math::fvar<stan::math::var>& sigma,
+    const stan::math::fvar<stan::math::var>& df,
+    double T)
+{
+    using stan::math::var;
+    using stan::math::fvar;
+
+    var f = F.val(), k = K.val(), s = sigma.val(), d = df.val();
+    var sqrtT_v(std::sqrt(T));
+    var d1 = (log(f / k) + 0.5 * s * s * T) / (s * sqrtT_v);
+    var d2 = d1 - s * sqrtT_v;
+    var Nd2 = stan::math::Phi(d2);
+    var nd2 = exp(-0.5 * d2 * d2) / sqrt(2.0 * M_PI);
+
+    var price = d * Nd2;
+
+    // Partials
+    var dP_dF     = d * nd2 / (f * s * sqrtT_v);
+    var dP_dK     = -d * nd2 / (k * s * sqrtT_v);
+    var dP_dsigma = -d * nd2 * d1 / s;
+    var dP_ddf    = Nd2;
+
+    var tangent = dP_dF * F.d_ + dP_dK * K.d_
+                + dP_dsigma * sigma.d_ + dP_ddf * df.d_;
+
+    return fvar<var>(price, tangent);
+}
+```
+
+### 8.6 Cubic Spline Evaluation Primitive
+
+Spline evaluation is called very frequently (every vol/rate lookup). Given precomputed coefficients $a_i, b_i, c_i, d_i$ for the interval containing $x$:
+
+$$f(x) = a_i + b_i h + c_i h^2 + d_i h^3, \quad h = x - x_i$$
+
+The coefficients depend on the curve node values (AD leaves). For the primitive, we treat the coefficients as `var` inputs:
+
+```cpp
+inline stan::math::fvar<stan::math::var> spline_eval(
+    const stan::math::fvar<stan::math::var>& a,
+    const stan::math::fvar<stan::math::var>& b,
+    const stan::math::fvar<stan::math::var>& c,
+    const stan::math::fvar<stan::math::var>& d_coeff,
+    double h)   // h = x - x_i, typically a non-AD query point
+{
+    using stan::math::var;
+    using stan::math::fvar;
+
+    var av = a.val(), bv = b.val(), cv = c.val(), dv = d_coeff.val();
+
+    // Value: a + b*h + c*h² + d*h³
+    var value = av + h * (bv + h * (cv + h * dv));
+
+    // Partials w.r.t. coefficients (trivial)
+    // df/da = 1, df/db = h, df/dc = h², df/dd = h³
+    var tangent = a.d_ + h * (b.d_ + h * (c.d_ + h * d_coeff.d_));
+
+    return fvar<var>(value, tangent);
+}
+```
+
+This is particularly efficient because the partials w.r.t. coefficients are just powers of $h$ — no var operations needed for the tangent computation itself. The second derivatives come from reverse-mode differentiating the coefficients (which depend on the curve nodes through the tridiagonal solve).
+
+### 8.7 When NOT to Use Analytical Primitives
+
+- **One-off or rare functions**: The implementation cost (three overloads, deriving partials, testing) isn't worth it for functions called once per pricing.
+- **Functions with many inputs**: If $n > 10$ inputs, the tangent computation ($n$ multiplications) starts to rival the naive tape cost. The crossover depends on the formula complexity.
+- **Functions where partials are as complex as the function**: For some functions (e.g., multivariate copulas), the analytical partials are harder to implement than the function itself. Let AD handle those.
+- **Prototyping phase**: Get correctness first with naive AD. Profile. Then add analytical primitives for the hot spots.
+
+### 8.8 Verification
+
+Each analytical primitive must be verified against naive AD:
+
+```cpp
+// Verify bs_call primitive matches naive implementation
+template<typename T>
+T bs_call_naive(T F, T K, T sigma, T df, double T_mat) {
+    using stan::math::log; using stan::math::sqrt;
+    using stan::math::exp; using stan::math::Phi;
+    T sqrtT = sqrt(T_mat);
+    T d1 = (log(F / K) + 0.5 * sigma * sigma * T_mat) / (sigma * sqrtT);
+    T d2 = d1 - sigma * sqrtT;
+    return df * (F * Phi(d1) - K * Phi(d2));
+}
+
+void verify_bs_primitive() {
+    auto make_functor = [](auto bs_fn) {
+        return [bs_fn](const auto& x) {
+            using T = typename std::decay_t<decltype(x)>::Scalar;
+            return bs_fn(T(x(0)), T(x(1)), T(x(2)), T(x(3)), 1.0);
+        };
+    };
+
+    Eigen::VectorXd x(4);
+    x << 100.0, 100.0, 0.2, 0.95;  // F, K, sigma, df
+
+    double fx1, fx2;
+    Eigen::VectorXd g1, g2;
+    Eigen::MatrixXd H1, H2;
+
+    stan::math::hessian(make_functor([](auto... args){ return bs_call(args...); }),
+                         x, fx1, g1, H1);
+    stan::math::hessian(make_functor([](auto... args){ return bs_call_naive(args...); }),
+                         x, fx2, g2, H2);
+
+    assert(std::abs(fx1 - fx2) < 1e-12);
+    assert((g1 - g2).norm() < 1e-10);
+    assert((H1 - H2).norm() < 1e-8);
+}
+```
+
+Run this for each primitive with a range of inputs (ATM, deep ITM, deep OTM, short/long maturity, high/low vol) to catch edge cases.
+
+---
+
+## 9. AD-Safe Math Functions
 
 Many pricing operations use `min`, `max`, `abs`, `clamp`, `heaviside`, and payoff functions that have discontinuous derivatives. AD produces correct first derivatives everywhere except at the kink, but the **second derivative is zero almost everywhere** (Hessian entries involving these operations will be zero or undefined at the kink).
 
 For smooth, AD-compatible second derivatives, replace these with differentiable approximations.
 
-### 8.1 Core Smooth Approximations
+### 9.1 Core Smooth Approximations
 
 All functions below are templated on `DoubleT` and work with `double`, `var`, and `fvar<var>`.
 
@@ -1328,7 +1744,7 @@ T smooth_power(const T& x, double n, double eps = 1e-8) {
 } // namespace ad_math
 ```
 
-### 8.2 Smooth Payoff Functions
+### 9.2 Smooth Payoff Functions
 
 Common derivative payoffs have kinks. Replace with smooth versions for AD:
 
@@ -1449,7 +1865,7 @@ T smooth_straddle(const T& S, double K, double eps = 1e-4) {
 } // namespace ad_payoffs
 ```
 
-### 8.3 Choosing Epsilon
+### 9.3 Choosing Epsilon
 
 The smoothing parameter `eps` controls the trade-off between accuracy and differentiability:
 
@@ -1466,7 +1882,7 @@ The smoothing parameter `eps` controls the trade-off between accuracy and differ
 - For mathematical operations (abs, max in intermediate calcs): `eps = 1e-6` to `1e-8`.
 - For Hessian stability: don't make `eps` too small — the second derivative scales as $1/\epsilon$, which can cause overflow or numerical noise.
 
-### 8.4 When to Use Smooth vs Exact
+### 9.4 When to Use Smooth vs Exact
 
 | Operation | Use exact (Stan's built-in) | Use smooth |
 |-----------|----------------------------|------------|
@@ -1479,7 +1895,7 @@ The smoothing parameter `eps` controls the trade-off between accuracy and differ
 
 **Stan Math's built-in `fmax`, `fmin`, `fabs`** are first-order differentiable (they select the correct subgradient) but their second derivatives are zero everywhere except at the kink (where they are undefined). This means the Hessian will have zero entries where you'd expect nonzero gamma/volga. Smooth versions fix this.
 
-### 8.5 Conditional Logic in Pricers
+### 9.5 Conditional Logic in Pricers
 
 Pricers often have conditional logic that depends on market data values:
 
@@ -1523,7 +1939,7 @@ Both branches are evaluated (costs 2× the compute), but the derivatives correct
 
 For many pricers, the branch is far from the kink during normal market conditions (e.g., knock-in barrier is far from current spot). In this case, the AD Greeks are correct and the discontinuity is irrelevant. Only smooth if the branch point could be near current market data values.
 
-### 8.6 Flooring and Capping in Rate Calculations
+### 9.6 Flooring and Capping in Rate Calculations
 
 Interest rate pricers frequently floor rates at zero or cap them:
 
@@ -1546,9 +1962,9 @@ The `eps` should be small relative to typical rate values (1e-6 = 0.01bp).
 
 ---
 
-## 9. `fvar<var>` Compatibility Requirements
+## 10. `fvar<var>` Compatibility Requirements
 
-### 9.1 What Works Automatically
+### 10.1 What Works Automatically
 
 Any code that uses standard C++ arithmetic and Stan-overloaded math functions:
 
@@ -1609,7 +2025,7 @@ Eigen::Matrix<DoubleT, Eigen::Dynamic, Eigen::Dynamic> M;
 Eigen::Matrix<DoubleT, Eigen::Dynamic, 1> result = M * v;
 ```
 
-### 9.2 What Breaks and How to Fix
+### 10.2 What Breaks and How to Fix
 
 | Pattern | Problem | Fix |
 |---------|---------|-----|
@@ -1626,9 +2042,9 @@ Eigen::Matrix<DoubleT, Eigen::Dynamic, 1> result = M * v;
 | `x == 0.0` | Exact equality undefined for AD | `stan::math::value_of_rec(x) == 0.0` |
 | Assignment to `double&` | Can't assign `fvar<var>` to `double` ref | Template the output type |
 | `printf("%f", x)` | Can't print `fvar<var>` | `printf("%f", stan::math::value_of_rec(x))` |
-| External library (LAPACK, etc.) | Expects `double*` arrays | See Section 9.4 |
+| External library (LAPACK, etc.) | Expects `double*` arrays | See Section 10.4 |
 
-### 9.3 ADTemplate Checklist
+### 10.3 ADTemplate Checklist
 
 Each ADTemplate class should verify these properties for `fvar<var>` compatibility:
 
@@ -1655,7 +2071,7 @@ Each ADTemplate class should verify these properties for `fvar<var>` compatibili
 - [ ] Can be constructed from `DoubleT` values + `double` grid coordinates
 - [ ] Constructor does not perform arithmetic that requires `double` (e.g., computing spline coefficients from `DoubleT` values — the coefficients should be `DoubleT`)
 
-### 9.4 Wrapping External Libraries
+### 10.4 Wrapping External Libraries
 
 If a pricer calls an external library (e.g., a PDE solver, a numerical integrator, or a special function library written in C/Fortran), the library expects `double*`. You cannot pass `fvar<var>*`.
 
@@ -1697,7 +2113,7 @@ DoubleT call_external_solver(const DoubleT& S, const DoubleT& sigma,
 
 **Important limitation**: This approach gives correct first-order derivatives but the **Hessian entries involving this external call will be zero** (because the precomputed gradients are `double`, not `var` — they don't have their own AD tape). For full Hessian support through an external library call, you would need to also compute second-order derivatives externally and use a more complex wrapping strategy (e.g., returning `fvar<var>` with manually set tangent).
 
-### 9.5 Handling `using` Declarations Systematically
+### 10.5 Handling `using` Declarations Systematically
 
 To make all 100+ pricers AD-compatible without modifying each one individually, add `using` declarations to a central header that all pricers include:
 
@@ -1746,11 +2162,11 @@ Pricers can then do `using namespace ad_using;` inside their methods. This is cl
 
 ---
 
-## 10. Interpolation Under AD
+## 11. Interpolation Under AD
 
 Interpolation is critical — it's how vol surfaces and yield curves produce `DoubleT` values from `DoubleT` node data. The interpolation must be differentiable.
 
-### 10.1 Linear Interpolation
+### 11.1 Linear Interpolation
 
 For linear interpolation between nodes $(x_i, y_i)$ and $(x_{i+1}, y_{i+1})$ at point $x$:
 
@@ -1767,7 +2183,7 @@ $$y(x) = y_i \cdot \frac{x_{i+1} - x}{x_{i+1} - x_i} + y_{i+1} \cdot \frac{x - x
 
 **AD compatibility**: Perfect. No issues.
 
-### 10.2 Cubic Spline Interpolation
+### 11.2 Cubic Spline Interpolation
 
 Cubic splines produce values as:
 
@@ -1810,7 +2226,7 @@ void tridiagonal_solve(const std::vector<double>& a,    // sub-diagonal (double 
 
 Note: The tridiagonal matrix coefficients (`a`, `b`, `c`) come from grid spacing (double), but the RHS (`d`) and solution (`x`) are `DoubleT` because they depend on node values. The division `d[i] / b[i]` is `DoubleT / double`, which works correctly.
 
-### 10.3 Bicubic Interpolation for Vol Surfaces
+### 11.3 Bicubic Interpolation for Vol Surfaces
 
 For 2D bicubic interpolation on a vol surface:
 
@@ -1823,7 +2239,7 @@ Each step is a 1D cubic spline in `DoubleT`. The cascade correctly propagates AD
 
 ---
 
-## 11. Summary of Changes
+## 12. Summary of Changes
 
 ### New Code (additive, no existing code modified)
 
@@ -1833,8 +2249,9 @@ Each step is a 1D cubic spline in `DoubleT`. The cascade correctly propagates AD
 | `ScenarioData` | `packMarketData()` | ~60 |
 | `ScenarioData` | `loadFromVector()` | ~80 |
 | `ScenarioData` | Dual-source getters | ~15 per type × 6 types |
-| `ScenarioData` | Blueprint constructor | ~20 |
+| `ScenarioData` | Node-mappings constructor (non-copy) | ~20 |
 | `HessianFunctor` | Functor template + factory | ~30 |
+| Pricers | `rebind<T>()` + converting constructor | ~10–20 per pricer |
 | `calculateSensitivities` | Unified interface | ~30 |
 | `extractStructured` | Result unpacking + cross blocks | ~120 |
 | `SubsetFunctor` | Sparse Hessian support | ~40 |
@@ -1842,14 +2259,19 @@ Each step is a 1D cubic spline in `DoubleT`. The cascade correctly propagates AD
 | `ad_payoffs` namespace | Smooth payoff functions | ~100 |
 | `ad_using.h` | Centralized `using` declarations | ~30 |
 | `parallel_hessian` | Optional parallel implementation | ~50 |
-| **Total** | | **~850 lines** |
+| Analytical primitives | BS, digital, Bachelier, spline (3 overloads each) | ~80 per function |
+| **Total** | | **~850 lines + primitives** |
+
+### Modified (Minimal, Per-Pricer)
+
+- Each pricer needs a **converting constructor** and **`rebind<T>()`** method (Section 4.4). For stateless pricers this is ~5 lines; for path-dependent pricers with `DoubleT` state, ~10–20 lines. This is the only pricer-level change.
 
 ### Not Modified
 
-- Any of the 100+ pricers
+- Pricer business logic (`priceTrade`, `loadScenarioData`) — unchanged
 - Any generator
 - Any ADTemplate (assuming they already use `DoubleT` correctly — if not, fixes are one-time per class)
-- The MC simulation loop
+- The MC simulation loop structure (Hessian calls are inserted alongside existing pricing calls)
 - The interpolation library (assuming it's already templated on `DoubleT`)
 
 ### Template Instantiations Required
