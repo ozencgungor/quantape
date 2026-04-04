@@ -461,6 +461,58 @@ if(APPLE OR UNIX)
     )
 endif()
 
+# precomputed_gradients vs custom vari example
+add_executable(test_precomputed_gradients test_precomputed_gradients.cpp)
+
+target_link_libraries(test_precomputed_gradients PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_precomputed_gradients PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_precomputed_gradients PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ferror-limit=0)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_precomputed_gradients PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Multi-component AD chain example
+add_executable(test_chain_ad test_chain_ad.cpp)
+
+target_link_libraries(test_chain_ad PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_chain_ad PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_chain_ad PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ferror-limit=0)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_chain_ad PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
 # Create executable for pricer hierarchy hessian benchmark
 add_executable(test_pricer_hessian test_pricer_hessian.cpp)
 
