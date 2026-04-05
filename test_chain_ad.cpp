@@ -11,9 +11,9 @@
 
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <stan/math/rev/core.hpp>
+#include <stan/math/rev/fun/Phi.hpp>
 #include <stan/math/rev/fun/exp.hpp>
 #include <stan/math/rev/fun/log.hpp>
-#include <stan/math/rev/fun/Phi.hpp>
 
 #include <cmath>
 #include <iomanip>
@@ -32,17 +32,18 @@ using stan::math::var;
 struct CurveResult {
     var rate;
     // Jacobian: which df nodes are active, and the partial as a var
-    int i0, i1;         // indices of the two bracketing nodes
-    var dr_ddf0;        // ∂r/∂df[i0] as var (depends on df[i0])
-    var dr_ddf1;        // ∂r/∂df[i1] as var (depends on df[i1])
+    int i0, i1;  // indices of the two bracketing nodes
+    var dr_ddf0; // ∂r/∂df[i0] as var (depends on df[i0])
+    var dr_ddf1; // ∂r/∂df[i1] as var (depends on df[i1])
 };
 
-CurveResult interpolate_rate(const std::vector<var>& df_nodes,
-                              const std::vector<double>& times,
-                              double T) {
+CurveResult interpolate_rate(const std::vector<var>& df_nodes, const std::vector<double>& times,
+                             double T) {
     int i = 0;
-    while (i + 1 < (int)times.size() && times[i + 1] < T) ++i;
-    if (i + 1 >= (int)times.size()) i = (int)times.size() - 2;
+    while (i + 1 < (int)times.size() && times[i + 1] < T)
+        ++i;
+    if (i + 1 >= (int)times.size())
+        i = (int)times.size() - 2;
 
     double w = (T - times[i]) / (times[i + 1] - times[i]);
 
@@ -68,16 +69,17 @@ CurveResult interpolate_rate(const std::vector<var>& df_nodes,
 struct VolResult {
     var sigma;
     int j0, j1;
-    double dsig_dvol0;  // (1-w) — constant, doesn't need to be var
-    double dsig_dvol1;  // w
+    double dsig_dvol0; // (1-w) — constant, doesn't need to be var
+    double dsig_dvol1; // w
 };
 
-VolResult interpolate_vol(const std::vector<var>& vol_nodes,
-                           const std::vector<double>& strikes,
-                           double K) {
+VolResult interpolate_vol(const std::vector<var>& vol_nodes, const std::vector<double>& strikes,
+                          double K) {
     int i = 0;
-    while (i + 1 < (int)strikes.size() && strikes[i + 1] < K) ++i;
-    if (i + 1 >= (int)strikes.size()) i = (int)strikes.size() - 2;
+    while (i + 1 < (int)strikes.size() && strikes[i + 1] < K)
+        ++i;
+    if (i + 1 >= (int)strikes.size())
+        i = (int)strikes.size() - 2;
 
     double w = (K - strikes[i]) / (strikes[i + 1] - strikes[i]);
     var sigma = vol_nodes[i] * (1.0 - w) + vol_nodes[i + 1] * w;
@@ -133,7 +135,7 @@ int main() {
     std::vector<double> df_times = {0.5, 1.0, 2.0};
     std::vector<double> vol_strikes = {90.0, 100.0, 110.0};
     constexpr int N_DF = 3, N_VOL = 3;
-    constexpr int N = 1 + N_DF + N_VOL;  // S + 3 df + 3 vol = 7
+    constexpr int N = 1 + N_DF + N_VOL; // S + 3 df + 3 vol = 7
 
     double S0 = 100.0;
     double df_vals[N_DF] = {0.9975, 0.9512, 0.9048};
@@ -142,9 +144,7 @@ int main() {
     double K = 95.0, T = 0.75;
 
     // Labels for output
-    std::string labels[N] = {
-        "S", "df[0]", "df[1]", "df[2]", "vol[0]", "vol[1]", "vol[2]"
-    };
+    std::string labels[N] = {"S", "df[0]", "df[1]", "df[2]", "vol[0]", "vol[1]", "vol[2]"};
 
     // ── First order (gradient) ──
     Eigen::VectorXd gradient(N);
@@ -161,9 +161,12 @@ int main() {
 
         // ∂price/∂S = delta, ∂price/∂df[i] = rho * dr/ddf[i], etc.
         // But for first order we can just use the full var price expression:
-        var price = S * pricer.delta - K * exp(-curve.rate * T) * stan::math::Phi(
-            (log(S / K) + (curve.rate + 0.5 * smile.sigma * smile.sigma) * T)
-            / (smile.sigma * std::sqrt(T)) - smile.sigma * std::sqrt(T));
+        var price =
+            S * pricer.delta -
+            K * exp(-curve.rate * T) *
+                stan::math::Phi((log(S / K) + (curve.rate + 0.5 * smile.sigma * smile.sigma) * T) /
+                                    (smile.sigma * std::sqrt(T)) -
+                                smile.sigma * std::sqrt(T));
         // Actually simpler: just rebuild price as var to get the gradient directly
         // Or use chain rule manually:
         // We'll use the chain rule approach to be consistent.
@@ -176,7 +179,7 @@ int main() {
         // For vol[smile.j1]: vega * dsig_dvol1
 
         gradient.setZero();
-        gradient(0) = pricer.delta.val();  // ∂price/∂S
+        gradient(0) = pricer.delta.val(); // ∂price/∂S
         gradient(1 + curve.i0) += (pricer.rho * curve.dr_ddf0).val();
         gradient(1 + curve.i1) += (pricer.rho * curve.dr_ddf1).val();
         gradient(1 + N_DF + smile.j0) += (pricer.vega * smile.dsig_dvol0).val();
@@ -184,15 +187,14 @@ int main() {
     }
 
     std::cout << "── Gradient (first order) ──\n\n";
-    std::cout << "  price = " << std::setprecision(6)
-              << [&]{ // quick recompute for display
-                    double r = -(std::log(df_vals[0]) * 0.0 + std::log(df_vals[1]) * 1.0) / T;
-                    // just use the pricer to get the value
-                    return 0.0; // placeholder
-                 }() << "\n";
+    std::cout << "  price = " << std::setprecision(6) << [&] { // quick recompute for display
+        double r = -(std::log(df_vals[0]) * 0.0 + std::log(df_vals[1]) * 1.0) / T;
+        // just use the pricer to get the value
+        return 0.0; // placeholder
+    }() << "\n";
     for (int i = 0; i < N; ++i)
-        std::cout << "  ∂price/∂" << std::setw(7) << std::left << labels[i]
-                  << " = " << std::right << std::setprecision(6) << gradient(i) << "\n";
+        std::cout << "  ∂price/∂" << std::setw(7) << std::left << labels[i] << " = " << std::right
+                  << std::setprecision(6) << gradient(i) << "\n";
 
     // ── Hessian (second order) ──
     //
@@ -224,7 +226,7 @@ int main() {
             else if (k == curve.i1)
                 dP_dM = pricer.rho * curve.dr_ddf1;
             else
-                return;  // zero row — this node doesn't affect the rate
+                return; // zero row — this node doesn't affect the rate
         } else {
             // ∂price/∂vol[k] = vega * ∂σ/∂vol[k]
             int k = row_idx - 1 - N_DF;
@@ -233,7 +235,7 @@ int main() {
             else if (k == smile.j1)
                 dP_dM = pricer.vega * smile.dsig_dvol1;
             else
-                return;  // zero row
+                return; // zero row
         }
 
         stan::math::grad(dP_dM.vi_);
@@ -267,8 +269,8 @@ int main() {
     for (int i = 0; i < N; ++i)
         for (int j = i + 1; j < N; ++j)
             max_asym = std::max(max_asym, std::abs(H(i, j) - H(j, i)));
-    std::cout << "\n  Max asymmetry |H(i,j) - H(j,i)|: "
-              << std::scientific << std::setprecision(2) << max_asym << "\n";
+    std::cout << "\n  Max asymmetry |H(i,j) - H(j,i)|: " << std::scientific << std::setprecision(2)
+              << max_asym << "\n";
 
     std::cout << "\n";
     return 0;
