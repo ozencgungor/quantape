@@ -1445,7 +1445,121 @@ inline stan::math::fvar<stan::math::var> my_func(
 
 **Key detail for `fvar<var>` overload**: The partials must be computed in `var` arithmetic (not double), because reverse mode needs to differentiate through them. If you used `double` partials, the Hessian would be zero (no tape to differentiate).
 
-### 8.5 Example: Digital Call
+### 8.5 Example: Black76 with `precomputed_gradients`
+
+This shows the `precomputed_gradients` pattern applied to `Black76`, the same function that is implemented with `make_callback_var` in `Pricing/StanPrimitives.h` (see Appendix E). The two approaches produce identical results.
+
+#### 8.5.1 `var` specialization
+
+`precomputed_gradients` takes the scalar value, a vector of input `var`s, and a vector of pre-computed `double` partials. It creates one tape node whose reverse callback pushes `adj * partial_i` to each input.
+
+```cpp
+template <>
+inline stan::math::var Black76<stan::math::var>::price() const {
+    using stan::math::var;
+
+    const double D0 = DF.val(), F0 = F.val(), K0 = K.val(), vol0 = vol.val();
+    auto res = black76Analytical(D0, F0, K0, vol0, T, type);
+
+    return stan::math::precomputed_gradients(
+        res.price,
+        {DF, F, K, vol},
+        {res.g1.dV_dDF, res.g1.dV_dF, res.g1.dV_dK, res.g1.dV_dvol});
+}
+```
+
+Compare with the `make_callback_var` version (from `StanPrimitives.h`):
+
+```cpp
+template <>
+inline stan::math::var Black76<stan::math::var>::price() const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    const double D0 = DF.val(), F0 = F.val(), K0 = K.val(), vol0 = vol.val();
+    auto res = black76Analytical(D0, F0, K0, vol0, T, type);
+
+    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
+        const double adj = vi.adj();
+        DF.adj()  += adj * g1.dV_dDF;
+        F.adj()   += adj * g1.dV_dF;
+        K.adj()   += adj * g1.dV_dK;
+        vol.adj() += adj * g1.dV_dvol;
+    });
+}
+```
+
+Both produce exactly 1 tape node. The `precomputed_gradients` version is more declarative; the `make_callback_var` version gives explicit control over the adjoint callback.
+
+#### 8.5.2 `fvar<var>` specialization
+
+For the Hessian, each 1st-order Greek must be a `var` that encodes its Hessian row. With `precomputed_gradients`, each Greek is created by passing the `var` inputs and the corresponding 2nd-order partials as its precomputed gradients:
+
+```cpp
+template <>
+inline stan::math::fvar<stan::math::var>
+Black76<stan::math::fvar<stan::math::var>>::price() const {
+    using stan::math::fvar;
+    using stan::math::var;
+
+    // Extract var and tangent components
+    var DFv = DF.val_, Fv = F.val_, Kv = K.val_, volv = vol.val_;
+    var DFd = DF.d_,   Fd = F.d_,  Kd = K.d_,   vold = vol.d_;
+
+    const double DF0 = DFv.val(), F0 = Fv.val(), K0 = Kv.val(), vol0 = volv.val();
+    auto res = black76Analytical(DF0, F0, K0, vol0, T, type);
+    const auto& g1 = res.g1;
+    const auto& g2 = res.g2;
+
+    var price_var(res.price);
+
+    // Each 1st-order Greek becomes a var via precomputed_gradients,
+    // with the 2nd-order Greeks as its gradients.
+    // This encodes one row of the Hessian per Greek.
+    //
+    // Note: d2V/dDF2 = 0 (V is linear in DF), so the dV_dDF row
+    // has no DF entry — only F, K, vol.
+
+    var dV_dDF_var = stan::math::precomputed_gradients(
+        g1.dV_dDF,
+        {Fv, Kv, volv},
+        {g2.d2V_dDF_dF, g2.d2V_dDF_dK, g2.d2V_dDF_dvol});
+
+    var dV_dF_var = stan::math::precomputed_gradients(
+        g1.dV_dF,
+        {DFv, Fv, Kv, volv},
+        {g2.d2V_dDF_dF, g2.d2V_dF2, g2.d2V_dF_dK, g2.d2V_dF_dvol});
+
+    var dV_dK_var = stan::math::precomputed_gradients(
+        g1.dV_dK,
+        {DFv, Fv, Kv, volv},
+        {g2.d2V_dDF_dK, g2.d2V_dF_dK, g2.d2V_dK2, g2.d2V_dK_dvol});
+
+    var dV_dvol_var = stan::math::precomputed_gradients(
+        g1.dV_dvol,
+        {DFv, Fv, Kv, volv},
+        {g2.d2V_dDF_dvol, g2.d2V_dF_dvol, g2.d2V_dK_dvol, g2.d2V_dvol2});
+
+    // Forward tangent: dot product of Greek vars with tangent directions
+    var tangent = dV_dDF_var * DFd + dV_dF_var * Fd
+                + dV_dK_var * Kd + dV_dvol_var * vold;
+
+    return fvar<var>(price_var, tangent);
+}
+```
+
+**How it works**: When `stan::math::hessian` seeds tangent direction $e_i$ and calls `grad()` on the tangent:
+
+1. The tangent simplifies to `dV_dx_i_var` (since only one tangent component is 1).
+2. `grad()` reaches the `precomputed_gradients` node for `dV_dx_i_var`.
+3. That node pushes its precomputed 2nd-order partials to `DFv`, `Fv`, `Kv`, `volv`.
+4. Reading `x_j.val_.adj()` gives $\partial^2 V / \partial x_i \partial x_j$ — one Hessian row.
+
+The `precomputed_gradients` node for each Greek stores the 2nd-order partials as `double` values in a flat vector. During reverse, it multiplies each by the incoming adjoint and adds to the corresponding input's adjoint accumulator — functionally identical to what the `make_callback_var` lambda does explicitly.
+
+**Tape cost**: 4 `precomputed_gradients` nodes (one per Greek) + 7 arithmetic nodes (4 multiplies + 3 adds for the tangent) = 11 nodes total. Same as the `make_callback_var` version.
+
+### 8.6 Example: Digital Call
 
 ```cpp
 // Digital call: pays 1 if S > K at expiry
@@ -2411,3 +2525,631 @@ void verify_hessian(const auto& functor, const Eigen::VectorXd& x,
 | FD and AD agree for gradient but not Hessian | `fmax`/`fmin` zeroing second derivative | Use `smooth_max`/`smooth_min` |
 | Hessian has NaN/Inf | Division by zero, log of zero, sqrt of negative | Add floors: `log(fmax(x, 1e-15))` |
 | Gradient correct, Hessian row all zero for node $i$ | Node $i$ enters only linearly (correct!) or tape is broken at that node | Verify: if linear, zero Hessian row is correct |
+
+---
+
+## Appendix D: Diagonal-Only Hessian via Graph Coloring
+
+### D.1 Motivation
+
+`stan::math::hessian` computes the full $N \times N$ Hessian in $N$ forward-over-reverse passes. When only the diagonal $\{d^2f/dx_i^2\}$ is needed (e.g., for gamma per rate node, per vol node), the full Hessian is wasteful in both computation and storage.
+
+A naive diagonal-only implementation still requires $N$ passes — one per variable, reading only `x(i).val_.adj()` and discarding the rest. The cost is identical to the full Hessian; you only save the $N^2$ matrix storage.
+
+The real optimization comes from **seed compression via graph coloring**: if you know which pairs of variables have zero cross-derivatives ($d^2f/dx_i dx_j = 0$), you can seed multiple tangent directions simultaneously in a single `fvar<var>` pass.
+
+### D.2 Seed Compression — How It Works
+
+In one `fvar<var>` pass, seed all variables in a group $G$ with tangent $= 1$:
+
+$$x_i = \text{fvar<var>}(\text{var}(x_i^0),\ \mathbb{1}_{i \in G})$$
+
+After the forward evaluation and reverse pass on `y.d_`:
+
+$$x_i.\text{val\_}.\text{adj}() = \sum_{j \in G} \frac{\partial^2 f}{\partial x_i \partial x_j}$$
+
+If all cross-terms $\partial^2 f / \partial x_i \partial x_j = 0$ for $i \neq j$ within $G$, then:
+
+$$x_i.\text{val\_}.\text{adj}() = \frac{\partial^2 f}{\partial x_i^2}$$
+
+The group $G$ must be an **independent set** in the interaction graph (no two members have nonzero cross-derivative). Graph coloring partitions all $N$ variables into independent sets (colors), and each color requires one pass.
+
+### D.3 The Interaction Graph
+
+Build a graph where:
+- Each variable $x_i$ is a node
+- Edge $(i, j)$ exists if $\partial^2 f / \partial x_i \partial x_j \neq 0$
+
+For pricing functions, this graph is typically sparse. The sparsity comes from the structure of interpolation and the limited coupling between market data types:
+
+| Market data pair | Interaction? | Reason |
+|-----------------|-------------|--------|
+| Adjacent rate nodes on same curve | Yes | Cubic spline interpolation couples ~4 neighbors |
+| Distant rate nodes on same curve | No | Outside interpolation stencil |
+| Rate node and vol node | Possibly | If both enter the same pricing formula (e.g., BS uses both) |
+| Vol nodes at different strikes/maturities | Possibly | Bicubic interpolation couples 4×4 stencil |
+| Nodes on different curves (e.g., USD vs EUR) | Usually no | Unless a cross-currency product couples them |
+
+### D.4 Determining the Sparsity Pattern
+
+**Option 1: Structural analysis (recommended)**. You know the interpolation bandwidth from the curve/surface construction:
+
+```cpp
+// For a curve with cubic spline interpolation (bandwidth = 3):
+// each node interacts with at most 3 neighbors on each side
+SparsityPattern curveSparsity(int numNodes, int bandwidth = 3) {
+    SparsityPattern neighbors(numNodes);
+    for (int i = 0; i < numNodes; ++i) {
+        for (int j = std::max(0, i - bandwidth);
+             j < std::min(numNodes, i + bandwidth + 1); ++j) {
+            if (j != i) neighbors[i].push_back(j);
+        }
+    }
+    return neighbors;
+}
+```
+
+For a typical yield curve with 15 nodes and cubic spline interpolation (bandwidth 3), this gives a chromatic number of ~4, so 4 passes instead of 15.
+
+**Option 2: Cross-type coupling**. For interactions between different market data types (e.g., rate node vs vol node), the coupling depends on whether both quantities enter the same pricing sub-expression. Conservatively, treat all cross-type pairs as interacting; optimistically, only pairs that enter the same Black-Scholes call interact.
+
+**Option 3: Probe run**. Run one `fvar<var>` pass seeding all variables, inspect which `x(i).val_.adj()` values are nonzero. This costs one full pass but gives the exact sparsity pattern. Useful for validating structural assumptions.
+
+### D.5 Graph Coloring
+
+A greedy coloring is sufficient — optimal coloring is NP-hard but greedy gives at most $\Delta + 1$ colors where $\Delta$ is the maximum degree.
+
+```cpp
+#include <set>
+#include <vector>
+
+using SparsityPattern = std::vector<std::vector<int>>;
+
+inline std::vector<int> greedyColor(int N, const SparsityPattern& neighbors) {
+    std::vector<int> color(N, -1);
+    for (int i = 0; i < N; ++i) {
+        std::set<int> used;
+        for (int j : neighbors[i])
+            if (color[j] >= 0) used.insert(color[j]);
+        int c = 0;
+        while (used.count(c)) ++c;
+        color[i] = c;
+    }
+    return color;
+}
+```
+
+For banded graphs (typical of interpolation), greedy coloring with natural ordering gives optimal results: a bandwidth-$k$ graph needs exactly $k + 1$ colors.
+
+### D.6 Implementation
+
+```cpp
+#include <stan/math.hpp>
+#include <Eigen/Dense>
+
+// F: functor with signature Eigen::Matrix<T, Dynamic, 1> -> T
+// Works with any functor — no fvar<var> specializations needed.
+// If intermediate functions (Black76, GBS, interpolation) have
+// fvar<var> specializations, they are used automatically by Stan's
+// dispatch. If not, Stan's generic AD handles everything.
+
+template <typename F>
+Eigen::VectorXd hessianDiagonal(const F& f, const Eigen::VectorXd& x0,
+                                 const SparsityPattern& neighbors) {
+    using stan::math::fvar;
+    using stan::math::var;
+
+    const int N = x0.size();
+    Eigen::VectorXd diag(N);
+    diag.setZero();
+
+    auto colors = greedyColor(N, neighbors);
+    int numColors = *std::max_element(colors.begin(), colors.end()) + 1;
+
+    for (int c = 0; c < numColors; ++c) {
+        // Identify which variables are seeded this pass
+        std::vector<int> seeded;
+        for (int i = 0; i < N; ++i)
+            if (colors[i] == c) seeded.push_back(i);
+
+        // Each pass gets its own tape scope
+        stan::math::nested_rev_autodiff nested;
+
+        // Build fvar<var> input: tangent = 1 for this color, 0 otherwise
+        Eigen::Matrix<fvar<var>, Eigen::Dynamic, 1> x(N);
+        for (int i = 0; i < N; ++i)
+            x(i) = fvar<var>(var(x0[i]), colors[i] == c ? 1.0 : 0.0);
+
+        // Forward pass — through the full pricing chain
+        fvar<var> y = f(x);
+
+        // y.d_ is the sum of directional derivatives for all seeded variables.
+        // Reverse pass on y.d_ gives: for each variable i,
+        //   x(i).val_.adj() = Σ_j d²f/dx_i dx_j * tangent_j
+        // Since tangent_j = 1 only for same-color j's, and by construction
+        // no two same-color variables interact, cross-terms vanish.
+        y.d_.grad();
+
+        for (int i : seeded)
+            diag(i) = x(i).val_.adj();
+    }
+
+    return diag;
+}
+```
+
+### D.7 Overload: Full Diagonal Without Sparsity
+
+When the sparsity pattern is unknown, fall back to $N$ passes (equivalent to `stan::math::hessian` but only storing the diagonal):
+
+```cpp
+template <typename F>
+Eigen::VectorXd hessianDiagonal(const F& f, const Eigen::VectorXd& x0) {
+    // No sparsity info: treat every pair as interacting (complete graph)
+    // -> N colors, N passes, same cost as stan::math::hessian
+    SparsityPattern trivial(x0.size());
+    for (int i = 0; i < x0.size(); ++i)
+        for (int j = 0; j < x0.size(); ++j)
+            if (i != j) trivial[i].push_back(j);
+    return hessianDiagonal(f, x0, trivial);
+}
+```
+
+Or more efficiently, just extract the diagonal from `stan::math::hessian`:
+
+```cpp
+template <typename F>
+Eigen::VectorXd hessianDiagonalNaive(const F& f, const Eigen::VectorXd& x0) {
+    double fx;
+    Eigen::VectorXd grad;
+    Eigen::MatrixXd H;
+    stan::math::hessian(f, x0, fx, grad, H);
+    return H.diagonal();
+}
+```
+
+### D.8 Integration with the Pricing Architecture
+
+The `hessianDiagonal` function accepts the same functor as `stan::math::hessian`. Use it with the existing `HessianFunctor`:
+
+```cpp
+// Build functor (same as for full Hessian — Section 4.2)
+auto functor = makeHessianFunctor<EquityOptionPricer>(pricer, sd);
+Eigen::VectorXd x = sd.packMarketData();
+
+// Build sparsity pattern from curve/surface structure
+SparsityPattern sparsity = buildSparsityFromMappings(sd.nodeMappings());
+
+// Compute diagonal only
+Eigen::VectorXd diag = hessianDiagonal(functor, x, sparsity);
+// diag[i] = d²P/dx_i² for each market data node
+```
+
+Building the sparsity pattern from node mappings:
+
+```cpp
+SparsityPattern buildSparsityFromMappings(
+    const std::vector<NodeMapping>& mappings)
+{
+    int N = 0;
+    for (const auto& nm : mappings) N += nm.count;
+
+    SparsityPattern neighbors(N);
+
+    for (const auto& nm : mappings) {
+        int bandwidth = std::visit([](const auto& desc) -> int {
+            using D = std::decay_t<decltype(desc)>;
+            if constexpr (std::is_same_v<D, IRCurveDescriptor> ||
+                          std::is_same_v<D, YieldCurveDescriptor> ||
+                          std::is_same_v<D, CreditDescriptor>) {
+                return 3;  // cubic spline: 3 neighbors each side
+            } else if constexpr (std::is_same_v<D, EQDVolDescriptor>) {
+                return 4;  // bicubic: 4×4 stencil (handled separately)
+            } else {
+                return 0;  // spot, FX: single node, no self-interaction
+            }
+        }, nm.descriptor);
+
+        // Within-descriptor banded interactions
+        for (int i = 0; i < nm.count; ++i) {
+            int gi = nm.offset + i;
+            for (int j = std::max(0, i - bandwidth);
+                 j < std::min(nm.count, i + bandwidth + 1); ++j) {
+                if (j != i) neighbors[gi].push_back(nm.offset + j);
+            }
+        }
+    }
+
+    // Cross-descriptor interactions: conservatively mark
+    // spot vs all curves, vol vs all curves, etc.
+    // (Or skip: if only diagonal is needed and cross-type
+    // diagonal terms are not affected by other types,
+    // no cross-type edges needed for diagonal correctness.)
+
+    return neighbors;
+}
+```
+
+### D.9 Cost Comparison
+
+| Scenario | N | Full Hessian passes | Diagonal (no sparsity) | Diagonal (cubic spline, bw=3) |
+|----------|---|--------------------|-----------------------|-------------------------------|
+| 1 curve, 10 nodes | 10 | 10 | 10 | 4 |
+| 1 curve, 50 nodes | 50 | 50 | 50 | 4 |
+| 3 curves × 15 nodes + spot + FX | 47 | 47 | 47 | 4 (if no cross-type) |
+| Vol surface 10×10 + curve 15 | 115 | 115 | 115 | ~5 (vol stencil) + 4 (curve) = ~5 |
+| Full market (5 curves + 2 surfaces + spots) | 300 | 300 | 300 | ~5–8 |
+
+The savings are dramatic: for $N = 300$ variables with banded interpolation, the diagonal Hessian costs $\sim$5–8 passes instead of 300 — a **40–60× speedup**.
+
+### D.10 Correctness Guarantee
+
+The diagonal entries from `hessianDiagonal` are **exact** (to machine precision) — identical to the diagonal of the full Hessian from `stan::math::hessian`. The graph coloring only affects which variables are grouped; the `fvar<var>` forward-over-reverse computation is the same.
+
+If the sparsity pattern is **wrong** (i.e., you claimed two variables don't interact but they do), the diagonal entries for those variables will be incorrect — they'll include leaked cross-terms. Always validate against the full Hessian diagonal for a representative set of test cases:
+
+```cpp
+void validateDiagonal(const auto& functor, const Eigen::VectorXd& x,
+                       const SparsityPattern& sparsity) {
+    // Full Hessian
+    double fx;
+    Eigen::VectorXd grad;
+    Eigen::MatrixXd H;
+    stan::math::hessian(functor, x, fx, grad, H);
+
+    // Sparse diagonal
+    Eigen::VectorXd diag = hessianDiagonal(functor, x, sparsity);
+
+    double maxErr = (H.diagonal() - diag).cwiseAbs().maxCoeff();
+    double relErr = maxErr / std::max(1.0, H.diagonal().cwiseAbs().maxCoeff());
+    assert(relErr < 1e-12);  // should match to machine precision
+}
+```
+
+---
+
+## Appendix E: Defining `var` and `fvar<var>` Specializations
+
+This appendix explains how to write analytical AD specializations for pricing functions using the `make_callback_var` pattern. This is the pattern used in `Pricing/StanPrimitives.h` for `Black76` and `GBS`.
+
+### E.1 When to Write Specializations
+
+Write specializations when:
+- The function is on the hot path (called at every (path, timestep))
+- You have closed-form derivatives (1st and 2nd order)
+- The naive tape would be large (many intermediate operations)
+
+Do **not** write specializations:
+- During prototyping — get correctness first with generic AD
+- For functions called rarely
+- When the analytical derivatives are harder to implement correctly than the function itself
+
+The key property: specializations are a **local optimization**. They replace a sub-graph on the tape with fewer nodes, but the upstream and downstream tape works identically. A pricing chain with some specialized functions and some generic functions computes the correct Hessian automatically.
+
+### E.2 Pattern: `var` Specialization (First-Order Adjoints)
+
+The `var` specialization replaces the entire function evaluation with **one tape node** whose callback pushes pre-computed analytical adjoints.
+
+**Template**: for a function $f(x_1, \ldots, x_n)$ with known partials $\partial f / \partial x_i$:
+
+```cpp
+template <>
+inline stan::math::var MyFunc<stan::math::var>::eval() const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    // 1. Extract doubles from all var inputs
+    const double x1_0 = x1.val(), x2_0 = x2.val(), /* ... */ ;
+
+    // 2. Compute value and 1st-order derivatives analytically (in double)
+    auto res = myFuncAnalytical(x1_0, x2_0, /* ... */);
+
+    // 3. Create a single callback var: value = f(x), callback pushes adjoints
+    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
+        const double adj = vi.adj();  // upstream adjoint
+        x1.adj() += adj * g1.df_dx1;
+        x2.adj() += adj * g1.df_dx2;
+        // ... one line per input
+    });
+}
+```
+
+**Tape cost**: 1 node total, regardless of the function's internal complexity.
+
+**Concrete example** — `Black76<var>::price()`:
+
+```cpp
+template <>
+inline stan::math::var Black76<stan::math::var>::price() const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    // Extract doubles
+    const double D0 = DF.val(), F0 = F.val(), K0 = K.val(), vol0 = vol.val();
+
+    // Analytical price + Greeks (pure double computation, no tape)
+    auto res = black76Analytical(D0, F0, K0, vol0, T, type);
+
+    // Single tape node: value = price, callback = adjoint propagation
+    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
+        const double adj = vi.adj();
+        DF.adj()  += adj * g1.dV_dDF;
+        F.adj()   += adj * g1.dV_dF;
+        K.adj()   += adj * g1.dV_dK;
+        vol.adj() += adj * g1.dV_dvol;
+    });
+}
+```
+
+**How `make_callback_var` works**:
+- Creates a `var` with the given double value
+- Registers the lambda as a callback on the reverse-mode tape
+- During `grad()`, when the reverse sweep reaches this node, it calls the lambda
+- `vi.adj()` is the adjoint of the output (set by downstream operations)
+- The lambda pushes `adj * partial` to each input's adjoint accumulator
+
+### E.3 Pattern: `fvar<var>` Specialization (Second-Order / Hessian)
+
+The `fvar<var>` specialization encodes the full Hessian of the function. Each 1st-order partial becomes a `var` (via `make_callback_var`) whose callback encodes one row of the Hessian. The forward-mode tangent assembles the directional derivative.
+
+**Template**: for $f(x_1, \ldots, x_n)$ with known 1st-order partials $g_i = \partial f / \partial x_i$ and 2nd-order partials $H_{ij} = \partial^2 f / \partial x_i \partial x_j$:
+
+```cpp
+template <>
+inline stan::math::fvar<stan::math::var>
+MyFunc<stan::math::fvar<stan::math::var>>::eval() const {
+    using stan::math::fvar;
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    // 1. Extract var and tangent components from each fvar<var> input
+    var x1v = x1.val_, x2v = x2.val_, /* ... */ ;  // var (value part)
+    var x1d = x1.d_,   x2d = x2.d_,  /* ... */ ;  // var (tangent part)
+
+    // 2. Extract doubles for analytical computation
+    const double x1_0 = x1v.val(), x2_0 = x2v.val(), /* ... */ ;
+
+    // 3. Compute value, 1st-order, and 2nd-order derivatives analytically
+    auto res = myFuncAnalytical(x1_0, x2_0, /* ... */);
+    const auto& g1 = res.g1;  // 1st-order partials (doubles)
+    const auto& g2 = res.g2;  // 2nd-order partials (doubles)
+
+    // 4. Price as a plain var (constant on the tape)
+    var price_var(res.price);
+
+    // 5. Each 1st-order partial becomes a callback var encoding its Hessian row.
+    //    When stan::math::hessian calls grad() on the tangent, it reverse-
+    //    propagates through these callbacks, recovering the Hessian.
+    var dF_dx1_var = make_callback_var(
+        g1.df_dx1,
+        [x1v, x2v, /* ... */,
+         d2f_dx1_dx1 = g2.d2f_dx1_dx1,
+         d2f_dx1_dx2 = g2.d2f_dx1_dx2,
+         /* ... all d2f/dx1_dxj ... */](auto& vi) {
+            double a = vi.adj();
+            x1v.adj() += a * d2f_dx1_dx1;
+            x2v.adj() += a * d2f_dx1_dx2;
+            // ... one line per input
+        });
+
+    var dF_dx2_var = make_callback_var(
+        g1.df_dx2,
+        [x1v, x2v, /* ... */,
+         d2f_dx1_dx2 = g2.d2f_dx1_dx2,
+         d2f_dx2_dx2 = g2.d2f_dx2_dx2,
+         /* ... all d2f/dx2_dxj ... */](auto& vi) {
+            double a = vi.adj();
+            x1v.adj() += a * d2f_dx1_dx2;  // symmetric: d2f/dx2 dx1
+            x2v.adj() += a * d2f_dx2_dx2;
+            // ...
+        });
+
+    // ... one callback var per input variable ...
+
+    // 6. Assemble forward tangent: Σ_i (df/dx_i) * (dx_i tangent)
+    var tangent = dF_dx1_var * x1d + dF_dx2_var * x2d + /* ... */ ;
+
+    // 7. Return fvar<var>(value, tangent)
+    return fvar<var>(price_var, tangent);
+}
+```
+
+**Tape cost**: $n$ callback var nodes + $n$ multiply nodes + $(n-1)$ add nodes for the tangent = $3n - 1$ nodes total. For `Black76` ($n = 4$): 11 nodes. For `GBS` ($n = 5$): 14 nodes.
+
+### E.4 Why This Works with `stan::math::hessian`
+
+When `stan::math::hessian` evaluates the functor at column $i$:
+
+1. It seeds tangent $= 1$ in direction $e_i$, so exactly one `x_k.d_` is `var(1.0)` and the rest are `var(0.0)`.
+2. The tangent evaluates to: `tangent = dF_dx_i_var * 1 + (zeros) = dF_dx_i_var`.
+3. `hessian` calls `grad()` on `tangent`, which calls `grad()` on `dF_dx_i_var`.
+4. The callback for `dF_dx_i_var` fires, pushing $a \cdot H_{ij}$ to each `x_j.val_.adj()`.
+5. `hessian` reads `x_j.val_.adj()` for all $j$ → Hessian row $i$.
+
+The upstream tape (how `x_1, \ldots, x_n` were constructed from the raw market data vector) is unaffected. The chain rule composes through the callback vars:
+
+$$\frac{\partial^2 P}{\partial m_a \partial m_b} = \sum_{i,j} H_{ij} \frac{\partial x_i}{\partial m_a} \frac{\partial x_j}{\partial m_b} + \sum_i g_i \frac{\partial^2 x_i}{\partial m_a \partial m_b}$$
+
+The first term comes from the analytical Hessian in the callbacks. The second term comes from the tape's own propagation through upstream operations (interpolation, `exp`, etc.).
+
+### E.5 The Analytical Greeks Function
+
+Both specializations delegate to a pure-`double` function that computes value, gradient, and Hessian analytically. This function has no AD overhead:
+
+```cpp
+struct MyFuncGreeks1 {
+    double price;
+    double df_dx1, df_dx2, /* ... */ ;
+};
+
+struct MyFuncGreeks2 {
+    double d2f_dx1_dx1, d2f_dx1_dx2, /* ... */ ;
+    double d2f_dx2_dx2, /* ... */ ;
+    // Only upper triangle needed (Hessian is symmetric)
+};
+
+struct MyFuncResult {
+    double price;
+    MyFuncGreeks1 g1;
+    MyFuncGreeks2 g2;
+};
+
+inline MyFuncResult myFuncAnalytical(double x1, double x2, /* ... */) {
+    // Pure double arithmetic — derive all partials by hand
+    // ...
+    return {price, g1, g2};
+}
+```
+
+For `Black76`, this is `black76Analytical()` (in `BlackScholesDetail.h`), which computes:
+- Price
+- 4 first-order Greeks: $\partial V / \partial \text{DF}, \partial V / \partial F, \partial V / \partial K, \partial V / \partial \sigma$
+- 9 second-order Greeks: all unique entries of the $4 \times 4$ Hessian (exploiting $\partial^2 V / \partial \text{DF}^2 = 0$ since $V$ is linear in DF)
+
+For `GBS`, this is `gbsAnalytical()`, which chain-rules through `black76Analytical()`:
+- 5 first-order Greeks
+- 15 second-order Greeks (full $5 \times 5$ symmetric Hessian)
+
+### E.6 Extending to New Functions — Step by Step
+
+To add a specialization for a new function `MyPayoff<DoubleT>`:
+
+**Step 1**: Write the analytical Greeks function in pure double:
+
+```cpp
+// In MyPayoffDetail.h (or similar)
+inline MyPayoffResult myPayoffAnalytical(double S, double K, double vol, double T) {
+    // Compute price, all dV/dx_i, all d2V/dx_i dx_j
+    // Return as structs
+}
+```
+
+Derive all first and second partial derivatives by hand (or with a CAS). Verify against finite differences.
+
+**Step 2**: Write the `double` specialization (optional, for the non-AD path):
+
+```cpp
+template <>
+inline double MyPayoff<double>::price() const {
+    return myPayoffAnalytical(S, K, vol, T).price;
+}
+```
+
+**Step 3**: Write the `var` specialization:
+
+```cpp
+template <>
+inline stan::math::var MyPayoff<stan::math::var>::price() const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    auto res = myPayoffAnalytical(S.val(), K.val(), vol.val(), T);
+
+    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
+        const double adj = vi.adj();
+        S.adj()   += adj * g1.dV_dS;
+        K.adj()   += adj * g1.dV_dK;
+        vol.adj() += adj * g1.dV_dvol;
+    });
+}
+```
+
+**Step 4**: Write the `fvar<var>` specialization:
+
+```cpp
+template <>
+inline stan::math::fvar<stan::math::var>
+MyPayoff<stan::math::fvar<stan::math::var>>::price() const {
+    using stan::math::fvar;
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    var Sv = S.val_, Kv = K.val_, volv = vol.val_;
+    var Sd = S.d_,   Kd = K.d_,  vold = vol.d_;
+
+    auto res = myPayoffAnalytical(Sv.val(), Kv.val(), volv.val(), T);
+    const auto& g1 = res.g1;
+    const auto& g2 = res.g2;
+
+    var price_var(res.price);
+
+    var dV_dS_var = make_callback_var(g1.dV_dS,
+        [Sv, Kv, volv,
+         d2V_dS2 = g2.d2V_dS2,
+         d2V_dS_dK = g2.d2V_dS_dK,
+         d2V_dS_dvol = g2.d2V_dS_dvol](auto& vi) {
+            double a = vi.adj();
+            Sv.adj()   += a * d2V_dS2;
+            Kv.adj()   += a * d2V_dS_dK;
+            volv.adj() += a * d2V_dS_dvol;
+        });
+
+    var dV_dK_var = make_callback_var(g1.dV_dK,
+        [Sv, Kv, volv,
+         d2V_dS_dK = g2.d2V_dS_dK,
+         d2V_dK2 = g2.d2V_dK2,
+         d2V_dK_dvol = g2.d2V_dK_dvol](auto& vi) {
+            double a = vi.adj();
+            Sv.adj()   += a * d2V_dS_dK;
+            Kv.adj()   += a * d2V_dK2;
+            volv.adj() += a * d2V_dK_dvol;
+        });
+
+    var dV_dvol_var = make_callback_var(g1.dV_dvol,
+        [Sv, Kv, volv,
+         d2V_dS_dvol = g2.d2V_dS_dvol,
+         d2V_dK_dvol = g2.d2V_dK_dvol,
+         d2V_dvol2 = g2.d2V_dvol2](auto& vi) {
+            double a = vi.adj();
+            Sv.adj()   += a * d2V_dS_dvol;
+            Kv.adj()   += a * d2V_dK_dvol;
+            volv.adj() += a * d2V_dvol2;
+        });
+
+    var tangent = dV_dS_var * Sd + dV_dK_var * Kd + dV_dvol_var * vold;
+
+    return fvar<var>(price_var, tangent);
+}
+```
+
+**Step 5**: Verify against naive AD (Section 8.8's pattern applies here too).
+
+### E.7 Lambda Capture Conventions
+
+The callbacks capture variables by **value** (copy the `var`). This is necessary because:
+- The callback fires during `grad()`, long after the function returns
+- Captured `var`s must still be alive on the tape
+- Capturing `this` in the `var` specialization works because the struct's `var` members are on the tape
+
+For the `fvar<var>` specialization, extract `.val_` and `.d_` into local `var` variables **before** the callbacks, then capture those locals:
+
+```cpp
+// Correct: capture var locals
+var Sv = S.val_;   // var, lives on tape
+var Sd = S.d_;     // var, lives on tape
+
+auto cb = make_callback_var(value, [Sv, /* ... */](auto& vi) {
+    Sv.adj() += ...;  // OK: Sv is a var on the tape
+});
+```
+
+Do **not** capture the `fvar<var>` members directly — their lifetime is tied to the function scope, not the tape.
+
+### E.8 Note on `make_callback_var` vs `precomputed_gradients`
+
+Section 8 of this document shows an older pattern using `precomputed_gradients` for the `var` specialization. `precomputed_gradients` is the legacy API; `make_callback_var` is the modern replacement in newer versions of Stan Math. Both produce one tape node, but `make_callback_var` is preferred:
+
+- **`make_callback_var`**: modern API, lambda-based, full control over adjoint propagation, works naturally for both `var` and `fvar<var>` specializations.
+- **`precomputed_gradients`**: legacy API, data-driven (`{vars, gradients}` vectors), kept for backward compatibility with older Stan versions.
+
+Use `make_callback_var` for all new specializations. The examples in Section 8 using `precomputed_gradients` are functionally equivalent but reflect the older style.
+
+### E.9 Interaction with Graph-Colored Diagonal Hessian
+
+Specializations work seamlessly with the diagonal Hessian from Appendix D. When `hessianDiagonal` seeds multiple tangent directions simultaneously, the `fvar<var>` specialization sees the combined tangent:
+
+```
+tangent = dV_dS_var * Sd + dV_dK_var * Kd + dV_dvol_var * vold
+```
+
+where multiple `Sd`, `Kd`, `vold` may be nonzero (because multiple variables are seeded). The callbacks still fire correctly — they push the full Hessian row, and the graph coloring ensures that cross-term contamination doesn't occur for the diagonal entries we care about.
