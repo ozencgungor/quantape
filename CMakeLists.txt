@@ -156,7 +156,8 @@ add_subdirectory(Markets)
 
 # Combine all sources and headers
 set(LIB_SOURCES ${MODEL_SOURCES_ABS} ${SCENARIO_SOURCES_ABS})
-set(LIB_HEADERS ${MODEL_HEADERS_ABS} ${SCENARIO_HEADERS_ABS} ${MATH_HEADERS_ABS} ${MARKETS_HEADERS_ABS})
+set(LIB_HEADERS ${MODEL_HEADERS_ABS} ${SCENARIO_HEADERS_ABS} ${MATH_HEADERS_ABS} ${MARKETS_HEADERS_ABS}
+        Pricing/BlackScholes.h)
 
 # ============================================================================
 # Library target
@@ -430,6 +431,32 @@ target_compile_options(test_bs_hessian_bench PRIVATE -Wall -Wextra -Wpedantic -O
 
 if(APPLE OR UNIX)
     set_target_properties(test_bs_hessian_bench PROPERTIES
+            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# Black-76 analytical Greeks test
+add_executable(test_black76 test_black76.cpp)
+
+target_link_libraries(test_black76 PUBLIC
+        generic_MC_lib
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_black76 PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_black76 PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+if(APPLE OR UNIX)
+    set_target_properties(test_black76 PROPERTIES
             INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
             BUILD_WITH_INSTALL_RPATH TRUE
     )

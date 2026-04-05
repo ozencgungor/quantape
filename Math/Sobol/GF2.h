@@ -30,7 +30,8 @@ inline uint64_t mul(uint64_t a, uint64_t b) {
     // This scalar fallback handles degrees up to ~31 safely in uint64_t.
     uint64_t r = 0;
     while (b) {
-        if (b & 1) r ^= a;
+        if (b & 1)
+            r ^= a;
         a <<= 1;
         b >>= 1;
     }
@@ -42,7 +43,7 @@ inline uint64_t mul(uint64_t a, uint64_t b) {
 inline uint64_t mul_hw(uint64_t a, uint64_t b) {
     __m128i va = _mm_set_epi64x(0, a);
     __m128i vb = _mm_set_epi64x(0, b);
-    __m128i r  = _mm_clmulepi64_si128(va, vb, 0x00);
+    __m128i r = _mm_clmulepi64_si128(va, vb, 0x00);
     // For degree ≤ 31 inputs, result fits in low 64 bits.
     // For higher degrees, high bits spill into r[127:64].
     return _mm_extract_epi64(r, 0);
@@ -53,13 +54,18 @@ inline uint64_t mod(uint64_t a, uint64_t m) {
     int dm = degree(m);
     for (;;) {
         int da = degree(a);
-        if (da < dm) return a;
+        if (da < dm)
+            return a;
         a ^= (m << (da - dm));
     }
 }
 
 inline uint64_t gcd(uint64_t a, uint64_t b) {
-    while (b) { uint64_t t = mod(a, b); a = b; b = t; }
+    while (b) {
+        uint64_t t = mod(a, b);
+        a = b;
+        b = t;
+    }
     return a;
 }
 
@@ -68,7 +74,8 @@ inline uint64_t powmod_x(uint64_t exp, uint64_t m) {
     uint64_t base = mod(2, m);
     uint64_t result = 1;
     while (exp > 0) {
-        if (exp & 1) result = mod(mul(result, base), m);
+        if (exp & 1)
+            result = mod(mul(result, base), m);
         base = mod(mul(base, base), m);
         exp >>= 1;
     }
@@ -84,10 +91,12 @@ inline std::vector<uint64_t> prime_factors(uint64_t n) {
     for (uint64_t d = 2; d * d <= n; ++d) {
         if (n % d == 0) {
             f.push_back(d);
-            while (n % d == 0) n /= d;
+            while (n % d == 0)
+                n /= d;
         }
     }
-    if (n > 1) f.push_back(n);
+    if (n > 1)
+        f.push_back(n);
     return f;
 }
 
@@ -99,19 +108,22 @@ inline std::vector<uint64_t> prime_factors(uint64_t n) {
 //   1. x^(2^s) ≡ x  (mod p)
 //   2. gcd(x^(2^(s/q)) - x, p) = 1 for each prime factor q of s
 inline bool is_irreducible(uint64_t p, int s) {
-    if (s <= 0) return false;
+    if (s <= 0)
+        return false;
 
     // x^(2^s) mod p via repeated squaring of x
     uint64_t xpow = 2;
     for (int i = 0; i < s; ++i)
         xpow = mod(mul(xpow, xpow), p);
-    if (xpow != 2) return false;
+    if (xpow != 2)
+        return false;
 
     for (uint64_t q : prime_factors(s)) {
         uint64_t xp = 2;
         for (int i = 0; i < s / (int)q; ++i)
             xp = mod(mul(xp, xp), p);
-        if (gcd(xp ^ 2, p) != 1) return false;  // xp - x = xp ^ x = xp ^ 2 (polynomial "x" = 0b10)
+        if (gcd(xp ^ 2, p) != 1)
+            return false; // xp - x = xp ^ x = xp ^ 2 (polynomial "x" = 0b10)
     }
     return true;
 }
@@ -121,11 +133,13 @@ inline bool is_irreducible(uint64_t p, int s) {
 //   2. ord(x mod p) = 2^s - 1
 //      i.e., x^((2^s-1)/q) ≢ 1 (mod p) for each prime q | (2^s - 1)
 inline bool is_primitive(uint64_t p, int s) {
-    if (!is_irreducible(p, s)) return false;
+    if (!is_irreducible(p, s))
+        return false;
 
     uint64_t order = (1ULL << s) - 1;
     for (uint64_t q : prime_factors(order)) {
-        if (powmod_x(order / q, p) == 1) return false;
+        if (powmod_x(order / q, p) == 1)
+            return false;
     }
     return true;
 }
