@@ -42,14 +42,16 @@ inline stan::math::var LinearInterpolation<stan::math::var>::valueImpl(stan::mat
     double w0 = (x2 - xv) * inv_dx;
     double w1 = (xv - x1) * inv_dx;
 
-    double y0_val = this->m_y[i].val();
-    double y1_val = this->m_y[i + 1].val();
-    double result = w0 * y0_val + w1 * y1_val;
+    var y0 = this->m_y[i];
+    var y1 = this->m_y[i + 1];
+    double result = w0 * y0.val() + w1 * y1.val();
 
-    return make_callback_var(result, [this, i, w0, w1](auto& vi) {
+    // y0/y1 captured by value: var copies share the varis, and the callback
+    // must stay valid even if the interpolation object is destroyed first.
+    return make_callback_var(result, [y0, y1, w0, w1](auto& vi) {
         double adj = vi.adj();
-        this->m_y[i].adj() += adj * w0;
-        this->m_y[i + 1].adj() += adj * w1;
+        y0.adj() += adj * w0;
+        y1.adj() += adj * w1;
     });
 }
 
@@ -65,14 +67,14 @@ LinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
     size_t i = this->locate(x);
     double inv_dx = 1.0 / (this->m_x[i + 1] - this->m_x[i]);
 
-    double y0_val = this->m_y[i].val();
-    double y1_val = this->m_y[i + 1].val();
-    double result = (y1_val - y0_val) * inv_dx;
+    stan::math::var y0 = this->m_y[i];
+    stan::math::var y1 = this->m_y[i + 1];
+    double result = (y1.val() - y0.val()) * inv_dx;
 
-    return make_callback_var(result, [this, i, inv_dx](auto& vi) {
+    return make_callback_var(result, [y0, y1, inv_dx](auto& vi) {
         double adj = vi.adj();
-        this->m_y[i].adj() += adj * (-inv_dx);
-        this->m_y[i + 1].adj() += adj * inv_dx;
+        y0.adj() += adj * (-inv_dx);
+        y1.adj() += adj * inv_dx;
     });
 }
 
@@ -102,15 +104,17 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
     double w0 = (x2 - xv) * inv_dx;
     double w1 = (xv - x1) * inv_dx;
 
-    const auto& y0 = this->m_y[i];
-    const auto& y1 = this->m_y[i + 1];
+    auto y0 = this->m_y[i];
+    auto y1 = this->m_y[i + 1];
 
     double y0_val = y0.val_.val();
     double y1_val = y1.val_.val();
     double result = w0 * y0_val + w1 * y1_val;
 
     // Value part: single callback var pushing w0/w1 to val_ adjoints
-    var val = make_callback_var(result, [&y0, &y1, w0, w1](auto& vi) {
+    // (y0/y1 captured by value: fvar copies share the varis, and the
+    // callback must stay valid if the interpolation object dies first)
+    var val = make_callback_var(result, [y0, y1, w0, w1](auto& vi) {
         double adj = vi.adj();
         y0.val_.adj() += adj * w0;
         y1.val_.adj() += adj * w1;
@@ -138,14 +142,14 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
     size_t i = this->locate(x);
     double inv_dx = 1.0 / (this->m_x[i + 1] - this->m_x[i]);
 
-    const auto& y0 = this->m_y[i];
-    const auto& y1 = this->m_y[i + 1];
+    auto y0 = this->m_y[i];
+    auto y1 = this->m_y[i + 1];
 
     double y0_val = y0.val_.val();
     double y1_val = y1.val_.val();
     double result = (y1_val - y0_val) * inv_dx;
 
-    var val = make_callback_var(result, [&y0, &y1, inv_dx](auto& vi) {
+    var val = make_callback_var(result, [y0, y1, inv_dx](auto& vi) {
         double adj = vi.adj();
         y0.val_.adj() += adj * (-inv_dx);
         y1.val_.adj() += adj * inv_dx;
@@ -182,10 +186,12 @@ inline stan::math::var LogLinearInterpolation<stan::math::var>::valueImpl(stan::
     double dfdyi = result * (1.0 - t) / y0;
     double dfdyi1 = result * t / y1;
 
-    return make_callback_var(result, [this, i, dfdyi, dfdyi1](auto& vi) {
+    stan::math::var y0v = this->m_y[i];
+    stan::math::var y1v = this->m_y[i + 1];
+    return make_callback_var(result, [y0v, y1v, dfdyi, dfdyi1](auto& vi) {
         double adj = vi.adj();
-        this->m_y[i].adj() += adj * dfdyi;
-        this->m_y[i + 1].adj() += adj * dfdyi1;
+        y0v.adj() += adj * dfdyi;
+        y1v.adj() += adj * dfdyi1;
     });
 }
 
@@ -225,10 +231,12 @@ LogLinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const
     double dg_dy0 = f_val * inv_dx / y0 * ((1.0 - t) * dL - 1.0);
     double dg_dy1 = f_val * inv_dx / y1 * (t * dL + 1.0);
 
-    return make_callback_var(result, [this, i, dg_dy0, dg_dy1](auto& vi) {
+    stan::math::var y0v = this->m_y[i];
+    stan::math::var y1v = this->m_y[i + 1];
+    return make_callback_var(result, [y0v, y1v, dg_dy0, dg_dy1](auto& vi) {
         double adj = vi.adj();
-        this->m_y[i].adj() += adj * dg_dy0;
-        this->m_y[i + 1].adj() += adj * dg_dy1;
+        y0v.adj() += adj * dg_dy0;
+        y1v.adj() += adj * dg_dy1;
     });
 }
 
@@ -256,8 +264,8 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
     double xv = this->extractDouble(x);
     double t = (xv - x1) / (x2 - x1);
 
-    const auto& yi = this->m_y[i];
-    const auto& yi1 = this->m_y[i + 1];
+    auto yi = this->m_y[i];
+    auto yi1 = this->m_y[i + 1];
 
     double y0 = yi.val_.val();
     double y1 = yi1.val_.val();
@@ -275,8 +283,9 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 
     var yiv = yi.val_, yi1v = yi1.val_;
 
-    // Value: single callback var
-    var val = make_callback_var(f_val, [&yi, &yi1, g0, g1](auto& vi) {
+    // Value: single callback var (yi/yi1 captured by value: fvar copies
+    // share the varis, and the callback must outlive the interpolator)
+    var val = make_callback_var(f_val, [yi, yi1, g0, g1](auto& vi) {
         double adj = vi.adj();
         yi.val_.adj() += adj * g0;
         yi1.val_.adj() += adj * g1;
@@ -324,8 +333,8 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
     double inv_dx = 1.0 / (x2 - x1);
     double t = (xv - x1) / (x2 - x1);
 
-    const auto& yi = this->m_y[i];
-    const auto& yi1 = this->m_y[i + 1];
+    auto yi = this->m_y[i];
+    auto yi1 = this->m_y[i + 1];
 
     double y0 = yi.val_.val();
     double y1 = yi1.val_.val();
@@ -349,7 +358,7 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
 
     var yiv = yi.val_, yi1v = yi1.val_;
 
-    var val = make_callback_var(result, [&yi, &yi1, g0, g1](auto& vi) {
+    var val = make_callback_var(result, [yi, yi1, g0, g1](auto& vi) {
         double adj = vi.adj();
         yi.val_.adj() += adj * g0;
         yi1.val_.adj() += adj * g1;
@@ -407,12 +416,15 @@ inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::m
     double result = w00 * m_z[j][i].val() + w10 * m_z[j][i + 1].val() + w01 * m_z[j + 1][i].val() +
                     w11 * m_z[j + 1][i + 1].val();
 
-    return make_callback_var(result, [this, i, j, w00, w10, w01, w11](auto& vi) {
+    var z00 = m_z[j][i], z10 = m_z[j][i + 1];
+    var z01 = m_z[j + 1][i], z11 = m_z[j + 1][i + 1];
+
+    return make_callback_var(result, [z00, z10, z01, z11, w00, w10, w01, w11](auto& vi) {
         double adj = vi.adj();
-        this->m_z[j][i].adj() += adj * w00;
-        this->m_z[j][i + 1].adj() += adj * w10;
-        this->m_z[j + 1][i].adj() += adj * w01;
-        this->m_z[j + 1][i + 1].adj() += adj * w11;
+        z00.adj() += adj * w00;
+        z10.adj() += adj * w10;
+        z01.adj() += adj * w01;
+        z11.adj() += adj * w11;
     });
 }
 
@@ -448,16 +460,17 @@ BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
     double w00 = wy0 * wx0, w10 = wy0 * wx1;
     double w01 = wy1 * wx0, w11 = wy1 * wx1;
 
-    const auto& z00 = m_z[j][i];
-    const auto& z10 = m_z[j][i + 1];
-    const auto& z01 = m_z[j + 1][i];
-    const auto& z11 = m_z[j + 1][i + 1];
+    auto z00 = m_z[j][i];
+    auto z10 = m_z[j][i + 1];
+    auto z01 = m_z[j + 1][i];
+    auto z11 = m_z[j + 1][i + 1];
 
     double result =
         w00 * z00.val_.val() + w10 * z10.val_.val() + w01 * z01.val_.val() + w11 * z11.val_.val();
 
-    // Value: single callback var
-    var val = make_callback_var(result, [&z00, &z10, &z01, &z11, w00, w10, w01, w11](auto& vi) {
+    // Value: single callback var (z values captured by value: fvar copies
+    // share the varis, and the callback must outlive the interpolator)
+    var val = make_callback_var(result, [z00, z10, z01, z11, w00, w10, w01, w11](auto& vi) {
         double adj = vi.adj();
         z00.val_.adj() += adj * w00;
         z10.val_.adj() += adj * w10;
@@ -491,8 +504,8 @@ BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 // ============================================================================
 
 template <>
-inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixValue(
-    stan::math::var x) const {
+inline stan::math::var
+CubicInterpolation<stan::math::var>::weightMatrixValue(stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -506,7 +519,7 @@ inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixValue(
     const double dx2 = dx * dx;
     const double dx3 = dx2 * dx;
 
-    double result = this->m_y[i].val();      // the delta(i, j) term
+    double result = this->m_y[i].val(); // the delta(i, j) term
     std::vector<double> w(n, 0.0);
     for (size_t j = 0; j < n; ++j) {
         w[j] = m_Wa[i * n + j] * dx + m_Wb[i * n + j] * dx2 + m_Wc[i * n + j] * dx3;
@@ -515,15 +528,15 @@ inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixValue(
 
     return make_callback_var(result, [y = this->m_y, i, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
-        y[i].adj() += adj;                    // delta(i, j)
+        y[i].adj() += adj; // delta(i, j)
         for (size_t j = 0; j < w.size(); ++j)
             y[j].adj() += adj * w[j];
     });
 }
 
 template <>
-inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixDerivative(
-    stan::math::var x) const {
+inline stan::math::var
+CubicInterpolation<stan::math::var>::weightMatrixDerivative(stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -576,7 +589,6 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixValue(
         result += w[j] * this->m_y[j].val_.val();
     }
 
-
     // Linear in y => y-Hessian is zero: tangent is just the weighted sum
     // of the tangent components — no Hessian callback vars.
     var tangent = this->m_y[i].d_;
@@ -617,7 +629,6 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
         result += w[j] * this->m_y[j].val_.val();
     }
 
-
     var tangent = 0.0;
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
@@ -648,11 +659,11 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
 // ============================================================================
 
 template <>
-inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsValue(
-    stan::math::var x) const {
+inline stan::math::var
+CubicInterpolation<stan::math::var>::localWeightsValue(stan::math::var x) const {
+    using Math::detail::ProbeDual;
     using stan::math::make_callback_var;
     using stan::math::var;
-    using Math::detail::ProbeDual;
 
     const size_t n = this->m_x.size();
     const size_t seg = (n == 2) ? 1 : n - 1;
@@ -674,13 +685,11 @@ inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsValue(
 
     const double result = this->m_y[i].val() + a[i].v * dx + b[i].v * dx2 + c[i].v * dx3;
     std::vector<double> w(n, 0.0);
-    w[i] += 1.0;  // delta(i, j)
+    w[i] += 1.0; // delta(i, j)
     // Size-safe gradient read: zero entries (or any dual produced from a
     // scalar literal) carry an EMPTY gradient vector; treat missing entries
     // as zero gradients rather than reading out of bounds.
-    auto dGet = [](const auto& dual, size_t k) {
-        return k < dual.d.size() ? dual.d[k] : 0.0;
-    };
+    auto dGet = [](const auto& dual, size_t k) { return k < dual.d.size() ? dual.d[k] : 0.0; };
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
 
@@ -692,11 +701,11 @@ inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsValue(
 }
 
 template <>
-inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsDerivative(
-    stan::math::var x) const {
+inline stan::math::var
+CubicInterpolation<stan::math::var>::localWeightsDerivative(stan::math::var x) const {
+    using Math::detail::ProbeDual;
     using stan::math::make_callback_var;
     using stan::math::var;
-    using Math::detail::ProbeDual;
 
     const size_t n = this->m_x.size();
     const size_t seg = (n == 2) ? 1 : n - 1;
@@ -720,9 +729,7 @@ inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsDerivati
     // Size-safe gradient read: zero entries (or any dual produced from a
     // scalar literal) carry an EMPTY gradient vector; treat missing entries
     // as zero gradients rather than reading out of bounds.
-    auto dGet = [](const auto& dual, size_t k) {
-        return k < dual.d.size() ? dual.d[k] : 0.0;
-    };
+    auto dGet = [](const auto& dual, size_t k) { return k < dual.d.size() ? dual.d[k] : 0.0; };
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
 
@@ -737,10 +744,10 @@ template <>
 inline stan::math::fvar<stan::math::var>
 CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsValue(
     stan::math::fvar<stan::math::var> x) const {
+    using Math::detail::ProbeDual;
     using stan::math::fvar;
     using stan::math::make_callback_var;
     using stan::math::var;
-    using Math::detail::ProbeDual;
 
     const size_t n = this->m_x.size();
     const size_t seg = (n == 2) ? 1 : n - 1;
@@ -760,19 +767,15 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsValue(
     std::vector<ProbeDual> a, b, c;
     CubicInterpolation<fvar<var>>::computeCoefficientsDual(this->m_x, y, m_da, m_smooth, a, b, c);
 
-    const double result =
-        this->m_y[i].val_.val() + a[i].v * dx + b[i].v * dx2 + c[i].v * dx3;
+    const double result = this->m_y[i].val_.val() + a[i].v * dx + b[i].v * dx2 + c[i].v * dx3;
     std::vector<double> w(n, 0.0);
     w[i] += 1.0;
     // Size-safe gradient read: zero entries (or any dual produced from a
     // scalar literal) carry an EMPTY gradient vector; treat missing entries
     // as zero gradients rather than reading out of bounds.
-    auto dGet = [](const auto& dual, size_t k) {
-        return k < dual.d.size() ? dual.d[k] : 0.0;
-    };
+    auto dGet = [](const auto& dual, size_t k) { return k < dual.d.size() ? dual.d[k] : 0.0; };
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
-
 
     var tangent = this->m_y[i].d_;
     for (size_t j = 0; j < n; ++j)
@@ -791,10 +794,10 @@ template <>
 inline stan::math::fvar<stan::math::var>
 CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
     stan::math::fvar<stan::math::var> x) const {
+    using Math::detail::ProbeDual;
     using stan::math::fvar;
     using stan::math::make_callback_var;
     using stan::math::var;
-    using Math::detail::ProbeDual;
 
     const size_t n = this->m_x.size();
     const size_t seg = (n == 2) ? 1 : n - 1;
@@ -818,12 +821,9 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
     // Size-safe gradient read: zero entries (or any dual produced from a
     // scalar literal) carry an EMPTY gradient vector; treat missing entries
     // as zero gradients rather than reading out of bounds.
-    auto dGet = [](const auto& dual, size_t k) {
-        return k < dual.d.size() ? dual.d[k] : 0.0;
-    };
+    auto dGet = [](const auto& dual, size_t k) { return k < dual.d.size() ? dual.d[k] : 0.0; };
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
-
 
     var tangent = 0.0;
     for (size_t j = 0; j < n; ++j)
@@ -839,7 +839,5 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
 }
 
 } // namespace Math
-
-
 
 #endif // INTERPOLATION_STAN_PRIMITIVES_H

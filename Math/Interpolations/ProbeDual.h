@@ -21,8 +21,7 @@ struct ProbeDual {
     double v = 0.0;
     std::vector<double> d;
 
-    explicit ProbeDual(double value = 0.0, size_t gradSize = 0)
-        : v(value), d(gradSize, 0.0) {}
+    explicit ProbeDual(double value = 0.0, size_t gradSize = 0) : v(value), d(gradSize, 0.0) {}
 
     ProbeDual operator-() const {
         // Negate BOTH value and derivatives. (An earlier version forgot the
@@ -58,16 +57,15 @@ struct ProbeDual {
         const size_t m = maxSize(d.size(), o.d.size());
         ProbeDual r(v * o.v, m);
         for (size_t k = 0; k < m; ++k)
-            r.d[k] = (k < d.size() ? d[k] : 0.0) * o.v +
-                     v * (k < o.d.size() ? o.d[k] : 0.0);
+            r.d[k] = (k < d.size() ? d[k] : 0.0) * o.v + v * (k < o.d.size() ? o.d[k] : 0.0);
         return r;
     }
     ProbeDual operator/(const ProbeDual& o) const {
         const size_t m = maxSize(d.size(), o.d.size());
         ProbeDual r(v / o.v, m);
         for (size_t k = 0; k < m; ++k)
-            r.d[k] = ((k < d.size() ? d[k] : 0.0) * o.v -
-                      v * (k < o.d.size() ? o.d[k] : 0.0)) / (o.v * o.v);
+            r.d[k] = ((k < d.size() ? d[k] : 0.0) * o.v - v * (k < o.d.size() ? o.d[k] : 0.0)) /
+                     (o.v * o.v);
         return r;
     }
 
@@ -83,14 +81,18 @@ struct ProbeDual {
     ProbeDual operator/(double x) const { return *this / ProbeDual(x, d.size()); }
 };
 
-inline ProbeDual operator+(double x, const ProbeDual& o) { return o + x; }
+inline ProbeDual operator+(double x, const ProbeDual& o) {
+    return o + x;
+}
 inline ProbeDual operator-(double x, const ProbeDual& o) {
     ProbeDual r(x - o.v, o.d.size());
     for (size_t k = 0; k < o.d.size(); ++k)
         r.d[k] = -o.d[k];
     return r;
 }
-inline ProbeDual operator*(double x, const ProbeDual& o) { return o * x; }
+inline ProbeDual operator*(double x, const ProbeDual& o) {
+    return o * x;
+}
 inline ProbeDual operator/(double x, const ProbeDual& o) {
     ProbeDual r(x / o.v, o.d.size());
     for (size_t k = 0; k < o.d.size(); ++k)
@@ -109,8 +111,12 @@ inline ProbeDual abs(const ProbeDual& x) {
     return r;
 }
 
-inline double primal(const ProbeDual& x) { return x.v; }
-inline double primal(double x) { return x; }
+inline double primal(const ProbeDual& x) {
+    return x.v;
+}
+inline double primal(double x) {
+    return x;
+}
 
 /// Smooth approximation of |u|: sqrt(u^2 + eps^2) — C^1, subgradient-free.
 inline ProbeDual smoothAbs(const ProbeDual& x, double eps = 1e-8) {

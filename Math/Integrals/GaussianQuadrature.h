@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "Integrator.h"
@@ -180,6 +181,22 @@ public:
           ,
           m_quadrature(order) {}
 
+    /**
+     * @brief Integrate f from a to b.
+     *
+     * double: the fixed-order quadrature below. var and fvar<var>: the
+     * discrete quadrature rule is extracted by probing the rule with
+     * RuleScalar and the AD integrand samples are combined with it through a
+     * single callback var per output (IntegratorStanPrimitives.h).
+     */
+    DoubleT operator()(const FunctionType& f, DoubleT a, DoubleT b) const {
+        if constexpr (std::is_same_v<DoubleT, double>) {
+            return Integrator<DoubleT>::operator()(f, a, b);
+        } else {
+            return integratePrimitives(f, a, b);
+        }
+    }
+
 protected:
     DoubleT integrate(const FunctionType& f, DoubleT a, DoubleT b) const override {
         this->setNumberOfEvaluations(m_quadrature.order());
@@ -188,6 +205,11 @@ protected:
 
 private:
     GaussLegendreQuadrature<DoubleT> m_quadrature;
+
+    // Defined for stan::math::var / stan::math::fvar<var> in
+    // IntegratorStanPrimitives.h. Never ODR-used for double (nor for the
+    // RuleScalar probe, which enters through the base operator()).
+    DoubleT integratePrimitives(const FunctionType& f, DoubleT a, DoubleT b) const;
 };
 } // namespace Math
 

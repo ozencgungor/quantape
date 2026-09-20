@@ -47,7 +47,7 @@ public:
 
         // Create interpolator for zero rates
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-            m_tenors, m_zeroRates, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_zeroRates, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -57,7 +57,7 @@ public:
         : m_descriptor(other.m_descriptor), m_tenors(other.m_tenors),
           m_zeroRates(other.m_zeroRates) {
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-            m_tenors, m_zeroRates, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_zeroRates, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -69,7 +69,7 @@ public:
             m_tenors = other.m_tenors;
             m_zeroRates = other.m_zeroRates;
             m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-                m_tenors, m_zeroRates, Math::CubicInterpolation<DoubleT>::Spline);
+                m_tenors, m_zeroRates, Math::CubicDerivativeApprox::Spline);
         }
         return *this;
     }
