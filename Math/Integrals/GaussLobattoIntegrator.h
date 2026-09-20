@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include "Integrator.h"
 
@@ -42,6 +43,22 @@ public:
                            bool useConvergenceEstimate = true)
         : Integrator<DoubleT>(absAccuracy, maxIterations), m_relAccuracy(relAccuracy),
           m_useConvergenceEstimate(useConvergenceEstimate) {}
+
+    /**
+     * @brief Integrate f from a to b.
+     *
+     * double: the adaptive 6-way subdivision implemented below. var and
+     * fvar<var>: the converged quadrature rule is extracted in one
+     * double-valued pass and the AD integrand samples are combined with it
+     * through a single callback var per output (IntegratorStanPrimitives.h).
+     */
+    DoubleT operator()(const FunctionType& f, DoubleT a, DoubleT b) const {
+        if constexpr (std::is_same_v<DoubleT, double>) {
+            return Integrator<DoubleT>::operator()(f, a, b);
+        } else {
+            return integratePrimitives(f, a, b);
+        }
+    }
 
 protected:
     DoubleT integrate(const FunctionType& f, DoubleT a, DoubleT b) const override {
@@ -178,13 +195,18 @@ private:
         }
     }
 
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
+    // Recursive primal extraction: double -> itself, var -> .val(),
+    // fvar<var> -> .val().val()
+    static double value(double x) { return x; }
+    template <typename T>
+    static double value(const T& x) {
+        return value(x.val());
     }
+
+    // Defined for stan::math::var / stan::math::fvar<var> in
+    // IntegratorStanPrimitives.h. Never ODR-used for double (nor for the
+    // RuleScalar probe, which enters through the base operator()).
+    DoubleT integratePrimitives(const FunctionType& f, DoubleT a, DoubleT b) const;
 };
 } // namespace Math
 

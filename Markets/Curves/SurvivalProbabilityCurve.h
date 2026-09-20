@@ -56,7 +56,7 @@ public:
 
         // Create interpolator for survival probabilities
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-            m_tenors, m_survivalProbs, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_survivalProbs, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -66,7 +66,7 @@ public:
         : m_descriptor(other.m_descriptor), m_tenors(other.m_tenors),
           m_survivalProbs(other.m_survivalProbs) {
         m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-            m_tenors, m_survivalProbs, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_survivalProbs, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -78,7 +78,7 @@ public:
             m_tenors = other.m_tenors;
             m_survivalProbs = other.m_survivalProbs;
             m_interpolator = std::make_unique<Math::CubicInterpolation<DoubleT>>(
-                m_tenors, m_survivalProbs, Math::CubicInterpolation<DoubleT>::Spline);
+                m_tenors, m_survivalProbs, Math::CubicDerivativeApprox::Spline);
         }
         return *this;
     }

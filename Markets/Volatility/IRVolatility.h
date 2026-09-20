@@ -74,7 +74,7 @@ public:
         // Note: BicubicInterpolation expects (x, y, z) where z[y_index][x_index]
         // So we pass (tenors, expiries, z) since our z is organized as z[expiry][tenor]
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -85,7 +85,7 @@ public:
           m_atmVolSurface(other.m_atmVolSurface), m_hasSmile(other.m_hasSmile),
           m_strikes(other.m_strikes) {
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -100,7 +100,7 @@ public:
             m_hasSmile = other.m_hasSmile;
             m_strikes = other.m_strikes;
             m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-                m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+                m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
         }
         return *this;
     }
@@ -193,7 +193,7 @@ public:
         }
         // Recreate interpolator with scaled surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -208,7 +208,7 @@ public:
         }
         // Recreate interpolator with shifted surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -224,7 +224,7 @@ public:
         }
         // Recreate interpolator with transformed surface
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -244,7 +244,7 @@ public:
             m_atmVolSurface[expiryIndex][tenorIndex] + bumpSize;
         // Recreate interpolator
         m_atmInterpolator = std::make_unique<Math::BicubicInterpolation<DoubleT>>(
-            m_tenors, m_expiries, m_atmVolSurface, Math::CubicInterpolation<DoubleT>::Spline);
+            m_tenors, m_expiries, m_atmVolSurface, Math::CubicDerivativeApprox::Spline);
     }
 
     /**

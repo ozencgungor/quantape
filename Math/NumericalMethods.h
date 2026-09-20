@@ -16,7 +16,11 @@
  *   Math::TrapezoidIntegratorDefault<double> integrator(1e-6, 1000);
  *   double result = integrator([](double x) { return x*x; }, 0.0, 1.0);
  *
- *   // For automatic differentiation (requires Stan Math)
+ *   // For automatic differentiation (requires Stan Math), also include
+ *   // "Math/Integrals/IntegratorStanPrimitives.h": var and fvar<var>
+ *   // integrator instantiations then use the optimized rule-extraction
+ *   // path automatically (this umbrella stays Stan-free so double-only
+ *   // consumers do not need the Stan Math / TBB include paths).
  *   using ADVariableT = stan::math::var;
  *   Math::TrapezoidIntegratorDefault<ADVariableT> ad_integrator(1e-6, 1000);
  *   ADVariableT result_ad = ad_integrator([](ADVariableT x) { return x*x; },
@@ -28,6 +32,7 @@
 #include "Integrals/GaussianQuadrature.h"
 #include "Integrals/Integrator.h"
 #include "Integrals/SimpsonIntegrator.h"
+#include "Integrals/TanhSinhIntegrator.h"
 #include "Integrals/TrapezoidIntegrator.h"
 
 // Solver methods

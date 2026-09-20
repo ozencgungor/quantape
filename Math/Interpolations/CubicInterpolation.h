@@ -31,9 +31,9 @@ enum class CubicDerivativeApprox {
 /// y-direction weights are built once and shared by every per-query
 /// y-interpolation.
 struct CubicWeightMatrix {
-    size_t n = 0;    ///< grid size
-    size_t seg = 0;  ///< number of segments
-    std::vector<double> Wa, Wb, Wc;  ///< flat (seg * n) rows
+    size_t n = 0;                   ///< grid size
+    size_t seg = 0;                 ///< number of segments
+    std::vector<double> Wa, Wb, Wc; ///< flat (seg * n) rows
 
     bool empty() const { return seg == 0; }
 };
@@ -68,13 +68,12 @@ struct CubicWeightMatrix {
  *                 of slightly changing its values.
  */
 template <typename DoubleT, bool Smooth = false>
-class CubicInterpolation
-    : public Interpolation<DoubleT, CubicInterpolation<DoubleT, Smooth>> {
+class CubicInterpolation : public Interpolation<DoubleT, CubicInterpolation<DoubleT, Smooth>> {
     using Base = Interpolation<DoubleT, CubicInterpolation<DoubleT, Smooth>>;
     friend Base;
 
 public:
-    using DerivativeApprox = CubicDerivativeApprox;  // back-compat alias
+    using DerivativeApprox = CubicDerivativeApprox; // back-compat alias
 
     template <typename ContainerX, typename ContainerY>
     CubicInterpolation(const ContainerX& x, const ContainerY& y,
@@ -84,7 +83,7 @@ public:
         this->m_y = this->toVector(y);
         this->validate();
         if constexpr (std::is_same_v<DoubleT, double>) {
-            calculateCoefficients();  // coefficient fast path (double only)
+            calculateCoefficients(); // coefficient fast path (double only)
         } else {
             // AD types never need the coefficient path: linear methods use
             // the weight matrix, adaptive methods recompute branch-pinned
@@ -98,8 +97,8 @@ public:
     /// interpolators on the same grid — the 2D per-query y-interpolation
     /// uses this to avoid re-probing on every evaluation).
     template <typename ContainerX, typename ContainerY>
-    CubicInterpolation(const ContainerX& x, const ContainerY& y, DerivativeApprox da,
-                       bool smooth, const CubicWeightMatrix& precomputed)
+    CubicInterpolation(const ContainerX& x, const ContainerY& y, DerivativeApprox da, bool smooth,
+                       const CubicWeightMatrix& precomputed)
         : m_da(da), m_smooth(smooth) {
         this->m_x = this->toDoubleVector(x);
         this->m_y = this->toVector(y);
@@ -110,17 +109,17 @@ public:
             if (!precomputed.empty())
                 applyWeights(precomputed);
             else
-                buildWeightMatrix();  // fallback (e.g., adaptive methods)
+                buildWeightMatrix(); // fallback (e.g., adaptive methods)
         }
     }
 
     DoubleT valueImpl(DoubleT x) const {
         if constexpr (std::is_same_v<DoubleT, double>) {
-            return coefficientValue(x);  // O(1) fast path, no tape concept
+            return coefficientValue(x); // O(1) fast path, no tape concept
         } else {
             if (m_useWeights)
-                return weightMatrixValue(x);  // Spline/Parabolic: global weights
-            return localWeightsValue(x);      // adaptive methods: branch-pinned probe
+                return weightMatrixValue(x); // Spline/Parabolic: global weights
+            return localWeightsValue(x);     // adaptive methods: branch-pinned probe
         }
     }
 
@@ -160,7 +159,7 @@ private:
     // branch selection depends on y, so precomputed weights would go
     // stale when a branch flips.
     bool m_useWeights = false;
-    std::vector<double> m_Wa, m_Wb, m_Wc;  ///< flat (segment * n) rows
+    std::vector<double> m_Wa, m_Wb, m_Wc; ///< flat (segment * n) rows
 
     // Defined for stan::math::var / stan::math::fvar<var> in
     // InterpolationStanPrimitives.h. Never ODR-used for double.
@@ -169,13 +168,11 @@ private:
     DoubleT localWeightsValue(DoubleT x) const;
     DoubleT localWeightsDerivative(DoubleT x) const;
 
-    void buildWeightMatrix() {
-        applyWeights(probeWeights(this->m_x, m_da));
-    }
+    void buildWeightMatrix() { applyWeights(probeWeights(this->m_x, m_da)); }
 
     void applyWeights(const CubicWeightMatrix& W) {
         if (W.empty())
-            return;  // adaptive methods: not linear in y, no global weights
+            return; // adaptive methods: not linear in y, no global weights
         m_useWeights = true;
         m_Wa = W.Wa;
         m_Wb = W.Wb;
@@ -187,13 +184,12 @@ private:
     /// coefficients. O(n) solves, O(n^2) total — pure double, never on any
     /// tape. Public/static so 2D interpolators can cache one per grid.
 public:
-    static CubicWeightMatrix probeWeights(const std::vector<double>& x,
-                                          DerivativeApprox da) {
+    static CubicWeightMatrix probeWeights(const std::vector<double>& x, DerivativeApprox da) {
         CubicWeightMatrix W;
-        const bool linearInY = (da == DerivativeApprox::Spline ||
-                                da == DerivativeApprox::Parabolic);
+        const bool linearInY =
+            (da == DerivativeApprox::Spline || da == DerivativeApprox::Parabolic);
         if (!linearInY)
-            return W;  // adaptive methods: data-dependent branch selection
+            return W; // adaptive methods: data-dependent branch selection
 
         const size_t n = x.size();
         const size_t seg = (n == 2) ? 1 : n - 1;
@@ -312,7 +308,9 @@ private:
     static double primalOf(double x) { return x; }
     static double primalOf(const detail::ProbeDual& x) { return detail::primal(x); }
     template <typename T>
-    static double primalOf(const T& x) { return primalOf(x.val()); }
+    static double primalOf(const T& x) {
+        return primalOf(x.val());
+    }
 
     template <typename T>
     static T absImpl(const T& x) {
@@ -320,7 +318,7 @@ private:
             return std::abs(x);
         } else {
             using std::abs;
-            return abs(x);  // ADL: stan::math::abs, or detail::abs(ProbeDual)
+            return abs(x); // ADL: stan::math::abs, or detail::abs(ProbeDual)
         }
     }
 
@@ -332,7 +330,7 @@ private:
             return detail::smoothAbs(x);
         } else {
             const double eps = 1e-8;
-            return sqrt(x * x + eps * eps);  // stan types: generic C^1 abs
+            return sqrt(x * x + eps * eps); // stan types: generic C^1 abs
         }
     }
 
@@ -346,10 +344,9 @@ private:
     // (branch-pinned linearization). Branch conditions always use primalOf.
 
     template <typename T>
-    static std::vector<T> solveTridiagonalT(const std::vector<double>& lower,
-                                            const std::vector<double>& diag,
-                                            const std::vector<double>& upper,
-                                            const std::vector<T>& rhs) {
+    static std::vector<T>
+    solveTridiagonalT(const std::vector<double>& lower, const std::vector<double>& diag,
+                      const std::vector<double>& upper, const std::vector<T>& rhs) {
         const size_t n = rhs.size();
         if (n == 0)
             return {};
@@ -588,12 +585,10 @@ private:
     // anyway); static, reusable, and never instantiated for double.
 
 public:
-    static void computeCoefficientsDual(const std::vector<double>& x,
-                                        const std::vector<detail::ProbeDual>& y,
-                                        DerivativeApprox da, bool smooth,
-                                        std::vector<detail::ProbeDual>& a,
-                                        std::vector<detail::ProbeDual>& b,
-                                        std::vector<detail::ProbeDual>& c) {
+    static void
+    computeCoefficientsDual(const std::vector<double>& x, const std::vector<detail::ProbeDual>& y,
+                            DerivativeApprox da, bool smooth, std::vector<detail::ProbeDual>& a,
+                            std::vector<detail::ProbeDual>& b, std::vector<detail::ProbeDual>& c) {
         const size_t n = x.size();
         if (n < 2)
             throw std::runtime_error("CubicInterpolation: need at least 2 points");
@@ -643,9 +638,10 @@ public:
         for (size_t i = 0; i < n - 1; ++i) {
             a[i] = derivatives[i];
             b[i] = (detail::ProbeDual(3.0, n) * S[i] - derivatives[i + 1] -
-                    detail::ProbeDual(2.0, n) * derivatives[i]) / dx[i];
-            c[i] = (derivatives[i + 1] + derivatives[i] -
-                    detail::ProbeDual(2.0, n) * S[i]) / (dx[i] * dx[i]);
+                    detail::ProbeDual(2.0, n) * derivatives[i]) /
+                   dx[i];
+            c[i] = (derivatives[i + 1] + derivatives[i] - detail::ProbeDual(2.0, n) * S[i]) /
+                   (dx[i] * dx[i]);
         }
     }
 };

@@ -695,7 +695,7 @@ void benchCubicSpline() {
             y_var[i] = y_vals[i];
         var x_v = x_eval;
         CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
-                                       CubicInterpolation<var>::Spline);
+                                       CubicDerivativeApprox::Spline);
         var result = interp(x_v);
         stan::math::grad(result.vi_);
         stan::math::recover_memory();
@@ -721,7 +721,7 @@ void benchCubicSpline() {
 
         var x_n = x_eval;
         CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_naive,
-                                       CubicInterpolation<var>::Spline);
+                                       CubicDerivativeApprox::Spline);
         var res_n = interp(x_n);
         stan::math::grad(res_n.vi_);
 
@@ -776,7 +776,7 @@ void benchCubicSpline() {
             y_var[i] = y_vals[i];
         var x_v = x_eval;
         CubicInterpolation<var> interp(std::vector<var>(x_grid.begin(), x_grid.end()), y_var,
-                                       CubicInterpolation<var>::Spline);
+                                       CubicDerivativeApprox::Spline);
         var result = interp(x_v);
         (void)result;
     };
@@ -796,7 +796,7 @@ void benchCubicSpline() {
     printMemory("cubic spline", nodes_naive, nodes_anal, bytes_naive, bytes_anal, MEM_BATCH);
 
     auto double_once = [&]() {
-        CubicInterpolation<double> interp(x_grid, y_vals, CubicInterpolation<double>::Spline);
+        CubicInterpolation<double> interp(x_grid, y_vals, CubicDerivativeApprox::Spline);
         volatile double result = interp(x_eval);
         (void)result;
     };
