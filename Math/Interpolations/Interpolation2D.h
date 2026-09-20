@@ -1,32 +1,44 @@
 #ifndef INTERPOLATION2D_H
 #define INTERPOLATION2D_H
 
-#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
 namespace Math {
 
-template <typename DoubleT>
+/**
+ * @brief CRTP base class for 2D interpolations
+ *
+ * Derived classes must implement (non-virtual, accessible via friend):
+ * - valueImpl(DoubleT x, DoubleT y) const -> DoubleT
+ * - isInRange(DoubleT x, DoubleT y) const -> bool
+ *
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam Derived CRTP derived class
+ */
+template <typename DoubleT, typename Derived>
 class Interpolation2D {
 public:
     Interpolation2D() = default;
-    virtual ~Interpolation2D() = default;
 
     DoubleT operator()(DoubleT x, DoubleT y, bool allowExtrapolation = false) const {
-        if (!allowExtrapolation && !isInRange(x, y)) {
+        if (!allowExtrapolation && !derived().isInRange(x, y)) {
             throw std::runtime_error("Interpolation2D: (x, y) is out of range");
         }
-        return valueImpl(x, y);
+        return derived().valueImpl(x, y);
     }
 
-protected:
-    virtual DoubleT valueImpl(DoubleT x, DoubleT y) const = 0;
-    virtual bool isInRange(DoubleT x, DoubleT y) const = 0;
+    // ── Value extraction ──
 
-    /**
-     * @brief Helper to convert 1D container to std::vector
-     */
+    static double extractDouble(double x) { return x; }
+
+    template <typename T>
+    static double extractDouble(const T& x) {
+        return extractDouble(x.val());
+    }
+
+    // ── Container conversion helpers ──
+
     template <typename Container>
     static std::vector<DoubleT> toVector(const Container& container) {
         if constexpr (std::is_same_v<Container, std::vector<DoubleT>>) {
@@ -41,15 +53,24 @@ protected:
         }
     }
 
-    /**
-     * @brief Helper to convert 2D container to std::vector<std::vector<>>
-     * Works with std::vector<std::vector<>>, Eigen::Matrix, etc.
-     */
+    template <typename Container>
+    static std::vector<double> toDoubleVector(const Container& container) {
+        if constexpr (std::is_same_v<Container, std::vector<double>>) {
+            return container;
+        } else {
+            std::vector<double> result;
+            result.reserve(container.size());
+            for (size_t i = 0; i < container.size(); ++i) {
+                result.push_back(extractDouble(container[i]));
+            }
+            return result;
+        }
+    }
+
     template <typename Container2D>
     static std::vector<std::vector<DoubleT>> toVector2D(const Container2D& container) {
         std::vector<std::vector<DoubleT>> result;
 
-        // For Eigen matrices or similar: use rows() and cols()
         if constexpr (requires {
                           container.rows();
                           container.cols();
@@ -61,12 +82,10 @@ protected:
                     result[i][j] = static_cast<DoubleT>(container(i, j));
                 }
             }
-        }
-        // For std::vector<std::vector<>> or similar
-        else if constexpr (requires {
-                               container.size();
-                               container[0].size();
-                           }) {
+        } else if constexpr (requires {
+                                 container.size();
+                                 container[0].size();
+                             }) {
             result.resize(container.size());
             for (size_t i = 0; i < container.size(); ++i) {
                 result[i].resize(container[i].size());
@@ -78,6 +97,9 @@ protected:
 
         return result;
     }
+
+private:
+    const Derived& derived() const { return static_cast<const Derived&>(*this); }
 };
 
 } // namespace Math
