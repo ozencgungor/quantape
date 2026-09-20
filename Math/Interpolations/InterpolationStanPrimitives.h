@@ -15,6 +15,7 @@
 #include <stan/math.hpp>
 #include <stan/math/mix.hpp>
 
+#include "BicubicInterpolation.h"
 #include "BilinearInterpolation.h"
 #include "CubicInterpolation.h"
 #include "LinearInterpolation.h"
@@ -471,174 +472,374 @@ BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 }
 
 // ============================================================================
-// CubicInterpolation<var>::valueImpl -- 1 tape node (down from 6)
+// ============================================================================
+// ============================================================================
+// CubicInterpolation — weight-matrix specializations (Spline/Parabolic)
 //
-// P(x) = y[i] + a[i]*dx + b[i]*dx^2 + c[i]*dx^3
-// where dx is double, and (y[i], a[i], b[i], c[i]) are var.
-// Coefficients a,b,c were computed at construction time and are already on
-// the tape (they depend on ALL y values through the spline/derivative solve).
-// This specialization eliminates the 6 per-evaluation tape nodes by computing
-// the result in double and pushing adjoints analytically to the 4 inputs.
+// P(x) in segment i = y_i + sum_j W_j(dx) * y_j, with W_j(dx) pure double
+// (precomputed by probing the double solver). Consequences:
+//   - var:        ONE tape node, O(n) adjoint pushes — no construction tape
+//   - fvar<var>:  the y-Hessian is IDENTICALLY zero (P is linear in y),
+//                 so no second-order callback machinery is needed.
 //
-// Note: the O(n) tape nodes from coefficient computation at construction
-// remain. For O(1) total tape, precompute the full weight matrix W_j(x)
-// mapping y values directly to P(x) — see design doc for details.
+// SAFETY: the callbacks are SELF-CONTAINED — they capture the node-value
+// vector by value (shallow: var_value holds a pointer) and the weights by
+// move, never `this`. The interpolator may die before the reverse pass
+// runs (stan::math::gradient/hessian destroy the functor's locals before
+// grad()), and a `this` capture would dangle. This mirrors the
+// Pricing/StanPrimitives.h discipline.
 // ============================================================================
 
 template <>
-inline stan::math::var CubicInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixValue(
+    stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
+    const size_t n = this->m_x.size();
+    const size_t seg = m_Wa.size() / n;
     size_t i = this->locate(x);
-    if (i >= m_a.size())
-        i = m_a.size() - 1;
+    if (i >= seg)
+        i = seg - 1;
 
-    double dx = this->extractDouble(x) - this->m_x[i];
-    double dx2 = dx * dx;
-    double dx3 = dx2 * dx;
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+    const double dx3 = dx2 * dx;
 
-    double yi = this->m_y[i].val();
-    double ai = m_a[i].val();
-    double bi = m_b[i].val();
-    double ci = m_c[i].val();
+    double result = this->m_y[i].val();      // the delta(i, j) term
+    std::vector<double> w(n, 0.0);
+    for (size_t j = 0; j < n; ++j) {
+        w[j] = m_Wa[i * n + j] * dx + m_Wb[i * n + j] * dx2 + m_Wc[i * n + j] * dx3;
+        result += w[j] * this->m_y[j].val();
+    }
 
-    double result = yi + dx * (ai + dx * (bi + dx * ci));
-
-    // dP/dy[i] = 1,  dP/da[i] = dx,  dP/db[i] = dx^2,  dP/dc[i] = dx^3
-    return make_callback_var(result, [this, i, dx, dx2, dx3](auto& vi) {
-        double adj = vi.adj();
-        this->m_y[i].adj() += adj;
-        this->m_a[i].adj() += adj * dx;
-        this->m_b[i].adj() += adj * dx2;
-        this->m_c[i].adj() += adj * dx3;
+    return make_callback_var(result, [y = this->m_y, i, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        y[i].adj() += adj;                    // delta(i, j)
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].adj() += adj * w[j];
     });
 }
-
-// ============================================================================
-// CubicInterpolation<var>::derivativeImpl -- 1 tape node (down from 5)
-//
-// P'(x) = a[i] + 2*b[i]*dx + 3*c[i]*dx^2
-// ============================================================================
 
 template <>
-inline stan::math::var
-CubicInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
+inline stan::math::var CubicInterpolation<stan::math::var>::weightMatrixDerivative(
+    stan::math::var x) const {
     using stan::math::make_callback_var;
+    using stan::math::var;
 
+    const size_t n = this->m_x.size();
+    const size_t seg = m_Wa.size() / n;
     size_t i = this->locate(x);
-    if (i >= m_a.size())
-        i = m_a.size() - 1;
+    if (i >= seg)
+        i = seg - 1;
 
-    double dx = this->extractDouble(x) - this->m_x[i];
-    double dx2 = dx * dx;
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
 
-    double ai = m_a[i].val();
-    double bi = m_b[i].val();
-    double ci = m_c[i].val();
+    // P'(x) = sum_j (W_a + 2 W_b dx + 3 W_c dx^2) * y_j   (no delta term)
+    double result = 0.0;
+    std::vector<double> w(n, 0.0);
+    for (size_t j = 0; j < n; ++j) {
+        w[j] = m_Wa[i * n + j] + 2.0 * m_Wb[i * n + j] * dx + 3.0 * m_Wc[i * n + j] * dx2;
+        result += w[j] * this->m_y[j].val();
+    }
 
-    double result = ai + dx * (2.0 * bi + 3.0 * ci * dx);
-
-    // dP'/da[i] = 1,  dP'/db[i] = 2*dx,  dP'/dc[i] = 3*dx^2
-    return make_callback_var(result, [this, i, dx, dx2](auto& vi) {
-        double adj = vi.adj();
-        this->m_a[i].adj() += adj;
-        this->m_b[i].adj() += adj * 2.0 * dx;
-        this->m_c[i].adj() += adj * 3.0 * dx2;
+    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].adj() += adj * w[j];
     });
 }
-
-// ============================================================================
-// CubicInterpolation<fvar<var>>::valueImpl -- 1 callback var, zero Hessian
-//
-// P(x) is linear in (y[i], a[i], b[i], c[i]):
-//   dP/dy[i] = 1,  dP/da[i] = dx,  dP/db[i] = dx^2,  dP/dc[i] = dx^3
-// All second derivatives d2P/d(input_j)d(input_k) = 0.
-//
-// Value: 1 callback var pushing to val_ components.
-// Tangent: weighted sum of d_ components (no Hessian callback vars needed).
-// Total: 1 callback var + 6 arithmetic nodes for tangent.
-// ============================================================================
 
 template <>
 inline stan::math::fvar<stan::math::var>
-CubicInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
+CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixValue(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
     using stan::math::var;
 
+    const size_t n = this->m_x.size();
+    const size_t seg = m_Wa.size() / n;
     size_t i = this->locate(x);
-    if (i >= m_a.size())
-        i = m_a.size() - 1;
+    if (i >= seg)
+        i = seg - 1;
 
-    double dx = this->extractDouble(x) - this->m_x[i];
-    double dx2 = dx * dx;
-    double dx3 = dx2 * dx;
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+    const double dx3 = dx2 * dx;
 
-    const auto& yi = this->m_y[i];
-    const auto& ai = m_a[i];
-    const auto& bi = m_b[i];
-    const auto& ci = m_c[i];
+    double result = this->m_y[i].val_.val();
+    std::vector<double> w(n, 0.0);
+    for (size_t j = 0; j < n; ++j) {
+        w[j] = m_Wa[i * n + j] * dx + m_Wb[i * n + j] * dx2 + m_Wc[i * n + j] * dx3;
+        result += w[j] * this->m_y[j].val_.val();
+    }
 
-    double result =
-        yi.val_.val() + dx * (ai.val_.val() + dx * (bi.val_.val() + dx * ci.val_.val()));
 
-    // Value: 1 callback var
-    var val = make_callback_var(result, [&yi, &ai, &bi, &ci, dx, dx2, dx3](auto& vi) {
-        double adj = vi.adj();
-        yi.val_.adj() += adj;
-        ai.val_.adj() += adj * dx;
-        bi.val_.adj() += adj * dx2;
-        ci.val_.adj() += adj * dx3;
+    // Linear in y => y-Hessian is zero: tangent is just the weighted sum
+    // of the tangent components — no Hessian callback vars.
+    var tangent = this->m_y[i].d_;
+    for (size_t j = 0; j < n; ++j)
+        tangent += w[j] * this->m_y[j].d_;
+
+    var val = make_callback_var(result, [y = this->m_y, i, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        y[i].val_.adj() += adj;
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].val_.adj() += adj * w[j];
     });
 
-    // Tangent: Hessian is zero (P is linear in its inputs)
-    var tangent = yi.d_ + dx * ai.d_ + dx2 * bi.d_ + dx3 * ci.d_;
+    return fvar<var>(val, tangent);
+}
+
+template <>
+inline stan::math::fvar<stan::math::var>
+CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
+    stan::math::fvar<stan::math::var> x) const {
+    using stan::math::fvar;
+    using stan::math::make_callback_var;
+    using stan::math::var;
+
+    const size_t n = this->m_x.size();
+    const size_t seg = m_Wa.size() / n;
+    size_t i = this->locate(x);
+    if (i >= seg)
+        i = seg - 1;
+
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+
+    double result = 0.0;
+    std::vector<double> w(n, 0.0);
+    for (size_t j = 0; j < n; ++j) {
+        w[j] = m_Wa[i * n + j] + 2.0 * m_Wb[i * n + j] * dx + 3.0 * m_Wc[i * n + j] * dx2;
+        result += w[j] * this->m_y[j].val_.val();
+    }
+
+
+    var tangent = 0.0;
+    for (size_t j = 0; j < n; ++j)
+        tangent += w[j] * this->m_y[j].d_;
+
+    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].val_.adj() += adj * w[j];
+    });
 
     return fvar<var>(val, tangent);
 }
 
 // ============================================================================
-// CubicInterpolation<fvar<var>>::derivativeImpl -- 1 callback var, zero Hessian
+// CubicInterpolation — branch-pinned local probe (Akima/Kruger/Harmonic)
 //
-// P'(x) = a[i] + 2*b[i]*dx + 3*c[i]*dx^2
-// Linear in (a[i], b[i], c[i]) => zero Hessian.
+// These methods are piecewise-linear in y with DATA-DEPENDENT branch
+// selection, so precomputed weights would go stale. Instead, each
+// evaluation runs the coefficient computation once with ProbeDual y-values
+// (gradient = identity): every branch decision uses the PRIMAL, so the
+// resulting dual coefficients linearize the ACTIVE branch — exactly the
+// subgradient the generic tape path would produce, in ONE tape node.
+//
+// Note: the template parameter Smooth only sets the runtime default; pass
+// smooth=true to the constructor — these specializations respect m_smooth.
+// Callbacks are self-contained (y captured by value, weights by move) for
+// the same lifetime reason as the weight-matrix specializations above.
 // ============================================================================
 
 template <>
+inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsValue(
+    stan::math::var x) const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+    using Math::detail::ProbeDual;
+
+    const size_t n = this->m_x.size();
+    const size_t seg = (n == 2) ? 1 : n - 1;
+    size_t i = this->locate(x);
+    if (i >= seg)
+        i = seg - 1;
+
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+    const double dx3 = dx2 * dx;
+
+    std::vector<ProbeDual> y(n, ProbeDual(0.0, n));
+    for (size_t j = 0; j < n; ++j) {
+        y[j].v = this->m_y[j].val();
+        y[j].d[j] = 1.0;
+    }
+    std::vector<ProbeDual> a, b, c;
+    CubicInterpolation<var>::computeCoefficientsDual(this->m_x, y, m_da, m_smooth, a, b, c);
+
+    const double result = this->m_y[i].val() + a[i].v * dx + b[i].v * dx2 + c[i].v * dx3;
+    std::vector<double> w(n, 0.0);
+    w[i] += 1.0;  // delta(i, j)
+    // Size-safe gradient read: zero entries (or any dual produced from a
+    // scalar literal) carry an EMPTY gradient vector; treat missing entries
+    // as zero gradients rather than reading out of bounds.
+    auto dGet = [](const auto& dual, size_t k) {
+        return k < dual.d.size() ? dual.d[k] : 0.0;
+    };
+    for (size_t j = 0; j < n; ++j)
+        w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
+
+    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].adj() += adj * w[j];
+    });
+}
+
+template <>
+inline stan::math::var CubicInterpolation<stan::math::var>::localWeightsDerivative(
+    stan::math::var x) const {
+    using stan::math::make_callback_var;
+    using stan::math::var;
+    using Math::detail::ProbeDual;
+
+    const size_t n = this->m_x.size();
+    const size_t seg = (n == 2) ? 1 : n - 1;
+    size_t i = this->locate(x);
+    if (i >= seg)
+        i = seg - 1;
+
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+
+    std::vector<ProbeDual> y(n, ProbeDual(0.0, n));
+    for (size_t j = 0; j < n; ++j) {
+        y[j].v = this->m_y[j].val();
+        y[j].d[j] = 1.0;
+    }
+    std::vector<ProbeDual> a, b, c;
+    CubicInterpolation<var>::computeCoefficientsDual(this->m_x, y, m_da, m_smooth, a, b, c);
+
+    const double result = a[i].v + 2.0 * b[i].v * dx + 3.0 * c[i].v * dx2;
+    std::vector<double> w(n, 0.0);
+    // Size-safe gradient read: zero entries (or any dual produced from a
+    // scalar literal) carry an EMPTY gradient vector; treat missing entries
+    // as zero gradients rather than reading out of bounds.
+    auto dGet = [](const auto& dual, size_t k) {
+        return k < dual.d.size() ? dual.d[k] : 0.0;
+    };
+    for (size_t j = 0; j < n; ++j)
+        w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
+
+    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].adj() += adj * w[j];
+    });
+}
+
+template <>
 inline stan::math::fvar<stan::math::var>
-CubicInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
+CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsValue(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
     using stan::math::var;
+    using Math::detail::ProbeDual;
 
+    const size_t n = this->m_x.size();
+    const size_t seg = (n == 2) ? 1 : n - 1;
     size_t i = this->locate(x);
-    if (i >= m_a.size())
-        i = m_a.size() - 1;
+    if (i >= seg)
+        i = seg - 1;
 
-    double dx = this->extractDouble(x) - this->m_x[i];
-    double dx2 = dx * dx;
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+    const double dx3 = dx2 * dx;
 
-    const auto& ai = m_a[i];
-    const auto& bi = m_b[i];
-    const auto& ci = m_c[i];
+    std::vector<ProbeDual> y(n, ProbeDual(0.0, n));
+    for (size_t j = 0; j < n; ++j) {
+        y[j].v = this->m_y[j].val_.val();
+        y[j].d[j] = 1.0;
+    }
+    std::vector<ProbeDual> a, b, c;
+    CubicInterpolation<fvar<var>>::computeCoefficientsDual(this->m_x, y, m_da, m_smooth, a, b, c);
 
-    double result = ai.val_.val() + dx * (2.0 * bi.val_.val() + 3.0 * ci.val_.val() * dx);
+    const double result =
+        this->m_y[i].val_.val() + a[i].v * dx + b[i].v * dx2 + c[i].v * dx3;
+    std::vector<double> w(n, 0.0);
+    w[i] += 1.0;
+    // Size-safe gradient read: zero entries (or any dual produced from a
+    // scalar literal) carry an EMPTY gradient vector; treat missing entries
+    // as zero gradients rather than reading out of bounds.
+    auto dGet = [](const auto& dual, size_t k) {
+        return k < dual.d.size() ? dual.d[k] : 0.0;
+    };
+    for (size_t j = 0; j < n; ++j)
+        w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
 
-    var val = make_callback_var(result, [&ai, &bi, &ci, dx, dx2](auto& vi) {
-        double adj = vi.adj();
-        ai.val_.adj() += adj;
-        bi.val_.adj() += adj * 2.0 * dx;
-        ci.val_.adj() += adj * 3.0 * dx2;
+
+    var tangent = this->m_y[i].d_;
+    for (size_t j = 0; j < n; ++j)
+        tangent += w[j] * this->m_y[j].d_;
+
+    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].val_.adj() += adj * w[j];
     });
 
-    var tangent = ai.d_ + 2.0 * dx * bi.d_ + 3.0 * dx2 * ci.d_;
+    return fvar<var>(val, tangent);
+}
+
+template <>
+inline stan::math::fvar<stan::math::var>
+CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
+    stan::math::fvar<stan::math::var> x) const {
+    using stan::math::fvar;
+    using stan::math::make_callback_var;
+    using stan::math::var;
+    using Math::detail::ProbeDual;
+
+    const size_t n = this->m_x.size();
+    const size_t seg = (n == 2) ? 1 : n - 1;
+    size_t i = this->locate(x);
+    if (i >= seg)
+        i = seg - 1;
+
+    const double dx = this->extractDouble(x) - this->m_x[i];
+    const double dx2 = dx * dx;
+
+    std::vector<ProbeDual> y(n, ProbeDual(0.0, n));
+    for (size_t j = 0; j < n; ++j) {
+        y[j].v = this->m_y[j].val_.val();
+        y[j].d[j] = 1.0;
+    }
+    std::vector<ProbeDual> a, b, c;
+    CubicInterpolation<fvar<var>>::computeCoefficientsDual(this->m_x, y, m_da, m_smooth, a, b, c);
+
+    const double result = a[i].v + 2.0 * b[i].v * dx + 3.0 * c[i].v * dx2;
+    std::vector<double> w(n, 0.0);
+    // Size-safe gradient read: zero entries (or any dual produced from a
+    // scalar literal) carry an EMPTY gradient vector; treat missing entries
+    // as zero gradients rather than reading out of bounds.
+    auto dGet = [](const auto& dual, size_t k) {
+        return k < dual.d.size() ? dual.d[k] : 0.0;
+    };
+    for (size_t j = 0; j < n; ++j)
+        w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
+
+
+    var tangent = 0.0;
+    for (size_t j = 0; j < n; ++j)
+        tangent += w[j] * this->m_y[j].d_;
+
+    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+        const double adj = vi.adj();
+        for (size_t j = 0; j < w.size(); ++j)
+            y[j].val_.adj() += adj * w[j];
+    });
 
     return fvar<var>(val, tangent);
 }
 
 } // namespace Math
+
+
 
 #endif // INTERPOLATION_STAN_PRIMITIVES_H

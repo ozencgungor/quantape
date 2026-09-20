@@ -453,7 +453,43 @@ target_compile_definitions(test_black76 PRIVATE
         TBB_INTERFACE_NEW
 )
 
-target_compile_options(test_black76 PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+target_compile_options(test_black76 PRIVATE -Wall -Wextra -Wpedantic)
+
+# Cubic interpolation weight-matrix / branch-pinned probe validation
+add_executable(test_cubic_weights test_cubic_weights.cpp)
+
+target_link_libraries(test_cubic_weights PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_cubic_weights PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_cubic_weights PRIVATE -Wall -Wextra -Wpedantic)
+
+# Bicubic interpolation weight-matrix / branch-pinned probe validation
+add_executable(test_bicubic_weights test_bicubic_weights.cpp)
+
+target_link_libraries(test_bicubic_weights PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_bicubic_weights PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_bicubic_weights PRIVATE -Wall -Wextra -Wpedantic)
 
 if(APPLE OR UNIX)
     set_target_properties(test_black76 PROPERTIES
