@@ -491,6 +491,42 @@ target_compile_definitions(test_bicubic_weights PRIVATE
 
 target_compile_options(test_bicubic_weights PRIVATE -Wall -Wextra -Wpedantic)
 
+# Tanh-sinh (double-exponential) quadrature: value + AD gradient/Hessian
+add_executable(test_tanh_sinh test_tanh_sinh.cpp)
+
+target_link_libraries(test_tanh_sinh PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_tanh_sinh PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_tanh_sinh PRIVATE -Wall -Wextra -Wpedantic)
+
+# Integrator AD primitives: all Integrals classes at double/var/fvar<var>
+add_executable(test_integrator_primitives test_integrator_primitives.cpp)
+
+target_link_libraries(test_integrator_primitives PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_integrator_primitives PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_integrator_primitives PRIVATE -Wall -Wextra -Wpedantic)
+
 if(APPLE OR UNIX)
     set_target_properties(test_black76 PROPERTIES
             INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
