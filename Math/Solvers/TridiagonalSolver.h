@@ -9,7 +9,8 @@ namespace Math {
 template <typename DoubleT>
 class TridiagonalSolver {
 public:
-    static std::vector<DoubleT> solve(const std::vector<DoubleT>& a, const std::vector<DoubleT>& b,
+    static std::vector<DoubleT> solve(const std::vector<DoubleT>& a,
+                                      const std::vector<DoubleT>& b,
                                       const std::vector<DoubleT>& c,
                                       const std::vector<DoubleT>& d) {
         int n = d.size();

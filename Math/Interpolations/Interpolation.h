@@ -1,49 +1,46 @@
 #ifndef INTERPOLATION_H
 #define INTERPOLATION_H
 
-#include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <stdexcept>
 #include <vector>
 
 namespace Math {
+
 /**
- * @brief Base class for 1D interpolations
+ * @brief CRTP base class for 1D interpolations
  *
- * Provides common functionality for all 1D interpolation methods:
- * - Binary search for x location
- * - Range checking
- * - Value extraction for AD types
+ * Grid coordinates (m_x) are always double — they are not AD-active.
+ * Node values (m_y) are DoubleT — these are the AD leaves.
  *
- * Derived classes must implement:
- * - valueImpl(x): Interpolated value at x
- * - derivativeImpl(x): Derivative at x
+ * This separation is critical for AD performance: grid operations (locate,
+ * weight computation) stay off the tape entirely. Only the final linear
+ * combination of node values produces tape nodes.
  *
- * @tparam DoubleT Numeric type (double or stan::math::var)
+ * Derived classes must implement (non-virtual, accessible via friend):
+ * - valueImpl(DoubleT x) const -> DoubleT
+ * - derivativeImpl(DoubleT x) const -> DoubleT
+ *
+ * Explicit template specializations of valueImpl/derivativeImpl for
+ * stan::math::var and stan::math::fvar<var> go in InterpolationStanPrimitives.h,
+ * following the same pattern as Pricing/StanPrimitives.h for Black76.
+ *
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam Derived CRTP derived class
  */
-template <typename DoubleT>
+template <typename DoubleT, typename Derived>
 class Interpolation {
 public:
-    /**
-     * @brief Construct empty interpolation
-     */
     Interpolation() = default;
 
-    virtual ~Interpolation() = default;
+    // ── Container conversion helpers ──
 
-protected:
-    /**
-     * @brief Helper to convert any container to std::vector
-     * Works with std::vector, Eigen::Vector, arrays, etc.
-     */
+    /// Convert any container to std::vector<DoubleT> (for node values m_y)
     template <typename Container>
     static std::vector<DoubleT> toVector(const Container& container) {
-        // If it's already a std::vector, just copy it
         if constexpr (std::is_same_v<Container, std::vector<DoubleT>>) {
             return container;
         } else {
-            // Otherwise, use size() and operator[]
             std::vector<DoubleT> result;
             result.reserve(container.size());
             for (size_t i = 0; i < container.size(); ++i) {
@@ -53,146 +50,122 @@ protected:
         }
     }
 
-public:
-    /**
-     * @brief Get interpolated value at x
-     * @param x Point at which to interpolate
-     * @param allowExtrapolation Allow extrapolation outside data range
-     * @return Interpolated value
-     */
+    /// Convert any container to std::vector<double> (for grid coordinates m_x)
+    template <typename Container>
+    static std::vector<double> toDoubleVector(const Container& container) {
+        if constexpr (std::is_same_v<Container, std::vector<double>>) {
+            return container;
+        } else {
+            std::vector<double> result;
+            result.reserve(container.size());
+            for (size_t i = 0; i < container.size(); ++i) {
+                result.push_back(extractDouble(container[i]));
+            }
+            return result;
+        }
+    }
+
+    // ── Public interface (dispatches to Derived via CRTP) ──
+
     DoubleT operator()(DoubleT x, bool allowExtrapolation = false) const {
         if (!allowExtrapolation && !isInRange(x)) {
             throw std::runtime_error("Interpolation: x is out of range");
         }
-        return valueImpl(x);
+        return derived().valueImpl(x);
     }
 
-    /**
-     * @brief Get derivative at x
-     * @param x Point at which to compute derivative
-     * @param allowExtrapolation Allow extrapolation outside data range
-     * @return Derivative value
-     */
     DoubleT derivative(DoubleT x, bool allowExtrapolation = false) const {
         if (!allowExtrapolation && !isInRange(x)) {
             throw std::runtime_error("Interpolation: x is out of range for derivative");
         }
-        return derivativeImpl(x);
+        return derived().derivativeImpl(x);
     }
 
-    /**
-     * @brief Get minimum x value
-     */
     double xMin() const {
-        if (m_x.empty()) {
+        if (m_x.empty())
             throw std::runtime_error("Interpolation: no data");
-        }
-        return value(m_x.front());
+        return m_x.front();
     }
 
-    /**
-     * @brief Get maximum x value
-     */
     double xMax() const {
-        if (m_x.empty()) {
+        if (m_x.empty())
             throw std::runtime_error("Interpolation: no data");
-        }
-        return value(m_x.back());
+        return m_x.back();
     }
 
-    /**
-     * @brief Get number of data points
-     */
     size_t size() const { return m_x.size(); }
 
-    /**
-     * @brief Check if x is in interpolation range
-     */
     bool isInRange(DoubleT x) const {
         if (m_x.empty())
             return false;
-        double xVal = value(x);
-        return xVal >= value(m_x.front()) && xVal <= value(m_x.back());
+        double xVal = extractDouble(x);
+        return xVal >= m_x.front() && xVal <= m_x.back();
+    }
+
+    /// Access grid coordinates (always double)
+    const std::vector<double>& xGrid() const { return m_x; }
+
+    /// Access node values (DoubleT, AD-active)
+    const std::vector<DoubleT>& yValues() const { return m_y; }
+
+    // ── Value extraction ──
+
+    /// Recursively extract the innermost double from any AD type.
+    /// double -> double, var -> var.val() -> double,
+    /// fvar<var> -> fvar.val() -> var -> var.val() -> double
+    static double extractDouble(double x) { return x; }
+
+    template <typename T>
+    static double extractDouble(const T& x) {
+        return extractDouble(x.val());
     }
 
 protected:
-    std::vector<DoubleT> m_x; ///< X coordinates
-    std::vector<DoubleT> m_y; ///< Y coordinates
+    std::vector<double> m_x;  ///< Grid coordinates (double, never AD)
+    std::vector<DoubleT> m_y; ///< Node values (DoubleT, AD-active)
 
-    /**
-     * @brief Locate interval containing x using binary search
-     * @param x Point to locate
-     * @return Index i such that x[i] <= x < x[i+1]
-     */
+    // ── Grid operations (all in double, never on tape) ──
+
+    /// Locate interval: returns i such that m_x[i] <= x < m_x[i+1]
     size_t locate(DoubleT x) const {
-        if (m_x.size() < 2) {
+        if (m_x.size() < 2)
             throw std::runtime_error("Interpolation: need at least 2 points");
-        }
 
-        double xVal = value(x);
+        double xVal = extractDouble(x);
 
-        // Handle boundary cases
-        if (xVal <= value(m_x.front()))
+        if (xVal <= m_x.front())
             return 0;
-        if (xVal >= value(m_x.back()))
+        if (xVal >= m_x.back())
             return m_x.size() - 2;
 
-        // Binary search for the interval
+        // Binary search (pure double, no tape)
         size_t left = 0;
         size_t right = m_x.size() - 1;
-
         while (right - left > 1) {
             size_t mid = left + (right - left) / 2;
-            if (value(m_x[mid]) <= xVal) {
+            if (m_x[mid] <= xVal)
                 left = mid;
-            } else {
+            else
                 right = mid;
-            }
         }
-
         return left;
     }
 
-    /**
-     * @brief Extract double value from DoubleT
-     */
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val(); // For stan::math::var
-        }
-    }
-
-    /**
-     * @brief Validate data for interpolation
-     */
     void validate() const {
-        if (m_x.size() != m_y.size()) {
+        if (m_x.size() != m_y.size())
             throw std::runtime_error("Interpolation: x and y must have same size");
-        }
-        if (m_x.size() < 2) {
+        if (m_x.size() < 2)
             throw std::runtime_error("Interpolation: need at least 2 points");
-        }
-
-        // Check that x values are sorted
         for (size_t i = 1; i < m_x.size(); ++i) {
-            if (value(m_x[i]) <= value(m_x[i - 1])) {
+            if (m_x[i] <= m_x[i - 1])
                 throw std::runtime_error("Interpolation: x values must be strictly increasing");
-            }
         }
     }
 
-    /**
-     * @brief Compute interpolated value (to be implemented by derived classes)
-     */
-    virtual DoubleT valueImpl(DoubleT x) const = 0;
-
-    /**
-     * @brief Compute derivative (to be implemented by derived classes)
-     */
-    virtual DoubleT derivativeImpl(DoubleT x) const = 0;
+private:
+    const Derived& derived() const { return static_cast<const Derived&>(*this); }
 };
+
 } // namespace Math
 
 #endif // INTERPOLATION_H

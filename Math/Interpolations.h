@@ -58,12 +58,7 @@
 #include "Interpolations/BicubicInterpolation.h"
 #include "Interpolations/BilinearInterpolation.h"
 
-// Type aliases for convenience
-namespace Math {
-// Stan Math AD type alias (when Stan Math is available)
-// Uncomment when linking with Stan Math:
-// #include <stan/math.hpp>
-// using ADVariableT = stan::math::var;
-}
+// Stan AD specializations (var and fvar<var> optimized paths)
+#include "Interpolations/InterpolationStanPrimitives.h"
 
 #endif // INTERPOLATIONS_H
