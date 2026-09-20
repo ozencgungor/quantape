@@ -83,9 +83,9 @@ public:
 
 private:
     DerivativeApprox m_method;
-    std::vector<double> m_x, m_y;                              ///< Grid coordinates (double)
-    std::vector<std::vector<DoubleT>> m_z;                     ///< Node values (DoubleT, AD-active)
-    std::vector<CubicInterpolation<DoubleT>> m_x_interps;     ///< Precomputed x-row cubics
+    std::vector<double> m_x, m_y;                         ///< Grid coordinates (double)
+    std::vector<std::vector<DoubleT>> m_z;                ///< Node values (DoubleT, AD-active)
+    std::vector<CubicInterpolation<DoubleT>> m_x_interps; ///< Precomputed x-row cubics
 };
 
 } // namespace Math
