@@ -27,8 +27,7 @@ namespace Math {
 // ============================================================================
 
 template <>
-inline stan::math::var
-LinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var LinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -165,8 +164,7 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
 // ============================================================================
 
 template <>
-inline stan::math::var
-LogLinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var LogLinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
 
     size_t i = this->locate(x);
@@ -266,13 +264,13 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
     double f_val = std::exp((1.0 - t) * L0 + t * L1);
 
     // 1st-order gradients
-    double g0 = f_val * (1.0 - t) / y0;  // df/dy_i
-    double g1 = f_val * t / y1;            // df/dy_{i+1}
+    double g0 = f_val * (1.0 - t) / y0; // df/dy_i
+    double g1 = f_val * t / y1;         // df/dy_{i+1}
 
     // 2nd-order (Hessian elements)
-    double h00 = -f_val * t * (1.0 - t) / (y0 * y0);   // d2f/dy_i^2
-    double h11 = -f_val * t * (1.0 - t) / (y1 * y1);   // d2f/dy_{i+1}^2
-    double h01 = f_val * t * (1.0 - t) / (y0 * y1);    // d2f/(dy_i dy_{i+1})
+    double h00 = -f_val * t * (1.0 - t) / (y0 * y0); // d2f/dy_i^2
+    double h11 = -f_val * t * (1.0 - t) / (y1 * y1); // d2f/dy_{i+1}^2
+    double h01 = f_val * t * (1.0 - t) / (y0 * y1);  // d2f/(dy_i dy_{i+1})
 
     var yiv = yi.val_, yi1v = yi1.val_;
 
@@ -405,8 +403,8 @@ inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::m
     double w00 = wy0 * wx0, w10 = wy0 * wx1;
     double w01 = wy1 * wx0, w11 = wy1 * wx1;
 
-    double result = w00 * m_z[j][i].val() + w10 * m_z[j][i + 1].val() +
-                    w01 * m_z[j + 1][i].val() + w11 * m_z[j + 1][i + 1].val();
+    double result = w00 * m_z[j][i].val() + w10 * m_z[j][i + 1].val() + w01 * m_z[j + 1][i].val() +
+                    w11 * m_z[j + 1][i + 1].val();
 
     return make_callback_var(result, [this, i, j, w00, w10, w01, w11](auto& vi) {
         double adj = vi.adj();
@@ -425,9 +423,9 @@ inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::m
 // ============================================================================
 
 template <>
-inline stan::math::fvar<stan::math::var> BilinearInterpolation<stan::math::fvar<stan::math::var>>::
-    valueImpl(stan::math::fvar<stan::math::var> x,
-              stan::math::fvar<stan::math::var> y) const {
+inline stan::math::fvar<stan::math::var>
+BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
+    stan::math::fvar<stan::math::var> x, stan::math::fvar<stan::math::var> y) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
     using stan::math::var;
@@ -454,8 +452,8 @@ inline stan::math::fvar<stan::math::var> BilinearInterpolation<stan::math::fvar<
     const auto& z01 = m_z[j + 1][i];
     const auto& z11 = m_z[j + 1][i + 1];
 
-    double result = w00 * z00.val_.val() + w10 * z10.val_.val() + w01 * z01.val_.val() +
-                    w11 * z11.val_.val();
+    double result =
+        w00 * z00.val_.val() + w10 * z10.val_.val() + w01 * z01.val_.val() + w11 * z11.val_.val();
 
     // Value: single callback var
     var val = make_callback_var(result, [&z00, &z10, &z01, &z11, w00, w10, w01, w11](auto& vi) {
@@ -488,8 +486,7 @@ inline stan::math::fvar<stan::math::var> BilinearInterpolation<stan::math::fvar<
 // ============================================================================
 
 template <>
-inline stan::math::var
-CubicInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var CubicInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -584,7 +581,8 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
     const auto& bi = m_b[i];
     const auto& ci = m_c[i];
 
-    double result = yi.val_.val() + dx * (ai.val_.val() + dx * (bi.val_.val() + dx * ci.val_.val()));
+    double result =
+        yi.val_.val() + dx * (ai.val_.val() + dx * (bi.val_.val() + dx * ci.val_.val()));
 
     // Value: 1 callback var
     var val = make_callback_var(result, [&yi, &ai, &bi, &ci, dx, dx2, dx3](auto& vi) {

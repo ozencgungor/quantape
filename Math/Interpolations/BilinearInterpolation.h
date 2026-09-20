@@ -74,8 +74,8 @@ public:
     const std::vector<double>& yGrid() const { return m_y; }
 
 private:
-    std::vector<double> m_x, m_y;                ///< Grid coordinates (double)
-    std::vector<std::vector<DoubleT>> m_z;        ///< Node values (DoubleT, AD-active)
+    std::vector<double> m_x, m_y;          ///< Grid coordinates (double)
+    std::vector<std::vector<DoubleT>> m_z; ///< Node values (DoubleT, AD-active)
 
     size_t locateX(double xv) const {
         if (xv <= m_x.front())
