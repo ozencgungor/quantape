@@ -12,41 +12,35 @@ namespace Math {
  * @brief Bicubic interpolation using cubic interpolation along each axis
  *
  * Performs 2D interpolation by:
- * 1. Interpolating along x-direction for each y row
- * 2. Interpolating the results along y-direction
+ * 1. Interpolating along x-direction for each y row (precomputed at construction)
+ * 2. Interpolating the results along y-direction (per query)
  *
- * Supports all derivative approximation methods from CubicInterpolation:
- * - Spline (DEFAULT): Natural cubic spline (C^2 continuous)
- * - Parabolic: Local parabolic approximation
- * - Akima: Akima's shape-preserving method
- * - Kruger: Harmonic mean (monotonicity-preserving)
- * - Harmonic: Weighted harmonic mean
+ * The x-row CubicInterpolation objects are precomputed at construction time.
+ * This means:
+ * - For double: coefficient computation happens once, not per-query
+ * - For var: O(ny*nx) coefficient tape nodes are created once at construction,
+ *   not repeated per-query. Each query adds only ny+1 evaluation tape nodes
+ *   (via the CubicInterpolation<var> specialization) plus O(ny) for the
+ *   y-column coefficient construction.
  *
- * @tparam DoubleT Numeric type (double or stan::math::var)
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
  */
 template <typename DoubleT>
-class BicubicInterpolation : public Interpolation2D<DoubleT> {
+class BicubicInterpolation : public Interpolation2D<DoubleT, BicubicInterpolation<DoubleT>> {
+    using Base = Interpolation2D<DoubleT, BicubicInterpolation<DoubleT>>;
+    friend Base;
+
 public:
     using DerivativeApprox = typename CubicInterpolation<DoubleT>::DerivativeApprox;
 
-    /**
-     * @brief Construct bicubic interpolation
-     * @param x X coordinates - accepts std::vector, Eigen::Vector, etc.
-     * @param y Y coordinates - accepts std::vector, Eigen::Vector, etc.
-     * @param z Z values (2D grid) - accepts std::vector<std::vector<>>, Eigen::Matrix, etc.
-     * @param method Derivative approximation method (default: Spline)
-     *
-     * Note: z is organized as z[row][col] where row corresponds to y and col to x
-     */
     template <typename ContainerX, typename ContainerY, typename Container2D>
     BicubicInterpolation(const ContainerX& x, const ContainerY& y, const Container2D& z,
                          DerivativeApprox method = DerivativeApprox::Spline)
         : m_method(method) {
-        m_x = this->toVector(x);
-        m_y = this->toVector(y);
+        m_x = this->toDoubleVector(x);
+        m_y = this->toDoubleVector(y);
         m_z = this->toVector2D(z);
 
-        // Validate dimensions
         if (m_z.size() != m_y.size()) {
             throw std::runtime_error("BicubicInterpolation: z rows must match y size");
         }
@@ -55,47 +49,43 @@ public:
                 throw std::runtime_error("BicubicInterpolation: z columns must match x size");
             }
         }
+
+        // Precompute x-row cubic interpolations.
+        // Coefficient computation happens here (once), not per-query.
+        // For var: this puts ny*O(nx) tape nodes on the tape at construction.
+        m_x_interps.reserve(m_y.size());
+        for (size_t j = 0; j < m_y.size(); ++j) {
+            m_x_interps.emplace_back(m_x, m_z[j], m_method);
+        }
     }
 
-protected:
-    DoubleT valueImpl(DoubleT x, DoubleT y) const override {
-        // Step 1: Interpolate along x-direction for each y row
+    DoubleT valueImpl(DoubleT x, DoubleT y) const {
+        // Step 1: Evaluate precomputed x-row cubics
+        // For var: ny * 1 tape node (via CubicInterpolation<var> specialization)
         std::vector<DoubleT> y_values(m_y.size());
-        for (size_t i = 0; i < m_y.size(); ++i) {
-            CubicInterpolation<DoubleT> x_interp(m_x, m_z[i], m_method);
-            y_values[i] = x_interp(x, true); // Allow extrapolation
+        for (size_t j = 0; j < m_y.size(); ++j) {
+            y_values[j] = m_x_interps[j](x, true);
         }
 
-        // Step 2: Interpolate along y-direction
+        // Step 2: Build y-cubic from intermediate results and evaluate
+        // For var: O(ny) tape nodes for coefficient construction + 1 for evaluation
         CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method);
-        return y_interp(y, true); // Allow extrapolation
+        return y_interp(y, true);
     }
 
-    bool isInRange(DoubleT x, DoubleT y) const override {
+    bool isInRange(DoubleT x, DoubleT y) const {
         if (m_x.empty() || m_y.empty())
             return false;
-
-        double x_val = value(x);
-        double y_val = value(y);
-
-        bool x_in_range = (x_val >= value(m_x.front()) && x_val <= value(m_x.back()));
-        bool y_in_range = (y_val >= value(m_y.front()) && y_val <= value(m_y.back()));
-
-        return x_in_range && y_in_range;
+        double xv = this->extractDouble(x);
+        double yv = this->extractDouble(y);
+        return xv >= m_x.front() && xv <= m_x.back() && yv >= m_y.front() && yv <= m_y.back();
     }
 
 private:
     DerivativeApprox m_method;
-    std::vector<DoubleT> m_x, m_y;
-    std::vector<std::vector<DoubleT>> m_z;
-
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
+    std::vector<double> m_x, m_y;                              ///< Grid coordinates (double)
+    std::vector<std::vector<DoubleT>> m_z;                     ///< Node values (DoubleT, AD-active)
+    std::vector<CubicInterpolation<DoubleT>> m_x_interps;     ///< Precomputed x-row cubics
 };
 
 } // namespace Math
