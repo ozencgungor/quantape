@@ -580,6 +580,11 @@ target_compile_options(test_mcfarland PRIVATE -Wall -Wextra -Wpedantic -O3 -marc
 # Compiler options
 # ============================================================================
 
+# Optimization ONLY in Release builds. Debug stays -O0/-g so lldb shows
+# real locals instead of "optimized out" (moved here from the per-target
+# flags below, which previously applied -O3 to every build type).
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math -Rpass=loop-vectorize")
+
 # Enable warnings
 if(MSVC)
     target_compile_options(generic_MC_lib PRIVATE /W4)
@@ -600,7 +605,7 @@ if(MSVC)
     target_compile_options(numerical_methods PRIVATE /W4)
     target_compile_options(test_ad PRIVATE /W4)
 else()
-    target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -Rpass=loop-vectorize -ffast-math)
+    target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_interpolation PRIVATE -Wall -Wextra -Wpedantic)
@@ -616,9 +621,9 @@ else()
     target_compile_options(lambdas_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(advanced_cpp_topics PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(numerical_methods PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(numpy_patterns PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-    target_compile_options(eigen_fancy_indexing PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-    target_compile_options(test_ad PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -Rpass=loop-vectorize -ffast-math)
+    target_compile_options(numpy_patterns PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(eigen_fancy_indexing PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_ad PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # ============================================================================
