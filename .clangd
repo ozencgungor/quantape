@@ -1,0 +1,5 @@
+CompileFlags:
+  # clangd reads compile_commands.json from build/ (exported by the
+  # Sublime "Configure & Build" system via CMAKE_EXPORT_COMPILE_COMMANDS)
+  CompilationDatabase: build
+  Add: [-std=c++20]
