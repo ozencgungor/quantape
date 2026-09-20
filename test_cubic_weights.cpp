@@ -9,23 +9,23 @@
 //   5. dispatch: usesWeightMatrix() true iff Spline/Parabolic
 //
 // Run: ./test_cubic_weights
+#include "Math/Interpolations/InterpolationStanPrimitives.h"
+
+#include <stan/math.hpp>
+#include <stan/math/mix.hpp>
+
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
 
-#include <stan/math.hpp>
-#include <stan/math/mix.hpp>
-
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-
-#define CHECK(cond)                                                       \
-    do {                                                                  \
-        if (!(cond)) {                                                    \
-            std::cerr << "FAIL: " << #cond << " (line " << __LINE__ << ")\n"; \
-            std::exit(1);                                                 \
-        }                                                                 \
+#define CHECK(cond)                                                                                \
+    do {                                                                                           \
+        if (!(cond)) {                                                                             \
+            std::cerr << "FAIL: " << #cond << " (line " << __LINE__ << ")\n";                      \
+            std::exit(1);                                                                          \
+        }                                                                                          \
     } while (0)
 
 using Math::CubicInterpolation;
@@ -95,7 +95,7 @@ double maxHessian(double x, CubicInterpolation<double>::DerivativeApprox da, boo
             } else {
                 std::vector<Scalar> yv(xx.data(), xx.data() + xx.size());
                 const CubicInterpolation<Scalar> interp(g_x, yv, da, smooth);
-                return interp(Scalar(x, 0.0));  // fvar: tangent 0
+                return interp(Scalar(x, 0.0)); // fvar: tangent 0
             }
         },
         xv, fx, grad, H);
@@ -108,11 +108,16 @@ double maxHessian(double x, CubicInterpolation<double>::DerivativeApprox da, boo
 
 const char* methodName(CubicInterpolation<double>::DerivativeApprox da) {
     switch (da) {
-        case Math::CubicDerivativeApprox::Spline: return "Spline";
-        case Math::CubicDerivativeApprox::Parabolic: return "Parabolic";
-        case Math::CubicDerivativeApprox::Akima: return "Akima";
-        case Math::CubicDerivativeApprox::Kruger: return "Kruger";
-        case Math::CubicDerivativeApprox::Harmonic: return "Harmonic";
+        case Math::CubicDerivativeApprox::Spline:
+            return "Spline";
+        case Math::CubicDerivativeApprox::Parabolic:
+            return "Parabolic";
+        case Math::CubicDerivativeApprox::Akima:
+            return "Akima";
+        case Math::CubicDerivativeApprox::Kruger:
+            return "Kruger";
+        case Math::CubicDerivativeApprox::Harmonic:
+            return "Harmonic";
     }
     return "?";
 }
@@ -137,9 +142,8 @@ int main() {
                 const stan::math::var v = interp(stan::math::var(x));
                 const double diff = std::abs(v.val() - ref);
                 if (diff > 1e-12 * (1.0 + std::abs(ref))) {
-                    std::cerr << "value mismatch: " << methodName(da)
-                              << " smooth=" << smooth << " x=" << x
-                              << " ref=" << std::setprecision(17) << ref
+                    std::cerr << "value mismatch: " << methodName(da) << " smooth=" << smooth
+                              << " x=" << x << " ref=" << std::setprecision(17) << ref
                               << " var=" << v.val() << " diff=" << diff << "\n";
                     CHECK(false);
                 }
@@ -152,9 +156,9 @@ int main() {
                 for (size_t j = 0; j < g_y.size(); ++j) {
                     const double tol = smooth ? 1e-4 : 1e-5;
                     if (std::abs(fd[j] - ad[j]) > tol * (1.0 + std::abs(fd[j]))) {
-                        std::cerr << "gradient mismatch: " << methodName(da)
-                                  << " smooth=" << smooth << " x=" << x << " j=" << j
-                                  << " fd=" << fd[j] << " ad=" << ad[j] << "\n";
+                        std::cerr << "gradient mismatch: " << methodName(da) << " smooth=" << smooth
+                                  << " x=" << x << " j=" << j << " fd=" << fd[j] << " ad=" << ad[j]
+                                  << "\n";
                         CHECK(false);
                     }
                 }
@@ -184,9 +188,8 @@ int main() {
                 const double ad = interp.derivative(stan::math::var(x)).val();
                 const double tol = smooth ? 1e-4 : 1e-5;
                 if (std::abs(fd - ad) > tol * (1.0 + std::abs(fd))) {
-                    std::cerr << "x-derivative mismatch: " << methodName(da)
-                              << " smooth=" << smooth << " x=" << x << " fd=" << fd
-                              << " ad=" << ad << "\n";
+                    std::cerr << "x-derivative mismatch: " << methodName(da) << " smooth=" << smooth
+                              << " x=" << x << " fd=" << fd << " ad=" << ad << "\n";
                     CHECK(false);
                 }
             }
