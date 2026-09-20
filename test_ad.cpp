@@ -6,6 +6,7 @@
  * using Stan Math's reverse-mode automatic differentiation.
  */
 
+#include "Math/Integrals/IntegratorStanPrimitives.h"
 #include "Math/Interpolations.h"
 #include "Math/NumericalMethods.h"
 
@@ -64,7 +65,7 @@ void testCubicSplineInterpolationAD() {
     std::vector<ADVariableT> x = {0.0, 1.0, 2.0, 3.0};
     std::vector<ADVariableT> y = {0.0, 1.0, 4.0, 9.0};
 
-    CubicInterpolation<ADVariableT> spline(x, y, CubicInterpolation<ADVariableT>::Spline);
+    CubicInterpolation<ADVariableT> spline(x, y, CubicDerivativeApprox::Spline);
 
     // Test interpolation value
     ADVariableT x_eval = 1.5;
@@ -101,11 +102,11 @@ void testAllCubicMethodsAD() {
     double expected_deriv = std::cos(M_PI / 4.0);
 
     std::vector<std::pair<std::string, typename CubicInterpolation<ADVariableT>::DerivativeApprox>>
-        methods = {{"Spline", CubicInterpolation<ADVariableT>::Spline},
-                   {"Parabolic", CubicInterpolation<ADVariableT>::Parabolic},
-                   {"Akima", CubicInterpolation<ADVariableT>::Akima},
-                   {"Kruger", CubicInterpolation<ADVariableT>::Kruger},
-                   {"Harmonic", CubicInterpolation<ADVariableT>::Harmonic}};
+        methods = {{"Spline", CubicDerivativeApprox::Spline},
+                   {"Parabolic", CubicDerivativeApprox::Parabolic},
+                   {"Akima", CubicDerivativeApprox::Akima},
+                   {"Kruger", CubicDerivativeApprox::Kruger},
+                   {"Harmonic", CubicDerivativeApprox::Harmonic}};
 
     std::cout << "Testing sin(x) at x = π/4\n";
     std::cout << "Expected value: " << expected_value << "\n";
@@ -233,7 +234,7 @@ void testIntegrateInterpolatedFunctionAD() {
         y_data.push_back(ADVariableT(std::exp(xi)));
     }
 
-    CubicInterpolation<ADVariableT> spline(x_data, y_data, CubicInterpolation<ADVariableT>::Spline);
+    CubicInterpolation<ADVariableT> spline(x_data, y_data, CubicDerivativeApprox::Spline);
 
     // Integrate the interpolated function from 0 to upper_limit
     ADVariableT upper_limit = 1.0;
@@ -275,7 +276,7 @@ void testFinancialSensitivityExample() {
 
     // Create interpolation for discount curve
     CubicInterpolation<ADVariableT> discount_curve(maturities, discount_factors,
-                                                   CubicInterpolation<ADVariableT>::Spline);
+                                                   CubicDerivativeApprox::Spline);
 
     // Cash flows: 100 at t=1.5 years
     ADVariableT cash_flow_time = 1.5;

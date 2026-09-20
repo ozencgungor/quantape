@@ -48,8 +48,7 @@ public:
 
     template <typename ContainerX, typename ContainerY, typename Container2D>
     BicubicInterpolation(const ContainerX& x, const ContainerY& y, const Container2D& z,
-                         DerivativeApprox method = DerivativeApprox::Spline,
-                         bool smooth = Smooth)
+                         DerivativeApprox method = DerivativeApprox::Spline, bool smooth = Smooth)
         : m_method(method), m_smooth(smooth) {
         m_x = this->toDoubleVector(x);
         m_y = this->toDoubleVector(y);
@@ -88,8 +87,8 @@ public:
         // Step 2: y-direction cubic on the intermediate results
         if constexpr (!std::is_same_v<DoubleT, double>) {
             if (!m_y_weights.empty()) {
-                const CubicInterpolation<DoubleT> y_interp(
-                    m_y, y_values, m_method, m_smooth, m_y_weights);
+                const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth,
+                                                           m_y_weights);
                 return y_interp(y, true);
             }
         }
