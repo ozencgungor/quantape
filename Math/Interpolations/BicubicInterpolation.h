@@ -11,32 +11,46 @@ namespace Math {
 /**
  * @brief Bicubic interpolation using cubic interpolation along each axis
  *
- * Performs 2D interpolation by:
- * 1. Interpolating along x-direction for each y row (precomputed at construction)
- * 2. Interpolating the results along y-direction (per query)
+ * Tensor product: interpolate along x for each y row, then interpolate the
+ * results along y. The x-row CubicInterpolation objects are precomputed at
+ * construction.
  *
- * The x-row CubicInterpolation objects are precomputed at construction time.
- * This means:
- * - For double: coefficient computation happens once, not per-query
- * - For var: O(ny*nx) coefficient tape nodes are created once at construction,
- *   not repeated per-query. Each query adds only ny+1 evaluation tape nodes
- *   (via the CubicInterpolation<var> specialization) plus O(ny) for the
- *   y-column coefficient construction.
+ * AD behaviour (after the weight-matrix / branch-pinned-probe rework):
+ *   - construction puts NOTHING on the tape for any method (rows skip the
+ *     coefficient path for AD types; linear methods build their weight
+ *     matrices with pure-double probes);
+ *   - a query costs O(ny) tape nodes (one per x-row evaluation), a
+ *     tape-free y-interpolation (its grid weight matrix is cached here —
+ *     the weights depend only on the grid, so they are shared across all
+ *     queries), and one y-evaluation tape node with O(ny) adjoint pushes;
+ *   - for exactly-linear methods (Spline/Parabolic) the full bicubic is
+ *     linear in z, so the z-Hessian is identically zero;
+ *   - adaptive methods (Akima/Kruger/Harmonic) evaluate through the
+ *     branch-pinned probe in each direction, giving the active-branch
+ *     subgradient per evaluation.
  *
  * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam Smooth  Compile-time default for the runtime smoothing flag. The
+ *                 AD specializations exist for the default Smooth=false
+ *                 instantiation — pass smooth=true to the constructor at
+ *                 runtime rather than instantiating Smooth=true.
  */
-template <typename DoubleT>
-class BicubicInterpolation : public Interpolation2D<DoubleT, BicubicInterpolation<DoubleT>> {
-    using Base = Interpolation2D<DoubleT, BicubicInterpolation<DoubleT>>;
+template <typename DoubleT, bool Smooth = false>
+class BicubicInterpolation
+    : public Interpolation2D<DoubleT, BicubicInterpolation<DoubleT, Smooth>> {
+    static_assert(!Smooth || std::is_same_v<DoubleT, double>,
+                  "AD specializations exist for Smooth=false; pass smooth=true at runtime");
+    using Base = Interpolation2D<DoubleT, BicubicInterpolation<DoubleT, Smooth>>;
     friend Base;
 
 public:
-    using DerivativeApprox = typename CubicInterpolation<DoubleT>::DerivativeApprox;
+    using DerivativeApprox = CubicDerivativeApprox;
 
     template <typename ContainerX, typename ContainerY, typename Container2D>
     BicubicInterpolation(const ContainerX& x, const ContainerY& y, const Container2D& z,
-                         DerivativeApprox method = DerivativeApprox::Spline)
-        : m_method(method) {
+                         DerivativeApprox method = DerivativeApprox::Spline,
+                         bool smooth = Smooth)
+        : m_method(method), m_smooth(smooth) {
         m_x = this->toDoubleVector(x);
         m_y = this->toDoubleVector(y);
         m_z = this->toVector2D(z);
@@ -50,26 +64,36 @@ public:
             }
         }
 
-        // Precompute x-row cubic interpolations.
-        // Coefficient computation happens here (once), not per-query.
-        // For var: this puts ny*O(nx) tape nodes on the tape at construction.
+        // Precompute x-row cubic interpolations (tape-free for AD types).
         m_x_interps.reserve(m_y.size());
         for (size_t j = 0; j < m_y.size(); ++j) {
-            m_x_interps.emplace_back(m_x, m_z[j], m_method);
+            m_x_interps.emplace_back(m_x, m_z[j], m_method, m_smooth);
+        }
+
+        // Cache the y-direction grid weights ONCE (linear methods only).
+        // The weights depend only on m_y, so every per-query
+        // y-interpolation reuses them instead of re-probing.
+        if constexpr (!std::is_same_v<DoubleT, double>) {
+            m_y_weights = CubicInterpolation<DoubleT>::probeWeights(m_y, m_method);
         }
     }
 
     DoubleT valueImpl(DoubleT x, DoubleT y) const {
-        // Step 1: Evaluate precomputed x-row cubics
-        // For var: ny * 1 tape node (via CubicInterpolation<var> specialization)
+        // Step 1: evaluate the precomputed x-row cubics
         std::vector<DoubleT> y_values(m_y.size());
         for (size_t j = 0; j < m_y.size(); ++j) {
             y_values[j] = m_x_interps[j](x, true);
         }
 
-        // Step 2: Build y-cubic from intermediate results and evaluate
-        // For var: O(ny) tape nodes for coefficient construction + 1 for evaluation
-        CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method);
+        // Step 2: y-direction cubic on the intermediate results
+        if constexpr (!std::is_same_v<DoubleT, double>) {
+            if (!m_y_weights.empty()) {
+                const CubicInterpolation<DoubleT> y_interp(
+                    m_y, y_values, m_method, m_smooth, m_y_weights);
+                return y_interp(y, true);
+            }
+        }
+        const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth);
         return y_interp(y, true);
     }
 
@@ -81,11 +105,17 @@ public:
         return xv >= m_x.front() && xv <= m_x.back() && yv >= m_y.front() && yv <= m_y.back();
     }
 
+    /// Whether the cached y-direction weight matrix is in use
+    /// (Spline/Parabolic with an AD DoubleT).
+    bool usesWeightMatrix() const { return !m_y_weights.empty(); }
+
 private:
     DerivativeApprox m_method;
+    bool m_smooth = false;
     std::vector<double> m_x, m_y;                         ///< Grid coordinates (double)
     std::vector<std::vector<DoubleT>> m_z;                ///< Node values (DoubleT, AD-active)
     std::vector<CubicInterpolation<DoubleT>> m_x_interps; ///< Precomputed x-row cubics
+    CubicWeightMatrix m_y_weights;                        ///< Cached y-grid weights (AD, linear)
 };
 
 } // namespace Math

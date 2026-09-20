@@ -32,7 +32,7 @@ void testCubicSplineInterpolation() {
     std::vector<double> y_simple = {0.0, 1.0, 0.0};
 
     Math::CubicInterpolation<double> interp_simple(x_simple, y_simple,
-                                                   Math::CubicInterpolation<double>::Spline);
+                                                   Math::CubicDerivativeApprox::Spline);
     // For natural cubic spline through (0,0), (1,1), (2,0):
     // First derivatives: d0=1.5, d1=0, d2=-1.5
     // Coefficients: a[0]=1.5, b[0]=0, c[0]=-0.5
@@ -49,7 +49,7 @@ void testCubicSplineInterpolation() {
     std::vector<double> y_poly = {0.0, 1.0, 4.0, 9.0}; // x^2
 
     Math::CubicInterpolation<double> interp_poly(x_poly, y_poly,
-                                                 Math::CubicInterpolation<double>::Spline);
+                                                 Math::CubicDerivativeApprox::Spline);
     double val_poly = interp_poly(1.5);
     double expected_poly = 2.25; // 1.5^2
     std::cout << "Value at 1.5 (Polynomial x^2): " << val_poly << " (expected: " << expected_poly
@@ -63,7 +63,7 @@ void testCubicSplineInterpolation() {
     std::vector<double> y_sin = {0.0, 0.84147098, 0.90929743, 0.14112001, -0.7568025}; // sin(x)
 
     Math::CubicInterpolation<double> interp_natural_sin(x_sin, y_sin,
-                                                        Math::CubicInterpolation<double>::Spline);
+                                                        Math::CubicDerivativeApprox::Spline);
     double val_natural_sin = interp_natural_sin(1.5);
     double expected_sin = sin(1.5);
     std::cout << "Value at 1.5 (Natural, sin(x)): " << val_natural_sin
