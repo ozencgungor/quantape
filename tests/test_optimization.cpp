@@ -4,7 +4,7 @@
 //
 //   1. stop criteria: relative/absolute f and x tests, dx, gradient,
 //      evaluation budget (NLopt semantics)
-//   2. valueGrad: exact gradients at var and fvar<var>
+//   2. valueGrad: exact gradients at var and `fvar<var>`
 //   3. hvp: exact Hessian-vector products (no finite differences)
 //   4. constraintValueJacobian: values + row-major Jacobian
 //   5. CRTP base plumbing: a throwaway steepest-descent method drives the
@@ -377,7 +377,7 @@ void testLbfgs() {
         checkClose("rosenbrock x", x[0], 1.0, 1e-5);
         checkClose("rosenbrock y", x[1], 1.0, 1e-5);
     }
-    // fvar<var> backend drives the same loop through the value reverse path
+    // `fvar<var>` backend drives the same loop through the value reverse path
     {
         quantape::math::StopCriteria criteria;
         criteria.grad_tol = 1e-10;
@@ -938,7 +938,7 @@ void testTNewton() {
         }
         std::printf("  tnewton quadratic3: iters=%zu evals=%zu\n", state.iterations, state.evals);
     }
-    // fvar<var> backend drives the same path
+    // `fvar<var>` backend drives the same path
     {
         stan::math::recover_memory();
         quantape::math::TNewton<fvar<var>> solver(criteria);

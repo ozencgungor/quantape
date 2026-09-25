@@ -3,14 +3,14 @@
 //
 // Tested: TrapezoidIntegratorDefault, TrapezoidIntegratorMidPoint,
 // SimpsonIntegrator, GaussLobattoIntegrator, GaussLegendreIntegrator(20),
-// TanhSinhIntegrator. For each, with DoubleT = double / var / fvar<var>:
+// TanhSinhIntegrator. For each, with DoubleT = double / var / `fvar<var>`:
 //
 //   double:    value matches the analytic result (evaluation-count reference)
 //   var:       value + gradient match, and the converged rule performs the
 //              SAME number of integrand evaluations as the double path —
 //              proving the one-pass rule extraction (no re-dispatch, no
 //              per-node accumulation tape)
-//   fvar<var>: value + gradient + Hessian (via stan::math::hessian) match
+//   `fvar<var>`: value + gradient + Hessian (via stan::math::hessian) match
 //   bounds:    dI/dtheta for I(theta) = int_0^theta x^2 dx matches theta^2
 //
 // Integrands:
@@ -110,7 +110,7 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
         CHECK(integ.numberOfEvaluations() == n_evals);
     }
 
-    // ── fvar<var>: value + gradient + Hessian ──
+    // ── `fvar<var>`: value + gradient + Hessian ──
     {
         stan::math::recover_memory();
 

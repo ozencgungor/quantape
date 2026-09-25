@@ -24,7 +24,7 @@ namespace quantape::math {
 
 namespace detail {
 /// Recursive detection of a val() chain ending in an arithmetic type
-/// (double <- var <- fvar<var> <- ...). A trait is used instead of a
+/// (double <- var <- `fvar<var>` <- ...). A trait is used instead of a
 /// self-referential concept, which C++20 forbids.
 template <typename T>
 struct is_solver_scalar : std::is_arithmetic<T> {};

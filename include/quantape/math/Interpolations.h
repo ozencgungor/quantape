@@ -19,7 +19,7 @@
  * - BicubicInterpolation: 2D cubic interpolation (supports Spline, Akima, etc.)
  *
  * Usage:
- *   #include "Math/Interpolations.h"
+ *   `#include "quantape/math/Interpolations.h"`
  *
  *   // 1D Linear interpolation
  *   std::vector<double> x = {0.0, 1.0, 2.0, 3.0};
@@ -45,8 +45,8 @@
  *   ADVariableT result_ad = ad_spline(ADVariableT(1.5));
  *
  *   // Optimized AD paths (passive-abscissa callbacks): also include
- *   // "Math/Interpolations/InterpolationStanPrimitives.h" or the single AD
- *   // umbrella "Math/StanPrimitives.h". This header stays Stan-free.
+ *   // "quantape/math/Interpolations/InterpolationStanPrimitives.h" or the single AD
+ *   // umbrella "quantape/math/StanPrimitives.h". This header stays Stan-free.
  */
 
 // Base classes
@@ -62,8 +62,8 @@
 #include "Interpolations/BicubicInterpolation.h"
 #include "Interpolations/BilinearInterpolation.h"
 
-// AD dispatch (var/fvar<var> optimized paths) lives in
+// AD dispatch (var/`fvar<var>` optimized paths) lives in
 // Interpolations/InterpolationStanPrimitives.h: include it alongside a Stan
-// Math header, or use the single AD umbrella "Math/StanPrimitives.h".
+// Math header, or use the single AD umbrella "quantape/math/StanPrimitives.h".
 
 #endif // INTERPOLATIONS_H

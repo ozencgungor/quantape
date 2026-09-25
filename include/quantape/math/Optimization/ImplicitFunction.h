@@ -20,9 +20,9 @@
 //   g2 : void g(const std::vector<Sx>& x, const std::vector<Sm>& m, std::vector<Sx>& out)
 //   h2 : void h(const std::vector<Sx>& x, const std::vector<Sm>& m, std::vector<Sx>& out)
 //
-// Sx/Sm are deduced independently: x must support var and fvar<var> (for
+// Sx/Sm are deduced independently: x must support var and `fvar<var>` (for
 // HVPs and the mixed Hessian), m only needs double for the solve and
-// fvar<var> for the mixed passes. g2/h2 must accept Sx == var.
+// `fvar<var>` for the mixed passes. g2/h2 must accept Sx == var.
 //
 // v1 scope (documented in §6.2): the constraints are assumed NOT to depend
 // on m directly (dg/dm = 0, dh/dm = 0) -- true for no-arbitrage/structural

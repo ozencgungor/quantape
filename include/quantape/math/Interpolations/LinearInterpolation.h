@@ -60,7 +60,7 @@ public:
     }
 
     /// Passive-abscissa policy (fast path): x adjoint intentionally pushed
-    /// only by the var/fvar<var> specializations in InterpolationStanPrimitives.h.
+    /// only by the var/`fvar<var>` specializations in InterpolationStanPrimitives.h.
     DoubleT valueFixedImpl(DoubleT x) const { return valueImpl(x); }
 
     DoubleT derivativeFixedImpl(DoubleT x) const { return derivativeImpl(x); }

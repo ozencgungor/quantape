@@ -11,7 +11,7 @@ selected automatically by the scalar template parameter.
 ```
 include/quantape/      public headers (namespace quantape::)
     math/              integrators, solvers, interpolation, optimization, AD, RNG
-    markets/           curves (yield, IR, survival), volatility (IR, EQ, FX)
+    markets/           curves (yield, IR, survival), volatility (IR, EQ, FX), mostly a stub for now
     models/            stochastic models and bridge samplers
     pricing/           pricers (e.g. Black-Scholes) and AD primitives
     scenario/          Monte Carlo scenario machinery
@@ -31,15 +31,15 @@ umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
 
 ## Components
 
-| Module | Contents |
-|---|---|
-| `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol) |
-| `quantape/math/Optimization/` | Optimizer stack: result codes, stop criteria, CRTP `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export, and the first-order IFT layer (dp/dm, KKT sensitivities, var composition — `internal_docs/ad_optimizers.md`) |
-| `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP |
-| `quantape/markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX) |
-| `quantape/models/` | Stochastic models and bridge samplers |
-| `quantape/scenario/` | Monte Carlo scenario machinery |
-| `quantape/pricing/` | Pricers (e.g. Black-Scholes) and AD primitives |
+| Module | Contents                                                                                                                                                                                                                                                                                                                                                                                             |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol)                                                                                                  |
+| `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export, and the first-order IFT layer (dp/dm, KKT sensitivities, var composition |
+| `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP                                                                                                                                                                                                                      |
+| `quantape/markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX), currently a stub                                                                                                                                                                                                                                                                                                                              |
+| `quantape/models/` | Stochastic models and bridge samplers                                                                                                                                                                                                                                                                                                                                                                |
+| `quantape/scenario/` | Monte Carlo scenario machinery                                                                                                                                                                                                                                                                                                                                                                       |
+| `quantape/pricing/` | Pricers (e.g. Black-Scholes) and AD primitives                                                                                                                                                                                                                                                                                                                                                       |
 
 ## Build
 
@@ -77,7 +77,7 @@ Run a target and check the exit code; all of the following must exit `0`.
 | `test_interpolation_xad` | Evaluation-point AD: analytic `dI/dx`, mixed `d²I/dxdy` blocks, cubic mixed Hessians vs finite differences, `evaluateFixed` contract |
 | `test_cubic_weights` / `test_bicubic_weights` | Cubic/bicubic AD dispatch: gradients vs FD, true active-branch Hessians vs second-order FD, weight-matrix fast paths |
 | `test_autodiff_primitives` | Hessian-vector products, `solve(interp)`, `integrate(interp)`, nested solves — all with analytic references and FD cross-checks |
-| `test_optimization` | Optimizer stack: stop criteria, CRTP base, exact gradients/HVPs/constraint Jacobians, Wolfe line search, L-BFGS, QP, SLSQP/AUGLAG constrained fixtures |
+| `test_optimization` | Optimizer stack: stop criteria, base class, exact gradients/HVPs/constraint Jacobians, Wolfe line search, L-BFGS, QP, SLSQP/AUGLAG constrained fixtures |
 | `test_optimizers_stress` | Hard/edge problems: Rosenbrock n=50, Beale, Himmelblau, 1e8/1e16 conditioning, degenerate constraints, 20-point arbitrage curve, NLopt parity |
 | `test_ift` | IFT sensitivities: `dp/dm` vs analytic + bump-and-recalibrate FD, KKT multiplier sensitivities, degenerate active sets, ridge escalation, condition reporting, var composition |
 | `test_ziggurat` / `test_mcfarland` | Ziggurat / McFarland normal samplers: correctness and throughput |
@@ -87,7 +87,7 @@ Benchmarks live in `benchmarks/` (`test_optimizers_bench`,
 `test_bs_hessian_bench`, AD benches, exp/log bit-trick bench) — timing
 harnesses for the sampling profiler, not correctness gates.
 
-## AD architecture in one paragraph
+## AD architecture
 
 Primitives are templated on the scalar and route by type at compile time.
 `var` paths avoid differentiating algorithms where it is fragile: integrals
@@ -111,6 +111,8 @@ sensitivities, `var` composition on the caller's tape) — see
 ## Documentation
 
 Headers are comment-dense (`/** ... */` file/class/method docs). Generate the
-API reference with `cmake --build build --target doc` (Doxygen,
-`docs/Doxyfile`); output lands in `build/docs/doxygen/html` and the repository
-README is rendered as the landing page.
+API reference with `cmake --build build --target doc` (Doxygen + Graphviz,
+`docs/Doxyfile`); the output lands in `docs/html` and is reachable through the
+single entry point `docs/index.html` (open it in a browser). The generated
+HTML is gitignored — regenerate after changes. Class graphs, collaboration
+diagrams and call/caller graphs are enabled.

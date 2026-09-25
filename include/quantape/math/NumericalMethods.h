@@ -8,7 +8,7 @@
  * Covers integration, root finding, interpolation and optimization through
  * the component umbrellas:
  *
- *   #include "Math/NumericalMethods.h"   // double-only consumers
+ *   `#include "quantape/math/NumericalMethods.h"`   // double-only consumers
  *
  *   quantape::math::TrapezoidIntegratorDefault<double> integ(1e-6, 1000);
  *   double I = integ([](double x) { return x * x; }, 0.0, 1.0);
@@ -19,11 +19,11 @@
  * For automatic differentiation (stan::math::var / fvar<...>) include the
  * single AD umbrella as well:
  *
- *   #include "Math/StanMath.h"
- *   #include "Math/StanPrimitives.h"
+ *   `#include "quantape/math/StanMath.h"`
+ *   `#include "quantape/math/StanPrimitives.h"`
  *
  * Random-number utilities (Math/Random/) are intentionally not included;
- * include them directly, e.g. "Math/Random/PCGRandom.hpp".
+ * include them directly, e.g. "quantape/math/Random/PCGRandom.hpp".
  */
 
 // Component umbrellas (all Stan-free)

@@ -1,7 +1,7 @@
 //
 // StanPrimitives.h -- Stan AD specializations for pricing structs
 //
-// Provides analytical adjoint (var) and nested analytical (fvar<var>)
+// Provides analytical adjoint (var) and nested analytical (`fvar<var>`)
 // specializations for Black76 and GBS.
 //
 
@@ -36,7 +36,7 @@ inline stan::math::var Black76<stan::math::var>::price() const {
 }
 
 // ============================================================================
-// Black76<fvar<var>>::price() -- nested analytical for stan::math::hessian
+// Black76<`fvar<var>`>::price() -- nested analytical for stan::math::hessian
 //
 // The tangent var = sum_i Greek_i . tangent_i is built as ONE callback var:
 // its value is the directional derivative (exact, in double) and its adjoint
@@ -108,9 +108,9 @@ inline stan::math::var GBS<stan::math::var>::price() const {
 }
 
 // ============================================================================
-// GBS<fvar<var>>::price() -- nested analytical for stan::math::hessian
+// GBS<`fvar<var>`>::price() -- nested analytical for stan::math::hessian
 //
-// Single-tangent-callback form (see Black76<fvar<var>> above): the tangent's
+// Single-tangent-callback form (see Black76<`fvar<var>`> above): the tangent's
 // adjoint pushes H . d = sum_i tangent_i . (Hessian row i) into the leaves.
 // 2 callbacks + 0 arithmetic nodes instead of the 5-callback / 14-node
 // fan-out; identical adjoint semantics.

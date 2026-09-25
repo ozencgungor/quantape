@@ -53,7 +53,7 @@ namespace quantape::math {
  * v1 uses an identity preconditioner (mos2 = 1); the L-BFGS preconditioner
  * (mos2 = 2, NLOPT_LD_TNEWTON_PRECOND*) is a follow-up.
  *
- * Requires an AD backend: the objective must accept std::vector<fvar<var>>
+ * Requires an AD backend: the objective must accept `std::vector<fvar<var>>`
  * in addition to DoubleT. Iteration state is double; all work is local to
  * minimizeImpl (re-entrant).
  */
@@ -69,7 +69,7 @@ public:
     const LineSearchOptions& lineSearchOptions() const { return m_options; }
     void setLineSearchOptions(const LineSearchOptions& options) { m_options = options; }
 
-    // Internal, public for CRTP access (like Solver1D's solveImpl)
+    // Internal, public for base-class dispatch (like Solver1D's solveImpl)
     template <typename F>
         requires ObjectiveEvaluator<F, DoubleT>
     OptimizeResult minimizeImpl(const F& f, OptimizerState& state) const {

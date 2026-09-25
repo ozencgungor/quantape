@@ -8,7 +8,7 @@
 // Optimizer<DoubleT, Impl> base then evaluates gradients and HVPs
 // automatically:
 //
-//   Optimizer<var, LBFGS<var>>::minimize   -> exact gradients (one reverse pass)
+//   `Optimizer<var, LBFGS<var>>`::minimize   -> exact gradients (one reverse pass)
 //   TNewton<var>::minimize                 -> exact HVP (forward-over-reverse)
 //
 // Following the pattern of Solvers/SolverStanPrimitives.h and
@@ -75,7 +75,7 @@ std::pair<double, std::vector<double>> valueGrad(const F& f, const std::vector<d
 /**
  * @brief Exact Hessian-vector product H(x) v, written into a caller buffer
  *
- * The `theta` fvar<var> scratch vector is reused across calls (the nested
+ * The `theta` `fvar<var>` scratch vector is reused across calls (the nested
  * scope recovers the tape per call; only the varis are new). This is the
  * allocation-free variant used by dense-Hessian assembly (ImplicitFunction.h).
  */
@@ -104,13 +104,13 @@ inline void hvpInto(const F& f, const std::vector<double>& x, const std::vector<
 /**
  * @brief Exact Hessian-vector product H(x) v
  *
- * Parameters are seeded as fvar<var>(x_i, v_i); y.d_ is the directional
+ * Parameters are seeded as `fvar<var>`(x_i, v_i); y.d_ is the directional
  * derivative grad(f) . v, and one reverse pass over it returns
  * d/dx [grad(f) . v] = H v.
  *
  * One forward-over-reverse pass, machine precision, no step size and no extra
  * gradient evaluation (contrast with NLopt's PNET finite differences). The
- * objective must accept std::vector<fvar<var>>.
+ * objective must accept `std::vector<fvar<var>>`.
  */
 template <typename F>
 std::vector<double> hvp(const F& f, const std::vector<double>& x, const std::vector<double>& v) {

@@ -52,3 +52,6 @@ internal_tests/
 # Sublime Text project/workspace files
 *.sublime-project
 *.sublime-workspace
+
+# Generated API documentation (doxygen output)
+docs/html/

@@ -5,13 +5,13 @@
 // The default valueImpl/derivativeImpl are scalar-generic and differentiate
 // the query coordinate (weights are DoubleT). The specializations here
 // implement the *Fixed* methods (evaluateFixed/derivativeFixed): analytical
-// adjoint (var) and nested analytical (fvar<var>) callbacks that keep the
+// adjoint (var) and nested analytical (`fvar<var>`) callbacks that keep the
 // tape-node count minimal and intentionally do NOT push an adjoint into the
 // query coordinate. Use them only when x is a constant.
 //
 // Follows the same pattern as Pricing/StanPrimitives.h for Black76/GBS.
 // Include this header when using interpolation with stan::math::var or
-// stan::math::fvar<var> to get optimized tape usage.
+// stan::math::`fvar<var>` to get optimized tape usage.
 //
 
 #ifndef INTERPOLATION_STAN_PRIMITIVES_H
@@ -84,7 +84,7 @@ LinearInterpolation<stan::math::var>::derivativeFixedImpl(stan::math::var x) con
 }
 
 // ============================================================================
-// LinearInterpolation<fvar<var>>::valueFixedImpl -- 1 callback var, zero Hessian
+// LinearInterpolation<`fvar<var>`>::valueFixedImpl -- 1 callback var, zero Hessian
 //
 // Linear in y => d2f/dy_j dy_k = 0 for all j,k.
 // Value part: make_callback_var with w0, w1 adjoints.
@@ -133,7 +133,7 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
 }
 
 // ============================================================================
-// LinearInterpolation<fvar<var>>::derivativeFixedImpl -- 1 callback var, zero Hessian
+// LinearInterpolation<`fvar<var>`>::derivativeFixedImpl -- 1 callback var, zero Hessian
 // ============================================================================
 
 template <>
@@ -247,7 +247,7 @@ LogLinearInterpolation<stan::math::var>::derivativeFixedImpl(stan::math::var x) 
 }
 
 // ============================================================================
-// LogLinearInterpolation<fvar<var>>::valueFixedImpl -- 2 callback vars + tangent
+// LogLinearInterpolation<`fvar<var>`>::valueFixedImpl -- 2 callback vars + tangent
 //
 // Non-linear in y => Hessian is non-zero.
 // d2f/dy_i^2         = -f * t*(1-t) / y_i^2
@@ -317,7 +317,7 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
 }
 
 // ============================================================================
-// LogLinearInterpolation<fvar<var>>::derivativeFixedImpl -- 2 callback vars + tangent
+// LogLinearInterpolation<`fvar<var>`>::derivativeFixedImpl -- 2 callback vars + tangent
 //
 // f'(x) = f(x) * dL * inv_dx   where dL = log(y_{i+1}) - log(y_i)
 // Gradients and Hessian of f' w.r.t. (y_i, y_{i+1}) computed analytically.
@@ -435,10 +435,10 @@ BilinearInterpolation<stan::math::var>::valueFixedImpl(stan::math::var x, stan::
 }
 
 // ============================================================================
-// BilinearInterpolation<fvar<var>>::valueFixedImpl -- 1 callback var, zero Hessian
+// BilinearInterpolation<`fvar<var>`>::valueFixedImpl -- 1 callback var, zero Hessian
 //
 // Linear in z => d2f/dz_j dz_k = 0 for all j,k.
-// Same pattern as LinearInterpolation<fvar<var>>.
+// Same pattern as LinearInterpolation<`fvar<var>`>.
 // ============================================================================
 
 template <>
@@ -498,7 +498,7 @@ BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
 // P(x) in segment i = y_i + sum_j W_j(dx) * y_j, with W_j(dx) pure double
 // (precomputed by probing the double solver). Consequences:
 //   - var:        ONE tape node, O(n) adjoint pushes — no construction tape
-//   - fvar<var>:  the y-Hessian is IDENTICALLY zero (P is linear in y),
+//   - `fvar<var>`:  the y-Hessian is IDENTICALLY zero (P is linear in y),
 //                 so no second-order callback machinery is needed.
 //
 // SAFETY: the callbacks are SELF-CONTAINED — they capture the node-value

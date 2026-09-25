@@ -18,7 +18,7 @@
  * transitively (documented dependency, like stan/math.hpp provides its own
  * Eigen wrapper).
  *
- * .clang-format's IncludeCategories sort project headers ("Math/...") before
+ * .clang-format's IncludeCategories sort project headers ("quantape/math/...") before
  * third-party ones (<Eigen/...>), so this include also stays first within
  * any include block it appears in.
  */

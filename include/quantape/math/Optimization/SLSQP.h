@@ -95,7 +95,7 @@ public:
 
     // ── Unconstrained entry point (inherited base dispatch) ──
 
-    // Internal, public for CRTP access
+    // Internal, public for base-class dispatch
     template <typename F>
         requires ObjectiveEvaluator<F, DoubleT>
     OptimizeResult minimizeImpl(const F& f, OptimizerState& state) const {

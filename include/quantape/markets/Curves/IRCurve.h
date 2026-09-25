@@ -97,6 +97,7 @@ public:
      * @brief Get forward rate between two times
      * @param t1 Start time
      * @param t2 End time
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Forward rate f(t1, t2) = (r(t2)*t2 - r(t1)*t1) / (t2 - t1)
      */
     DoubleT forwardRate(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
@@ -112,6 +113,7 @@ public:
      * @brief Get forward discount factor between two times
      * @param t1 Start time
      * @param t2 End time
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Forward DF = DF(t2) / DF(t1)
      */
     DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {

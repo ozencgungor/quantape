@@ -4,7 +4,7 @@
 //           reversed bounds, infinite and half-infinite domains
 //   var:    integral value matches double; gradient w.r.t. a parameter
 //           (in the integrand and in the bounds) matches the analytic value
-//   fvar<var>: second derivative (Hessian) matches the analytic value
+//   `fvar<var>`: second derivative (Hessian) matches the analytic value
 //
 // Run: ./test_tanh_sinh
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
@@ -151,7 +151,7 @@ int main() {
         std::cout << "     integrand-parameter gradient = " << grad1(0) << " (expected 1)\n";
     }
 
-    // ── second order (fvar<var>) ──
+    // ── second order (`fvar<var>`) ──
     {
         // I(theta) = int_0^1 theta^2 x^2 dx = theta^2/3  =>  H = 2/3
         Eigen::VectorXd x0(1);

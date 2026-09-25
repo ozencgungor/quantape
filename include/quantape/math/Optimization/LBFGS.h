@@ -57,7 +57,7 @@ public:
     const LineSearchOptions& lineSearchOptions() const { return m_options; }
     void setLineSearchOptions(const LineSearchOptions& options) { m_options = options; }
 
-    // Internal, public for CRTP access (like Solver1D's solveImpl)
+    // Internal, public for base-class dispatch (like Solver1D's solveImpl)
     template <typename F>
         requires ObjectiveEvaluator<F, DoubleT>
     OptimizeResult minimizeImpl(const F& f, OptimizerState& state) const {

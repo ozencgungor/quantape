@@ -4,7 +4,7 @@
 namespace quantape::math {
 namespace detail {
 /// Recursive primal extraction: double -> itself, var -> .val(),
-/// fvar<var> -> .val().val().
+/// `fvar<var>` -> .val().val().
 ///
 /// Shared by the integrator AD specializations (Integrals/IntegratorStanPrimitives.h)
 /// and the 1-D solvers (Solvers/SolverPrimitives.h). Deliberately Stan-free so

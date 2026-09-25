@@ -123,6 +123,7 @@ public:
     /**
      * @brief Get average hazard rate from 0 to t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Average hazard rate λ(t) = -ln(S(t)) / t
      */
     DoubleT avgHazardRate(DoubleT t, bool allowExtrapolation = true) const {

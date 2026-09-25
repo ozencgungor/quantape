@@ -38,7 +38,7 @@ namespace quantape::math {
  *   - abscissas and weights are computed in pure double — OFF the tape;
  *   - only the f-evaluations and the weighted sums carry AD values, so
  *     d/d(theta) int f(x; theta) dx flows through generically for double,
- *     var and fvar<var> (Hessians included, via nested AD).
+ *     var and `fvar<var>` (Hessians included, via nested AD).
  *
  * Numerical details from the design doc (docs/tanh_sinh.md):
  *   - sech^2 is computed through exp(-2|u|) to avoid cosh overflow;
@@ -53,7 +53,7 @@ namespace quantape::math {
  *     f(x, d) in terms of d ((1 - x)^alpha -> (-d)^alpha near +1) to keep
  *     full precision where the plain x argument has already collapsed.
  *
- * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
  */
 template <typename DoubleT>
 class TanhSinhIntegrator : public Integrator<DoubleT> {
@@ -79,7 +79,7 @@ public:
      * @brief Integrate f from a to b.
      *
      * double: the adaptive level halving implemented below. var and
-     * fvar<var>: the converged quadrature rule is extracted in one
+     * `fvar<var>`: the converged quadrature rule is extracted in one
      * double-valued pass and the AD integrand samples are combined with it
      * through a single callback var per output (IntegratorStanPrimitives.h).
      * The complement and infinite-domain entry points keep the generic tape
@@ -186,7 +186,7 @@ private:
     size_t m_minLevels;
     size_t m_maxLevels;
 
-    // Defined for stan::math::var / stan::math::fvar<var> in
+    // Defined for stan::math::var / stan::math::`fvar<var>` in
     // IntegratorStanPrimitives.h. Never ODR-used for double (nor for the
     // RuleScalar probe, which enters through the base operator()).
     DoubleT integratePrimitives(const FunctionType& f, DoubleT a, DoubleT b) const;
@@ -209,7 +209,7 @@ private:
     static constexpr double LEVEL0_STEP = 1.0;
 
     /// Recursive primal extraction: double -> itself, var -> .val(),
-    /// fvar<var> -> .val().val()
+    /// `fvar<var>` -> .val().val()
     static double value(double x) { return x; }
     template <typename T>
     static double value(const T& x) {

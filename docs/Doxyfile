@@ -2,17 +2,19 @@
 #
 # The headers are comment-dense (/** ... */ file/class/method docs), so the
 # defaults plus these settings produce complete reference output. Generated
-# HTML goes to build/docs/doxygen (build/ is gitignored); regenerate with
+# HTML goes to docs/html (gitignored), reachable through docs/index.html;
+# regenerate with
 #   cmake --build build --target doc
 # or directly:  doxygen docs/Doxyfile
 
 PROJECT_NAME           = "Quantape"
 PROJECT_BRIEF          = "Differentiable quant library (AD, integrators, solvers, interpolation, optimization, IFT)"
 PROJECT_LOGO           =
-OUTPUT_DIRECTORY       = build/docs/doxygen
+OUTPUT_DIRECTORY       = docs
 
 INPUT                  = include/quantape \
-                         src
+                         src \
+                         README.md
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h *.cpp
 
@@ -42,8 +44,23 @@ WARN_IF_UNDOCUMENTED   = NO
 JAVADOC_AUTOBRIEF      = YES
 SORT_MEMBER_DOCS       = YES
 
-# Enable only if graphviz is installed: CALL_GRAPH / CALLER_GRAPH below
-HAVE_DOT               = NO
+# Graphviz: class/collaboration/include/call graphs
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 0
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = NO
+TEMPLATE_RELATIONS     = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+MAX_DOT_GRAPH_DEPTH    = 0
 
 # Group the top-level modules by directory
 LAYOUT_FILE            =

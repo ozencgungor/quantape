@@ -184,7 +184,7 @@ public:
     /**
      * @brief Integrate f from a to b.
      *
-     * double: the fixed-order quadrature below. var and fvar<var>: the
+     * double: the fixed-order quadrature below. var and `fvar<var>`: the
      * discrete quadrature rule is extracted by probing the rule with
      * RuleScalar and the AD integrand samples are combined with it through a
      * single callback var per output (IntegratorStanPrimitives.h).
@@ -206,7 +206,7 @@ protected:
 private:
     GaussLegendreQuadrature<DoubleT> m_quadrature;
 
-    // Defined for stan::math::var / stan::math::fvar<var> in
+    // Defined for stan::math::var / stan::math::`fvar<var>` in
     // IntegratorStanPrimitives.h. Never ODR-used for double (nor for the
     // RuleScalar probe, which enters through the base operator()).
     DoubleT integratePrimitives(const FunctionType& f, DoubleT a, DoubleT b) const;

@@ -105,6 +105,7 @@ public:
      * @brief Get forward yield between two times
      * @param t1 Start time
      * @param t2 End time
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Forward yield
      */
     DoubleT forwardYield(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {
@@ -120,6 +121,7 @@ public:
      * @brief Get forward discount factor between two times
      * @param t1 Start time
      * @param t2 End time
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Forward DF = DF(t2) / DF(t1)
      */
     DoubleT forwardDiscountFactor(DoubleT t1, DoubleT t2, bool allowExtrapolation = true) const {

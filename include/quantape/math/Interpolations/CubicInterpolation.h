@@ -59,7 +59,7 @@ struct CubicWeightMatrix {
  *     node per evaluation, x adjoint not pushed); Akima/Kruger/Harmonic use
  *     the branch-pinned ProbeDual linearization.
  *
- * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
  * @tparam Smooth  Compile-time default for the smoothing parameter: when true,
  *                 sign/abs branch conditions in the adaptive methods are
  *                 replaced by C^1 approximations (sigmoid blends, smooth abs).
@@ -162,7 +162,7 @@ private:
     bool m_useWeights = false;
     std::vector<double> m_Wa, m_Wb, m_Wc; ///< flat (segment * n) rows
 
-    // Defined for stan::math::var / stan::math::fvar<var> in
+    // Defined for stan::math::var / stan::math::`fvar<var>` in
     // InterpolationStanPrimitives.h (passive-abscissa fast path). Never
     // ODR-used for double.
     DoubleT weightMatrixValue(DoubleT x) const;

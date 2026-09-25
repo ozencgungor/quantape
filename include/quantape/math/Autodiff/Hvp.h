@@ -7,13 +7,13 @@ namespace quantape::math {
 /**
  * @brief Hessian-vector product by forward-over-reverse AD
  *
- * Evaluates the objective at x with an fvar<var> whose tangent is v:
+ * Evaluates the objective at x with an `fvar<var>` whose tangent is v:
  *
- *   y = f(fvar<var>(x, v))     =>     y.d_ = f'(x) * v
+ *   y = f(`fvar<var>`(x, v))     =>     y.d_ = f'(x) * v
  *
  * One reverse pass over y.d_ then yields d/dx [f'(x) v] = f''(x) v.
  *
- * The objective must be scalar-generic (callable with fvar<var> as well as
+ * The objective must be scalar-generic (callable with `fvar<var>` as well as
  * var/double), the same contract as the integrators and interpolators.
  *
  * Side effects: the internal reverse pass runs during forward construction and

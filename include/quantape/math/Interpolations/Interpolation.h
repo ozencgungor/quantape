@@ -9,7 +9,7 @@
 namespace quantape::math {
 
 /**
- * @brief CRTP base class for 1D interpolations
+ * @brief Base class for 1-D interpolations
  *
  * Grid coordinates (m_x) are always double — they are not AD-active.
  * Node values (m_y) are DoubleT — these are the AD leaves.
@@ -25,11 +25,11 @@ namespace quantape::math {
  * - derivativeFixedImpl(DoubleT x) const -> DoubleT (passive-abscissa policy)
  *
  * Explicit template specializations of the Fixed methods for stan::math::var
- * and stan::math::fvar<var> go in InterpolationStanPrimitives.h, following the
+ * and stan::math::`fvar<var>` go in InterpolationStanPrimitives.h, following the
  * same pattern as Pricing/StanPrimitives.h for Black76.
  *
- * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
- * @tparam Derived CRTP derived class
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
+ * @tparam Derived Derived interpolation class
  */
 template <typename DoubleT, typename Derived>
 class Interpolation {
@@ -68,7 +68,7 @@ public:
         }
     }
 
-    // ── Public interface (dispatches to Derived via CRTP) ──
+    // ── Public interface (dispatches to Derived) ──
 
     DoubleT operator()(DoubleT x, bool allowExtrapolation = false) const {
         if (!allowExtrapolation && !isInRange(x)) {
@@ -138,7 +138,7 @@ public:
 
     /// Recursively extract the innermost double from any AD type.
     /// double -> double, var -> var.val() -> double,
-    /// fvar<var> -> fvar.val() -> var -> var.val() -> double
+    /// `fvar<var>` -> fvar.val() -> var -> var.val() -> double
     static double extractDouble(double x) { return x; }
 
     template <typename T>

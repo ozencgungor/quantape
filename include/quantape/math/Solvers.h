@@ -10,12 +10,12 @@
  * explicit derivative functor, plus the Thomas tridiagonal solver.
  *
  * Usage:
- *   #include "Math/Solvers.h"
+ *   `#include "quantape/math/Solvers.h"`
  *   quantape::math::BrentSolver<double> solver;
  *   double root = solver.solve(f, 1e-12, guess, xMin, xMax);
  *
- * For automatic differentiation (var / fvar<var>) also include
- * "Math/Solvers/SolverStanPrimitives.h" — or "Math/StanPrimitives.h" — for
+ * For automatic differentiation (var / `fvar<var>`) also include
+ * "quantape/math/Solvers/SolverStanPrimitives.h" — or "quantape/math/StanPrimitives.h" — for
  * exact implicit-function-theorem gradients. This header stays Stan-free.
  */
 

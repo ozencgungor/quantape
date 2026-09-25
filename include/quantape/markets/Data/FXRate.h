@@ -71,6 +71,8 @@ public:
     /**
      * @brief Get forward FX rate at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Forward FX rate F(t) = S * exp((rd - rf) * t)
      *
      * Uses covered interest rate parity:
@@ -94,6 +96,8 @@ public:
     /**
      * @brief Get domestic discount factor at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Domestic discount factor
      *
      * @throws std::runtime_error if curves are not set
@@ -108,6 +112,8 @@ public:
     /**
      * @brief Get foreign discount factor at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Foreign discount factor
      *
      * @throws std::runtime_error if curves are not set
@@ -122,6 +128,8 @@ public:
     /**
      * @brief Get domestic zero rate at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Domestic zero rate
      */
     DoubleT domesticRate(DoubleT t, bool allowExtrapolation = true) const {
@@ -134,6 +142,8 @@ public:
     /**
      * @brief Get foreign zero rate at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Foreign zero rate
      */
     DoubleT foreignRate(DoubleT t, bool allowExtrapolation = true) const {

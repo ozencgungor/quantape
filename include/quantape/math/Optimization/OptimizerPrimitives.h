@@ -21,7 +21,7 @@ namespace quantape::math {
  * @brief Shared building blocks for the optimizer classes (Stan-free)
  *
  * Mirrors the design of Math/Solvers and Math/Interpolations:
- * - an `Optimizer<DoubleT, Impl>` CRTP base holding configuration only, with
+ * - an `Optimizer<DoubleT, Impl>` base holding configuration only, with
  *   all working state local to a minimize() call (thread-safe, re-entrant);
  * - `DoubleT` selects the derivative backend: `double` = value-only,
  *   `var` = exact gradients, `fvar<...>` = gradients/HVPs; the AD entry
@@ -139,7 +139,7 @@ inline double nowSeconds() {
 
 namespace detail {
 /// Recursive detection of a val() chain ending in an arithmetic type
-/// (double <- var <- fvar<var> <- ...). A trait rather than a concept because
+/// (double <- var <- `fvar<var>` <- ...). A trait rather than a concept because
 /// C++20 forbids self-referential concept definitions.
 template <typename T>
 struct is_optimization_scalar : std::is_arithmetic<T> {};
@@ -158,7 +158,7 @@ concept OptimizationScalar = quantape::math::detail::is_optimization_scalar<T>::
 template <typename DoubleT>
 concept GradientBackend = OptimizationScalar<DoubleT> && !std::is_same_v<DoubleT, double>;
 
-/// Backend that can produce exact HVPs (var/fvar; hvp runs fvar<var> internally)
+/// Backend that can produce exact HVPs (var/fvar; hvp runs `fvar<var>` internally)
 template <typename DoubleT>
 concept HvpBackend = GradientBackend<DoubleT>;
 
@@ -341,9 +341,9 @@ double valueGrad(const F& f, const std::vector<double>& x, std::vector<DoubleT>&
                  std::vector<double>& grad);
 
 /**
- * Exact Hessian-vector product H(x) v by forward-over-reverse (fvar<var>
+ * Exact Hessian-vector product H(x) v by forward-over-reverse (`fvar<var>`
  * tangent seeding, one pass). No finite differences, no step size. The
- * objective must be callable with std::vector<fvar<var>>.
+ * objective must be callable with `std::vector<fvar<var>>`.
  */
 template <typename F>
 std::vector<double> hvp(const F& f, const std::vector<double>& x, const std::vector<double>& v);
@@ -358,17 +358,17 @@ void constraintValueJacobian(const G& g, const std::vector<double>& x, std::vect
 } // namespace detail
 
 // ============================================================================
-// CRTP base
+// Optimizer base
 // ============================================================================
 
 /**
- * @brief Base class for minimizers using CRTP
+ * @brief Base class for minimizers
  *
  * Concrete optimizers are declared as:
- *   class LBFGS : public Optimizer<var, LBFGS<var>> { ... }
+ *   class LBFGS : public `Optimizer<var, LBFGS<var>>` { ... }
  *
- * and must provide, public (the base accesses it through CRTP):
- *   template <typename F> requires VectorObjective<F, DoubleT>
+ * and must provide, publicly (the base calls it on the static type):
+ *   template `<typename F>` requires VectorObjective<F, DoubleT>
  *   OptimizeResult minimizeImpl(const F& f, OptimizerState& state) const;
  *
  * The base holds configuration (StopCriteria) only; minimize() copies the
@@ -378,7 +378,7 @@ void constraintValueJacobian(const G& g, const std::vector<double>& x, std::vect
  *
  * @tparam DoubleT Derivative backend: double (value-only), var (exact
  *                 gradients), fvar<...> (gradients and HVPs)
- * @tparam Impl Derived optimizer implementation (CRTP)
+ * @tparam Impl Derived optimizer implementation
  */
 template <typename DoubleT, typename Impl>
     requires OptimizationScalar<DoubleT>

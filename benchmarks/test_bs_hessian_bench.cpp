@@ -15,7 +15,7 @@
  * Approaches:
  *   1. Naive:             stan::math::hessian on fully templated BS
  *   2. Reverse-on-Greeks: reverse-mode on each analytical Greek expression
- *   3. Nested analytical: fvar<var> functor with make_callback_var Greeks
+ *   3. Nested analytical: `fvar<var>` functor with make_callback_var Greeks
  *   4. Full analytical:   all second-order Greeks in double, zero AD
  */
 
@@ -104,7 +104,7 @@ inline G2 greeks2(double S, double sigma, double r) {
 // ═══════════════════════════════════════════════════════════════════════════
 // APPROACH 1: NAIVE — stan::math::hessian on fully templated BS
 //
-// Every operation (log, exp, Phi, erfc internals) goes through fvar<var>.
+// Every operation (log, exp, Phi, erfc internals) goes through `fvar<var>`.
 // Stan tapes ~30+ var nodes per Hessian column × 3 columns = ~90 reverse ops.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -130,9 +130,9 @@ struct BSNaiveFunctor {
 //
 // We create a var tape for each Greek and call grad() to get its
 // partial derivatives = one Hessian row. Cost: 3 reverse passes,
-// each ~10-15 var nodes (versus ~30+ for the full BS through fvar<var>).
+// each ~10-15 var nodes (versus ~30+ for the full BS through `fvar<var>`).
 //
-// No fvar<var> needed. Pure reverse-mode.
+// No `fvar<var>` needed. Pure reverse-mode.
 // ═══════════════════════════════════════════════════════════════════════════
 
 void hessian_reverse_on_greeks(double S0, double s0, double r0, double& fx, Eigen::Vector3d& g,
@@ -240,7 +240,7 @@ void hessian_callback_greeks(double S0, double s0, double r0, double& fx, Eigen:
 //
 // The ultimate tape-minimal approach for stan::math::hessian:
 //
-// When called with fvar<var>, we construct:
+// When called with `fvar<var>`, we construct:
 //   value   = var(price)              — just a plain var, 0 tape ops for value
 //   tangent = δ_var·Sd + ν_var·sd + ρ_var·rd     — 5 arithmetic var nodes
 //
@@ -275,7 +275,7 @@ struct BSNestedFunctor {
     }
 
     fvar<var> compute_nested(const Eigen::Matrix<fvar<var>, Eigen::Dynamic, 1>& theta) const {
-        // Value-level (var) and tangent-level (var) of each fvar<var> input
+        // Value-level (var) and tangent-level (var) of each `fvar<var>` input
         var Sv = theta(0).val_, sv = theta(1).val_, rv = theta(2).val_;
         var Sd = theta(0).d_, sd = theta(1).d_, rd = theta(2).d_;
 

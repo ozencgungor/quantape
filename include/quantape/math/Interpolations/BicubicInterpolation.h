@@ -26,7 +26,7 @@ namespace quantape::math {
  *   - adaptive methods (Akima/Kruger/Harmonic) use the branch-pinned probe,
  *     giving the active-branch subgradient per evaluation.
  *
- * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
  * @tparam Smooth  Compile-time default for the runtime smoothing flag. The
  *                 AD specializations exist for the default Smooth=false
  *                 instantiation — pass smooth=true to the constructor at

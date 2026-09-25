@@ -87,7 +87,7 @@ public:
     /**
      * @brief Integrate f from a to b.
      *
-     * double: the adaptive refinement implemented below. var and fvar<var>:
+     * double: the adaptive refinement implemented below. var and `fvar<var>`:
      * the converged quadrature rule is extracted in one double-valued pass
      * and the AD integrand samples are combined with it through a single
      * callback var per output (IntegratorStanPrimitives.h).
@@ -136,14 +136,14 @@ protected:
 
 private:
     // Recursive primal extraction: double -> itself, var -> .val(),
-    // fvar<var> -> .val().val()
+    // `fvar<var>` -> .val().val()
     static double value(double x) { return x; }
     template <typename T>
     static double value(const T& x) {
         return value(x.val());
     }
 
-    // Defined for stan::math::var / stan::math::fvar<var> in
+    // Defined for stan::math::var / stan::math::`fvar<var>` in
     // IntegratorStanPrimitives.h. Never ODR-used for double (nor for the
     // RuleScalar probe, which enters through the base operator()).
     DoubleT integratePrimitives(const FunctionType& f, DoubleT a, DoubleT b) const;

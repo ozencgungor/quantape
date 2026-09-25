@@ -14,13 +14,13 @@
  *
  *   double    → just compute the value
  *   var       → make_callback_var with analytical gradient (1 tape node)
- *   fvar<var> → express gradient as var operations;
+ *   `fvar<var>` → express gradient as var operations;
  *               AD differentiates through them for the Hessian
  *
  * Functions that know their Hessian analytically can optionally use
- * make_callback_var inside fvar<var> for even fewer tape nodes.
+ * make_callback_var inside `fvar<var>` for even fewer tape nodes.
  *
- * The key insight: for fvar<var>, the tangent is  J · d  where J (the
+ * The key insight: for `fvar<var>`, the tangent is  J · d  where J (the
  * Jacobian) is expressed as var operations. When stan::math::hessian
  * calls grad() on that tangent, reverse-mode flows through J's var graph
  * — giving the Hessian automatically, regardless of how J was computed.
@@ -46,15 +46,15 @@ using stan::math::var;
 //   value_fn(doubles...)        → double value
 //   grad_as_var_fn(vars...)     → {var value, array<var> gradient}
 //
-// Produces correct overloads for var and fvar<var>.
+// Produces correct overloads for var and `fvar<var>`.
 //
 // For var:       calls grad_as_var_fn, extracts doubles, makes callback
-// For fvar<var>: calls grad_as_var_fn with val-level vars,
+// For `fvar<var>`: calls grad_as_var_fn with val-level vars,
 //                forms tangent = Σ grad_i * d_i,
-//                returns fvar<var>(value, tangent)
+//                returns `fvar<var>`(value, tangent)
 //
 // The gradient entries are var — so AD can differentiate through them.
-// If a function CAN provide closed-form Hessian, it overrides fvar<var>
+// If a function CAN provide closed-form Hessian, it overrides `fvar<var>`
 // with nested make_callback_var for even more speed.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -96,7 +96,7 @@ struct CurveInterp {
         });
     }
 
-    // ── fvar<var>: gradient as var operations ──
+    // ── `fvar<var>`: gradient as var operations ──
     // The gradient entries (1-t) and t are constants for linear interp,
     // so the Hessian is zero. But this pattern generalizes to cubic spline
     // where the gradient depends on the knot values (and thus is non-trivial var).
@@ -212,8 +212,8 @@ struct CubicSplineInterp {
         return eval_impl(T, rates, M);
     }
 
-    // ── fvar<var>: same template works! ──
-    // Stan tapes through the tridiagonal solve with fvar<var>,
+    // ── `fvar<var>`: same template works! ──
+    // Stan tapes through the tridiagonal solve with `fvar<var>`,
     // giving both gradient and Hessian automatically.
     // The Hessian captures how spline coefficients change when knots move.
     fvar<var> eval(double T, const std::vector<fvar<var>>& rates) const {
@@ -232,9 +232,9 @@ struct CubicSplineInterp {
 // ═══════════════════════════════════════════════════════════════════════════
 // LAYER 2: BLACK-SCHOLES (Level 2 — gradient AND Hessian known)
 //
-// For fvar<var>, we use nested make_callback_var: each Greek is a
+// For `fvar<var>`, we use nested make_callback_var: each Greek is a
 // make_callback_var with second-order Greeks as derivatives.
-// This is the fastest possible fvar<var> implementation.
+// This is the fastest possible `fvar<var>` implementation.
 // ═══════════════════════════════════════════════════════════════════════════
 
 namespace bs_layer {
@@ -276,7 +276,7 @@ var price(var S, var sigma, var r, double K, double T) {
     });
 }
 
-// ── fvar<var>: nested analytical (Level 2) ──
+// ── `fvar<var>`: nested analytical (Level 2) ──
 // Each Greek is a make_callback_var with second-order Greeks.
 // Total: 3 callbacks + 5 arithmetic = 8 var nodes per hessian column.
 fvar<var> price(fvar<var> S, fvar<var> sigma, fvar<var> r, double K, double T) {
@@ -338,7 +338,7 @@ fvar<var> price(fvar<var> S, fvar<var> sigma, fvar<var> r, double K, double T) {
 // ═══════════════════════════════════════════════════════════════════════════
 // COMPOSED CHAIN: rate pillars → curve interp → forward → BS → PV
 //
-// The beauty: each layer provides its best overload. fvar<var> composition
+// The beauty: each layer provides its best overload. `fvar<var>` composition
 // just works — hessian() doesn't know or care which layers are analytical.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -368,7 +368,7 @@ struct PricingChainFunctor {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// NAIVE CHAIN (all fvar<var>, no analytical derivatives)
+// NAIVE CHAIN (all `fvar<var>`, no analytical derivatives)
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct NaiveChainFunctor {

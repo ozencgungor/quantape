@@ -12,7 +12,7 @@
 
 namespace quantape::math {
 /**
- * @brief Base class for 1-D root finders using CRTP
+ * @brief Base class for 1-D root finders
  *
  * Concrete solvers are declared as:
  *   class BrentSolver : public Solver1D<double, BrentSolver> { ... }
@@ -30,7 +30,7 @@ namespace quantape::math {
  * sensitivities, Solver<fvar<...>> keeps the pathwise route. See that header.
  *
  * @tparam DoubleT Numeric type (double or an AD scalar exposing val())
- * @tparam Impl Derived solver implementation (CRTP)
+ * @tparam Impl Derived solver implementation
  */
 template <typename DoubleT, typename Impl>
     requires SolverScalar<DoubleT>
@@ -239,7 +239,7 @@ public:
     }
 
 protected:
-    /// Primal value of a scalar (recursive for fvar<var>)
+    /// Primal value of a scalar (recursive for `fvar<var>`)
     static double value(const DoubleT& x) { return quantape::math::detail::primalValue(x); }
 
     static bool isZero(const DoubleT& x, double scale) {

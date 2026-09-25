@@ -58,6 +58,8 @@ public:
     /**
      * @brief Get dividend yield at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Continuously compounded dividend yield
      */
     DoubleT dividendYield(DoubleT t, bool allowExtrapolation = true) const {
@@ -67,6 +69,8 @@ public:
     /**
      * @brief Get forward price at time t
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Forward price F(t) = S * exp((r - q) * t)
      *
      * Uses cost-of-carry model: F = S * DF_div(t) / DF_disc(t)
@@ -81,6 +85,8 @@ public:
     /**
      * @brief Get discount factor at time t (from discount curve)
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Discount factor
      */
     DoubleT discountFactor(DoubleT t, bool allowExtrapolation = true) const {
@@ -90,6 +96,8 @@ public:
     /**
      * @brief Get risk-free rate at time t (from discount curve)
      * @param t Time in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
+
      * @return Zero rate
      */
     DoubleT riskFreeRate(DoubleT t, bool allowExtrapolation = true) const {
@@ -100,6 +108,7 @@ public:
      * @brief Calculate present value of a future cash flow
      * @param cashflow Future cash flow amount
      * @param t Time of cash flow in years
+     * @param allowExtrapolation If true, extrapolate beyond the curve range
      * @return Present value = cashflow * DF(t)
      */
     DoubleT presentValue(DoubleT cashflow, DoubleT t, bool allowExtrapolation = true) const {

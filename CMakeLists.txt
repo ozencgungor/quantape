@@ -752,9 +752,9 @@ message(STATUS "===========================================")
 find_package(Doxygen QUIET)
 if(Doxygen_FOUND)
     add_custom_target(doc
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/build/docs/doxygen
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/docs/html
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Generating API documentation (build/docs/doxygen/html)"
+        COMMENT "Generating API documentation (docs/html)"
         VERBATIM)
 endif()

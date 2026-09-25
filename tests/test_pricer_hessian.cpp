@@ -10,15 +10,15 @@
  *
  *   TradePricer
  *     └── computeGreeks()    — 1st order: price<var>(), grad(), collect adjoints
- *     └── computeHessian()   — 2nd order: loop over columns with fvar<var>
+ *     └── computeHessian()   — 2nd order: loop over columns with `fvar<var>`
  *
  * Each pricer's price<DoubleT> has 3 tiers via if constexpr:
  *   DoubleT == double    → plain evaluation
  *   DoubleT == var       → make_callback_var with analytical gradient (if available)
- *   DoubleT == fvar<var> → nested analytical (if available), else falls through
+ *   DoubleT == `fvar<var>` → nested analytical (if available), else falls through
  *
- * Pricers that DON'T override for fvar<var> still work — the templated
- * code compiles with fvar<var> and Stan tapes everything (Level 0).
+ * Pricers that DON'T override for `fvar<var>` still work — the templated
+ * code compiles with `fvar<var>` and Stan tapes everything (Level 0).
  * Pricers that DO override get the speed benefit.
  *
  * The TradePricer doesn't know or care which level each pricer uses.
@@ -81,7 +81,7 @@ struct PricerCRTP {
 // while still dispatching to templated price<T>() at compile time.
 //
 // The key trick: we store std::function<T(MarketEnv<T>&)> for each T
-// we might need (double, var, fvar<var>).
+// we might need (double, var, `fvar<var>`).
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct PricerHandle {
@@ -121,7 +121,7 @@ struct PricerHandle {
 //
 // This pricer has closed-form Greeks and second-order Greeks.
 // For var:       make_callback_var with Delta/Vega/Rho
-// For fvar<var>: nested make_callback_var with Gamma/Vanna/Volga
+// For `fvar<var>`: nested make_callback_var with Gamma/Vanna/Volga
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct VanillaEuropeanPricer : PricerCRTP<VanillaEuropeanPricer> {
@@ -186,7 +186,7 @@ private:
         });
     }
 
-    // ── fvar<var>: Level 2 second-order (single tangent callback) ──
+    // ── `fvar<var>`: Level 2 second-order (single tangent callback) ──
     //
     // The tangent = Delta*Sd + Vega*sd + Rho*rd is ONE callback var: its
     // adjoint pushes sum_i tangent_i * (Hessian row i) = H . d into the
@@ -239,7 +239,7 @@ private:
 // PRICER 2: EXOTIC (Level 0 — no analytical Greeks, AD tapes everything)
 //
 // Simulates a pricer that uses numerical methods internally (PDE, MC, etc.)
-// The same templated code works for double, var, AND fvar<var>.
+// The same templated code works for double, var, AND `fvar<var>`.
 // No special overloads needed — it "just works" at the cost of more tape.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -270,7 +270,7 @@ struct ExoticPricer : PricerCRTP<ExoticPricer> {
 //
 // Has a known analytical gradient but expressing the Hessian
 // analytically is tedious. Instead, the gradient is expressed as
-// var operations in the fvar<var> overload, and AD handles the rest.
+// var operations in the `fvar<var>` overload, and AD handles the rest.
 // ═══════════════════════════════════════════════════════════════════════════
 
 struct DigitalPricer : PricerCRTP<DigitalPricer> {
@@ -330,7 +330,7 @@ private:
                                              });
     }
 
-    // ── fvar<var>: Level 1 — gradient as var operations ──
+    // ── `fvar<var>`: Level 1 — gradient as var operations ──
     // We express the gradient entries as var, so AD can differentiate
     // through them for the Hessian. No need to derive Hessian by hand.
     fvar<var> priceLevel1(fvar<var> S, fvar<var> sigma, fvar<var> r) const {
@@ -405,14 +405,14 @@ public:
 
     // ── Second-order Greeks (Hessian) ──
     //
-    // Uses fvar<var> column-by-column (same as stan::math::hessian internally).
+    // Uses `fvar<var>` column-by-column (same as stan::math::hessian internally).
     // For each column j:
-    //   1. Create fvar<var> market data with tangent direction e_j
-    //   2. Price with fvar<var>
+    //   1. Create `fvar<var>` market data with tangent direction e_j
+    //   2. Price with `fvar<var>`
     //   3. result.d_ = ∂PV/∂θ_j as a var on the tape
     //   4. grad(result.d_) → ∂/∂θ_i(∂PV/∂θ_j) = H[i][j]
     //
-    // The pricer's fvar<var> overload determines speed:
+    // The pricer's `fvar<var>` overload determines speed:
     //   Level 0: full tape → slow but correct
     //   Level 1: gradient as var → moderate tape
     //   Level 2: nested analytical → minimal tape

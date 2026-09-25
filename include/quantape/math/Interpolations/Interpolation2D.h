@@ -7,14 +7,14 @@
 namespace quantape::math {
 
 /**
- * @brief CRTP base class for 2D interpolations
+ * @brief Base class for 2-D interpolations
  *
  * Derived classes must implement (non-virtual, accessible via friend):
  * - valueImpl(DoubleT x, DoubleT y) const -> DoubleT
  * - isInRange(DoubleT x, DoubleT y) const -> bool
  *
- * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
- * @tparam Derived CRTP derived class
+ * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
+ * @tparam Derived Derived interpolation class
  */
 template <typename DoubleT, typename Derived>
 class Interpolation2D {

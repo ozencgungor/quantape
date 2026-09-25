@@ -26,7 +26,7 @@
 //   3. the integral is assembled as sum_k c_k f_k with ONE callback var per
 //      output component whose adjoint pushes c_k into f_k. Reverse mode
 //      therefore sees O(#nodes) tape nodes instead of the ~2 extra
-//      accumulate/multiply nodes per quadrature node, and the fvar<var>
+//      accumulate/multiply nodes per quadrature node, and the `fvar<var>`
 //      Hessian is the weighted sum sum_k c_k H_k with no nested accumulate
 //      tape.
 //
@@ -38,7 +38,7 @@
 //
 //   quantape::math::TrapezoidIntegratorDefault<double>  integ(a, n);   // plain
 //   quantape::math::TrapezoidIntegratorDefault<var>     integ(a, n);   // primitives
-//   quantape::math::TrapezoidIntegratorDefault<fvar<var>> integ(a, n); // primitives
+//   quantape::math::TrapezoidIntegratorDefault<`fvar<var>`> integ(a, n); // primitives
 //
 //   stan::math::var I = integ(f, stan::math::var(0.0), stan::math::var(1.0));
 //   I.grad();   // theta adjoints now hold dI/dtheta
@@ -100,7 +100,7 @@ struct RuleNode {
  * Passed through the integrator's arithmetic unchanged (the integrator only
  * ever combines f-evaluations linearly: additions and multiplications by
  * pure-double weights/nodes). The integral's expression is the discrete
- * quadrature rule, and accumulate() reads its coefficients off in O(#slots).
+ * quadrature rule, and accumulate() reads its coefficients off in O(`#slots`).
  *
  * Constants (constructed from double) have an empty expression and are
  * treated as slot-free values. Products/quotients of two slot-bearing
