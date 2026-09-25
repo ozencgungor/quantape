@@ -22,55 +22,46 @@ template <typename DoubleT>
 class SecantSolver : public Solver1D<DoubleT, SecantSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, SecantSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     SecantSolver() = default;
 
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
         DoubleT fl, froot, dx, xl;
 
         // Pick the bound with smaller function value as most recent guess
-        if (std::fabs(value(this->m_fxMin)) < std::fabs(value(this->m_fxMax))) {
-            this->m_root = this->m_xMin;
-            froot = this->m_fxMin;
-            xl = this->m_xMax;
-            fl = this->m_fxMax;
+        if (std::fabs(Base::value(s.fxMin)) < std::fabs(Base::value(s.fxMax))) {
+            s.root = s.xMin;
+            froot = s.fxMin;
+            xl = s.xMax;
+            fl = s.fxMax;
         } else {
-            this->m_root = this->m_xMax;
-            froot = this->m_fxMax;
-            xl = this->m_xMin;
-            fl = this->m_fxMin;
+            s.root = s.xMax;
+            froot = s.fxMax;
+            xl = s.xMin;
+            fl = s.fxMin;
         }
 
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
+        while (s.evaluations <= s.maxEvaluations) {
             // Secant update formula
-            dx = (xl - this->m_root) * froot / (froot - fl);
-            xl = this->m_root;
-            fl = froot;
-            this->m_root = this->m_root + dx;
-            froot = f(this->m_root);
-            ++this->m_evaluationNumber;
+            const DoubleT denominator = froot - fl;
+            if (Base::value(denominator) == 0.0) {
+                throw std::runtime_error("SecantSolver: zero denominator");
+            }
 
-            if (std::fabs(value(dx)) < accuracy || isClose(froot, DoubleT(0.0))) {
-                return this->m_root;
+            dx = (xl - s.root) * froot / denominator;
+            xl = s.root;
+            fl = froot;
+            s.root = s.root + dx;
+            froot = f(s.root);
+            ++s.evaluations;
+
+            if (std::fabs(Base::value(dx)) < accuracy || Base::isZero(froot, s.fScale)) {
+                return s.root;
             }
         }
 
         throw std::runtime_error("SecantSolver: maximum number of evaluations exceeded");
-    }
-
-private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isClose(const DoubleT& x, const DoubleT& y) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x) - value(y)) < 42.0 * EPSILON;
     }
 };
 } // namespace Math

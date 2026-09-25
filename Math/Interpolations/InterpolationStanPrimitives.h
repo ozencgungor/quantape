@@ -1,8 +1,13 @@
 //
-// InterpolationStanPrimitives.h -- Stan AD specializations for interpolation classes
+// InterpolationStanPrimitives.h -- Stan AD specializations for interpolation
+// classes, providing the passive-abscissa fast paths.
 //
-// Provides analytical adjoint (var) and nested analytical (fvar<var>)
-// specializations for interpolation valueImpl and derivativeImpl methods.
+// The default valueImpl/derivativeImpl are scalar-generic and differentiate
+// the query coordinate (weights are DoubleT). The specializations here
+// implement the *Fixed* methods (evaluateFixed/derivativeFixed): analytical
+// adjoint (var) and nested analytical (fvar<var>) callbacks that keep the
+// tape-node count minimal and intentionally do NOT push an adjoint into the
+// query coordinate. Use them only when x is a constant.
 //
 // Follows the same pattern as Pricing/StanPrimitives.h for Black76/GBS.
 // Include this header when using interpolation with stan::math::var or
@@ -12,8 +17,7 @@
 #ifndef INTERPOLATION_STAN_PRIMITIVES_H
 #define INTERPOLATION_STAN_PRIMITIVES_H
 
-#include <stan/math.hpp>
-#include <stan/math/mix.hpp>
+#include "Math/StanMath.h"
 
 #include "BicubicInterpolation.h"
 #include "BilinearInterpolation.h"
@@ -24,11 +28,12 @@
 namespace Math {
 
 // ============================================================================
-// LinearInterpolation<var>::valueImpl -- 1 tape node (down from 3)
+// LinearInterpolation<var>::valueFixedImpl -- 1 tape node (down from 3)
 // ============================================================================
 
 template <>
-inline stan::math::var LinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var
+LinearInterpolation<stan::math::var>::valueFixedImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -56,12 +61,12 @@ inline stan::math::var LinearInterpolation<stan::math::var>::valueImpl(stan::mat
 }
 
 // ============================================================================
-// LinearInterpolation<var>::derivativeImpl -- 1 tape node (down from 2)
+// LinearInterpolation<var>::derivativeFixedImpl -- 1 tape node (down from 2)
 // ============================================================================
 
 template <>
 inline stan::math::var
-LinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
+LinearInterpolation<stan::math::var>::derivativeFixedImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
 
     size_t i = this->locate(x);
@@ -79,7 +84,7 @@ LinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
 }
 
 // ============================================================================
-// LinearInterpolation<fvar<var>>::valueImpl -- 1 callback var, zero Hessian
+// LinearInterpolation<fvar<var>>::valueFixedImpl -- 1 callback var, zero Hessian
 //
 // Linear in y => d2f/dy_j dy_k = 0 for all j,k.
 // Value part: make_callback_var with w0, w1 adjoints.
@@ -88,7 +93,7 @@ LinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
 
 template <>
 inline stan::math::fvar<stan::math::var>
-LinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
+LinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
@@ -128,12 +133,12 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 }
 
 // ============================================================================
-// LinearInterpolation<fvar<var>>::derivativeImpl -- 1 callback var, zero Hessian
+// LinearInterpolation<fvar<var>>::derivativeFixedImpl -- 1 callback var, zero Hessian
 // ============================================================================
 
 template <>
 inline stan::math::fvar<stan::math::var>
-LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
+LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeFixedImpl(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
@@ -161,7 +166,7 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
 }
 
 // ============================================================================
-// LogLinearInterpolation<var>::valueImpl -- 1 tape node
+// LogLinearInterpolation<var>::valueFixedImpl -- 1 tape node
 //
 // f(x) = exp( (1-t)*log(y_i) + t*log(y_{i+1}) )
 // df/dy_i     = f * (1-t) / y_i
@@ -169,7 +174,8 @@ LinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
 // ============================================================================
 
 template <>
-inline stan::math::var LogLinearInterpolation<stan::math::var>::valueImpl(stan::math::var x) const {
+inline stan::math::var
+LogLinearInterpolation<stan::math::var>::valueFixedImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
 
     size_t i = this->locate(x);
@@ -196,7 +202,7 @@ inline stan::math::var LogLinearInterpolation<stan::math::var>::valueImpl(stan::
 }
 
 // ============================================================================
-// LogLinearInterpolation<var>::derivativeImpl -- 1 tape node
+// LogLinearInterpolation<var>::derivativeFixedImpl -- 1 tape node
 //
 // f'(x) = f(x) * (log(y_{i+1}) - log(y_i)) * inv_dx
 // df'/dy_i     = f * inv_dx / y_i * ((1-t)*dL - 1)
@@ -206,7 +212,7 @@ inline stan::math::var LogLinearInterpolation<stan::math::var>::valueImpl(stan::
 
 template <>
 inline stan::math::var
-LogLinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const {
+LogLinearInterpolation<stan::math::var>::derivativeFixedImpl(stan::math::var x) const {
     using stan::math::make_callback_var;
 
     size_t i = this->locate(x);
@@ -241,7 +247,7 @@ LogLinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const
 }
 
 // ============================================================================
-// LogLinearInterpolation<fvar<var>>::valueImpl -- 2 callback vars + tangent
+// LogLinearInterpolation<fvar<var>>::valueFixedImpl -- 2 callback vars + tangent
 //
 // Non-linear in y => Hessian is non-zero.
 // d2f/dy_i^2         = -f * t*(1-t) / y_i^2
@@ -251,7 +257,7 @@ LogLinearInterpolation<stan::math::var>::derivativeImpl(stan::math::var x) const
 
 template <>
 inline stan::math::fvar<stan::math::var>
-LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
+LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
@@ -311,7 +317,7 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 }
 
 // ============================================================================
-// LogLinearInterpolation<fvar<var>>::derivativeImpl -- 2 callback vars + tangent
+// LogLinearInterpolation<fvar<var>>::derivativeFixedImpl -- 2 callback vars + tangent
 //
 // f'(x) = f(x) * dL * inv_dx   where dL = log(y_{i+1}) - log(y_i)
 // Gradients and Hessian of f' w.r.t. (y_i, y_{i+1}) computed analytically.
@@ -319,7 +325,7 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
 
 template <>
 inline stan::math::fvar<stan::math::var>
-LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
+LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeFixedImpl(
     stan::math::fvar<stan::math::var> x) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
@@ -382,15 +388,15 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeImpl(
 }
 
 // ============================================================================
-// BilinearInterpolation<var>::valueImpl -- 1 tape node (down from 7)
+// BilinearInterpolation<var>::valueFixedImpl -- 1 tape node (down from 7)
 //
 // f(x,y) = w00*z00 + w10*z10 + w01*z01 + w11*z11
 // where all weights are double. Linear in z => 4 adjoint pushes.
 // ============================================================================
 
 template <>
-inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::math::var x,
-                                                                         stan::math::var y) const {
+inline stan::math::var
+BilinearInterpolation<stan::math::var>::valueFixedImpl(stan::math::var x, stan::math::var y) const {
     using stan::math::make_callback_var;
     using stan::math::var;
 
@@ -429,7 +435,7 @@ inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::m
 }
 
 // ============================================================================
-// BilinearInterpolation<fvar<var>>::valueImpl -- 1 callback var, zero Hessian
+// BilinearInterpolation<fvar<var>>::valueFixedImpl -- 1 callback var, zero Hessian
 //
 // Linear in z => d2f/dz_j dz_k = 0 for all j,k.
 // Same pattern as LinearInterpolation<fvar<var>>.
@@ -437,7 +443,7 @@ inline stan::math::var BilinearInterpolation<stan::math::var>::valueImpl(stan::m
 
 template <>
 inline stan::math::fvar<stan::math::var>
-BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueImpl(
+BilinearInterpolation<stan::math::fvar<stan::math::var>>::valueFixedImpl(
     stan::math::fvar<stan::math::var> x, stan::math::fvar<stan::math::var> y) const {
     using stan::math::fvar;
     using stan::math::make_callback_var;
@@ -526,11 +532,11 @@ CubicInterpolation<stan::math::var>::weightMatrixValue(stan::math::var x) const 
         result += w[j] * this->m_y[j].val();
     }
 
-    return make_callback_var(result, [y = this->m_y, i, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_y_shared, i, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
-        y[i].adj() += adj; // delta(i, j)
+        (*y)[i].adj() += adj; // delta(i, j)
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].adj() += adj * w[j];
+            (*y)[j].adj() += adj * w[j];
     });
 }
 
@@ -557,10 +563,10 @@ CubicInterpolation<stan::math::var>::weightMatrixDerivative(stan::math::var x) c
         result += w[j] * this->m_y[j].val();
     }
 
-    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].adj() += adj * w[j];
+            (*y)[j].adj() += adj * w[j];
     });
 }
 
@@ -595,11 +601,11 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixValue(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y, i, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_y_shared, i, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
-        y[i].val_.adj() += adj;
+        (*y)[i].val_.adj() += adj;
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].val_.adj() += adj * w[j];
+            (*y)[j].val_.adj() += adj * w[j];
     });
 
     return fvar<var>(val, tangent);
@@ -633,10 +639,10 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].val_.adj() += adj * w[j];
+            (*y)[j].val_.adj() += adj * w[j];
     });
 
     return fvar<var>(val, tangent);
@@ -654,8 +660,10 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
 //
 // Note: the template parameter Smooth only sets the runtime default; pass
 // smooth=true to the constructor — these specializations respect m_smooth.
-// Callbacks are self-contained (y captured by value, weights by move) for
-// the same lifetime reason as the weight-matrix specializations above.
+// Callbacks are self-contained (y captured as the shared m_y_shared
+// snapshot — one shared_ptr copy per evaluation instead of a full vector
+// copy; weights by move) for the same lifetime reason as the weight-matrix
+// specializations above.
 // ============================================================================
 
 template <>
@@ -693,10 +701,10 @@ CubicInterpolation<stan::math::var>::localWeightsValue(stan::math::var x) const 
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
 
-    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].adj() += adj * w[j];
+            (*y)[j].adj() += adj * w[j];
     });
 }
 
@@ -733,10 +741,10 @@ CubicInterpolation<stan::math::var>::localWeightsDerivative(stan::math::var x) c
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
 
-    return make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].adj() += adj * w[j];
+            (*y)[j].adj() += adj * w[j];
     });
 }
 
@@ -781,10 +789,10 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsValue(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].val_.adj() += adj * w[j];
+            (*y)[j].val_.adj() += adj * w[j];
     });
 
     return fvar<var>(val, tangent);
@@ -829,10 +837,10 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
-            y[j].val_.adj() += adj * w[j];
+            (*y)[j].val_.adj() += adj * w[j];
     });
 
     return fvar<var>(val, tangent);

@@ -24,62 +24,52 @@ template <typename DoubleT>
 class FalsePositionSolver : public Solver1D<DoubleT, FalsePositionSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, FalsePositionSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     FalsePositionSolver() = default;
 
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
         DoubleT froot;
 
         // Main iteration loop
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
+        while (s.evaluations <= s.maxEvaluations) {
             // False position formula (linear interpolation)
-            DoubleT dx =
-                this->m_fxMax * (this->m_xMax - this->m_xMin) / (this->m_fxMax - this->m_fxMin);
-            this->m_root = this->m_xMax - dx;
+            const DoubleT denominator = s.fxMax - s.fxMin;
+            if (Base::value(denominator) == 0.0) {
+                throw std::runtime_error("FalsePositionSolver: zero denominator");
+            }
 
-            froot = f(this->m_root);
-            ++this->m_evaluationNumber;
+            const DoubleT dx = s.fxMax * (s.xMax - s.xMin) / denominator;
+            s.root = s.xMax - dx;
+
+            froot = f(s.root);
+            ++s.evaluations;
 
             // Check for convergence
-            if (isClose(froot, DoubleT(0.0))) {
-                return this->m_root;
+            if (Base::isZero(froot, s.fScale)) {
+                return s.root;
             }
 
             // Update brackets
-            if (value(froot) * value(this->m_fxMax) < 0.0) {
-                // Root is between root_ and xMax
-                this->m_xMin = this->m_xMax;
-                this->m_fxMin = this->m_fxMax;
-                this->m_xMax = this->m_root;
-                this->m_fxMax = froot;
+            if (Base::oppositeSigns(froot, s.fxMax)) {
+                // Root is between root and xMax
+                s.xMin = s.xMax;
+                s.fxMin = s.fxMax;
+                s.xMax = s.root;
+                s.fxMax = froot;
             } else {
-                // Root is between xMin and root_
-                this->m_xMax = this->m_root;
-                this->m_fxMax = froot;
+                // Root is between xMin and root
+                s.xMax = s.root;
+                s.fxMax = froot;
             }
 
             // Check if interval is small enough
-            if (std::fabs(value(this->m_xMax) - value(this->m_xMin)) <= accuracy) {
-                return this->m_root;
+            if (std::fabs(Base::value(s.xMax) - Base::value(s.xMin)) <= accuracy) {
+                return s.root;
             }
         }
 
         throw std::runtime_error("FalsePositionSolver: maximum number of evaluations exceeded");
-    }
-
-private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isClose(const DoubleT& x, const DoubleT& y) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x) - value(y)) < 42.0 * EPSILON;
     }
 };
 } // namespace Math

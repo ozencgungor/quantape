@@ -42,3 +42,9 @@ example_usage
 # personal stuff:
 interview_prep/
 .claude/
+
+# Internal working docs (kept out of version control)
+internal_docs/
+
+# Internal experiments (bridges, disconnected prototypes)
+internal_tests/

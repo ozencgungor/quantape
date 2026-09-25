@@ -1,25 +1,103 @@
 #ifndef NEWTON_SOLVER_H
 #define NEWTON_SOLVER_H
 
+#include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <stdexcept>
-#include <type_traits>
+#include <utility>
 
 #include "Solver1DBase.h"
 
 namespace Math {
+namespace detail {
+/**
+ * @brief Whether an objective provides its own derivative
+ *
+ * A functor with a derivative(x) member is used directly; everything else
+ * falls back to central finite differences (see newtonDerivative).
+ */
+template <typename F, typename T>
+concept HasDerivative = requires(const F& f, const T& x) {
+    { f.derivative(x) } -> std::convertible_to<T>;
+};
+
+/**
+ * @brief Derivative of the objective at x
+ *
+ * Honest fallback semantics: without a derivative() member this is central
+ * finite differences, second-order in value but with the usual round-off
+ * floor, and it costs two extra function evaluations. It is well-defined for
+ * AD scalars too, but for stan::math::var prefer NewtonSolverWithDerivative
+ * (or give the objective a derivative() method) to keep the AD graph small
+ * and the derivative exact.
+ */
+template <typename DoubleT, typename F>
+DoubleT newtonDerivative(const F& f, const DoubleT& x) {
+    if constexpr (HasDerivative<F, DoubleT>) {
+        return f.derivative(x);
+    } else {
+        const double h = 1e-8 * std::max(1.0, std::fabs(primalValue(x)));
+        return (f(x + DoubleT(h)) - f(x - DoubleT(h))) / DoubleT(2.0 * h);
+    }
+}
+
+/**
+ * @brief Shared Newton iteration for the solvers below
+ *
+ * Falls back to a bisection step whenever the Newton step leaves the bracket.
+ */
+template <typename DoubleT, typename F, typename DerivativeFn>
+DoubleT newtonIterate(const F& f, const DerivativeFn& df, double accuracy,
+                      SolverState<DoubleT>& s) {
+    DoubleT froot = f(s.root);
+    DoubleT dfroot = df(s.root);
+    ++s.evaluations;
+
+    if (isZero(primalValue(dfroot), 1.0)) {
+        throw std::runtime_error("Newton solver: derivative is zero");
+    }
+
+    while (s.evaluations <= s.maxEvaluations) {
+        const DoubleT dx = froot / dfroot;
+        s.root = s.root - dx;
+
+        // Check if jumped out of brackets
+        if (primalValue(s.root) < primalValue(s.xMin) ||
+            primalValue(s.root) > primalValue(s.xMax)) {
+            // Outside brackets - fall back to bisection for this step
+            s.root = (s.xMin + s.xMax) / DoubleT(2.0);
+        }
+
+        if (std::fabs(primalValue(dx)) < accuracy) {
+            return s.root;
+        }
+
+        froot = f(s.root);
+        dfroot = df(s.root);
+        ++s.evaluations;
+
+        if (isZero(primalValue(dfroot), 1.0)) {
+            throw std::runtime_error("Newton solver: derivative became zero");
+        }
+    }
+
+    throw std::runtime_error("Newton solver: maximum number of evaluations exceeded");
+}
+} // namespace detail
+
 /**
  * @brief Newton-Raphson method for 1D root finding
  *
  * Classic Newton's method using the update formula:
  *   x_{n+1} = x_n - f(x_n) / f'(x_n)
  *
- * Quadratic convergence when near the root. Requires derivative computation.
+ * Quadratic convergence when near the root. The derivative comes from the
+ * objective's derivative(x) method when present, otherwise central finite
+ * differences. For AD objectives, NewtonSolverWithDerivative avoids the
+ * finite-difference cost and round-off.
  *
- * For regular functions, the function object must provide a derivative() method.
- * For AD types (stan::math::var), derivatives are computed automatically.
- *
- * Falls back to bisection if Newton step would jump outside brackets.
+ * Falls back to bisection if a Newton step would jump outside the brackets.
  *
  * @tparam DoubleT Numeric type (double or stan::math::var)
  */
@@ -27,168 +105,44 @@ template <typename DoubleT>
 class NewtonSolver : public Solver1D<DoubleT, NewtonSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, NewtonSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     NewtonSolver() = default;
 
-    /**
-     * @brief Solve using Newton's method
-     *
-     * For regular double: function object must have derivative() method
-     * For stan::math::var: derivatives computed via AD
-     */
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
-        DoubleT froot, dfroot, dx;
-
-        froot = f(this->m_root);
-        dfroot = computeDerivative(f, this->m_root);
-        ++this->m_evaluationNumber;
-
-        if (isZero(dfroot)) {
-            throw std::runtime_error("NewtonSolver: derivative is zero");
-        }
-
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
-            dx = froot / dfroot;
-            this->m_root = this->m_root - dx;
-
-            // Check if jumped out of brackets
-            if (value(this->m_xMin - this->m_root) * value(this->m_root - this->m_xMax) < 0.0) {
-                // Outside brackets - fall back to bisection for this step
-                this->m_root = (this->m_xMin + this->m_xMax) / DoubleT(2.0);
-            }
-
-            if (std::fabs(value(dx)) < accuracy) {
-                f(this->m_root); // Final evaluation
-                ++this->m_evaluationNumber;
-                return this->m_root;
-            }
-
-            froot = f(this->m_root);
-            dfroot = computeDerivative(f, this->m_root);
-            ++this->m_evaluationNumber;
-
-            if (isZero(dfroot)) {
-                throw std::runtime_error("NewtonSolver: derivative became zero");
-            }
-        }
-
-        throw std::runtime_error("NewtonSolver: maximum number of evaluations exceeded");
-    }
-
-private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isZero(const DoubleT& x) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x)) < EPSILON;
-    }
-
-    /**
-     * @brief Compute derivative - specialized for double and AD types
-     */
-    DoubleT computeDerivative(const FunctionType& f, DoubleT x) const {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            // For double, try to call derivative() method
-            // This requires the function object to have a derivative() method
-            constexpr double h = 1e-8;
-            return (f(x + h) - f(x - h)) / (2.0 * h);
-        } else {
-            // For AD types (stan::math::var), use automatic differentiation
-            // This would require stan::math to be included
-            // For now, use finite differences as fallback
-            DoubleT h = DoubleT(1e-8);
-            return (f(x + h) - f(x - h)) / (DoubleT(2.0) * h);
-        }
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
+        const auto derivativeFn = [&f](const DoubleT& x) { return detail::newtonDerivative(f, x); };
+        return detail::newtonIterate(f, derivativeFn, accuracy, s);
     }
 };
 
 /**
- * @brief Newton solver with explicit derivative function
+ * @brief Newton solver with a user-supplied derivative
  *
- * Version where user provides both function and derivative explicitly.
- * More efficient than finite differences and works with all numeric types.
+ * No type erasure: the derivative functor is a template parameter and is
+ * stored by value, so the update loop inlines both calls. More efficient
+ * than finite differences and exact for AD objectives.
  *
  * @tparam DoubleT Numeric type (double or stan::math::var)
+ * @tparam Derivative Callable DoubleT -> DoubleT
  */
-template <typename DoubleT>
-class NewtonSolverWithDerivative : public Solver1D<DoubleT, NewtonSolverWithDerivative<DoubleT>> {
+template <typename DoubleT, typename Derivative>
+    requires std::invocable<const Derivative&, const DoubleT&> &&
+             std::convertible_to<std::invoke_result_t<const Derivative&, const DoubleT&>, DoubleT>
+class NewtonSolverWithDerivative
+    : public Solver1D<DoubleT, NewtonSolverWithDerivative<DoubleT, Derivative>> {
 public:
-    using Base = Solver1D<DoubleT, NewtonSolverWithDerivative<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
-    using DerivativeType = std::function<DoubleT(DoubleT)>;
+    using Base = Solver1D<DoubleT, NewtonSolverWithDerivative<DoubleT, Derivative>>;
 
-    NewtonSolverWithDerivative() = default;
+    explicit NewtonSolverWithDerivative(Derivative derivative)
+        : m_derivative(std::move(derivative)) {}
 
-    /**
-     * @brief Set the derivative function
-     */
-    void setDerivative(DerivativeType derivative) { m_derivative = derivative; }
-
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
-        if (!m_derivative) {
-            throw std::runtime_error("NewtonSolverWithDerivative: derivative function not set");
-        }
-
-        DoubleT froot, dfroot, dx;
-
-        froot = f(this->m_root);
-        dfroot = m_derivative(this->m_root);
-        ++this->m_evaluationNumber;
-
-        if (isZero(dfroot)) {
-            throw std::runtime_error("NewtonSolverWithDerivative: derivative is zero");
-        }
-
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
-            dx = froot / dfroot;
-            this->m_root = this->m_root - dx;
-
-            // Check if jumped out of brackets
-            if (value(this->m_xMin - this->m_root) * value(this->m_root - this->m_xMax) < 0.0) {
-                this->m_root = (this->m_xMin + this->m_xMax) / DoubleT(2.0);
-            }
-
-            if (std::fabs(value(dx)) < accuracy) {
-                f(this->m_root);
-                ++this->m_evaluationNumber;
-                return this->m_root;
-            }
-
-            froot = f(this->m_root);
-            dfroot = m_derivative(this->m_root);
-            ++this->m_evaluationNumber;
-
-            if (isZero(dfroot)) {
-                throw std::runtime_error("NewtonSolverWithDerivative: derivative became zero");
-            }
-        }
-
-        throw std::runtime_error(
-            "NewtonSolverWithDerivative: maximum number of evaluations exceeded");
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
+        return detail::newtonIterate(f, m_derivative, accuracy, s);
     }
 
 private:
-    mutable DerivativeType m_derivative;
-
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isZero(const DoubleT& x) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x)) < EPSILON;
-    }
+    Derivative m_derivative;
 };
 } // namespace Math
 

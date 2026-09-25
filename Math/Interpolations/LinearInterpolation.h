@@ -10,16 +10,18 @@ namespace Math {
  *
  * For a query point x in segment [x_i, x_{i+1}]:
  *   f(x) = w0 * y[i] + w1 * y[i+1]
- * where w0, w1 are double weights (depend only on grid + query point).
+ * with w0 = (x_{i+1} - x)/(x_{i+1} - x_i), w1 = 1 - w0.
  *
- * AD properties:
- *   - df/dy[i] = w0, df/dy[i+1] = w1 (double constants)
- *   - d2f/dy[j]dy[k] = 0 (linear in node values, Hessian is zero)
- *   - Generic path: 3 tape nodes (2 multiplies + 1 add)
- *   - var specialization: 1 tape node via make_callback_var
- *   - fvar<var> specialization: 1 callback var, zero Hessian
+ * AD properties (default evaluation):
+ *   - weights are DoubleT: df/dx = (y[i+1] - y[i])/(x_{i+1} - x_i) (segment
+ *     slope), df/dy[i] = w0, df/dy[i+1] = w1
+ *   - mixed d2f/dx dy[i] = -inv_dx, d2f/dx dy[i+1] = +inv_dx
+ *   - d2f/dy_j dy_k = 0 (linear in node values)
  *
- * var and fvar<var> specializations are in InterpolationStanPrimitives.h.
+ * evaluateFixed()/derivativeFixed() use the node-minimal callback paths in
+ * InterpolationStanPrimitives.h (1 tape node, x treated as passive).
+ *
+ * Segment selection stays primal-pinned (subgradient convention at knots).
  */
 template <typename DoubleT>
 class LinearInterpolation : public Interpolation<DoubleT, LinearInterpolation<DoubleT>> {
@@ -34,20 +36,18 @@ public:
         this->validate();
     }
 
-    // valueImpl and derivativeImpl: primary template works for all DoubleT.
-    // Explicit specializations for var and fvar<var> in InterpolationStanPrimitives.h
-    // reduce tape nodes from 3 to 1.
-
+    /// Default (AD-aware) evaluation: the query coordinate is on the tape.
     DoubleT valueImpl(DoubleT x) const {
         size_t i = this->locate(x);
 
         double x1 = this->m_x[i];
         double x2 = this->m_x[i + 1];
-        double xv = this->extractDouble(x);
-
         double inv_dx = 1.0 / (x2 - x1);
-        double w0 = (x2 - xv) * inv_dx;
-        double w1 = (xv - x1) * inv_dx;
+
+        // Weights are DoubleT — x contributes df/dx = slope, and the mixed
+        // d2f/dxdy block (the grid positions stay double).
+        DoubleT w0 = (DoubleT(x2) - x) * inv_dx;
+        DoubleT w1 = (x - DoubleT(x1)) * inv_dx;
 
         return w0 * this->m_y[i] + w1 * this->m_y[i + 1];
     }
@@ -58,6 +58,12 @@ public:
 
         return (this->m_y[i + 1] - this->m_y[i]) * inv_dx;
     }
+
+    /// Passive-abscissa policy (fast path): x adjoint intentionally pushed
+    /// only by the var/fvar<var> specializations in InterpolationStanPrimitives.h.
+    DoubleT valueFixedImpl(DoubleT x) const { return valueImpl(x); }
+
+    DoubleT derivativeFixedImpl(DoubleT x) const { return derivativeImpl(x); }
 };
 
 } // namespace Math

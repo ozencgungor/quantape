@@ -187,66 +187,40 @@ target_include_directories(generic_MC_lib PUBLIC
 # ============================================================================
 
 # Create executable for example usage
-add_executable(example_usage example_usage.cpp)
+add_executable(example_usage examples/example_usage.cpp)
 target_link_libraries(example_usage generic_MC_lib)
 
 # Create executable for Math library tests
-add_executable(test_math test_math.cpp)
+add_executable(test_math tests/test_math.cpp)
 target_link_libraries(test_math generic_MC_lib)
 
+# Create executable for 1-D root solver regression tests
+add_executable(test_solvers tests/test_solvers.cpp)
+target_link_libraries(test_solvers generic_MC_lib)
+
 # Create executable for Interpolation library tests
-add_executable(test_interpolation test_interpolation.cpp)
+add_executable(test_interpolation tests/test_interpolation.cpp)
 target_link_libraries(test_interpolation generic_MC_lib)
 
 # Create executable for Markets library tests
-add_executable(test_markets test_markets.cpp)
+add_executable(test_markets tests/test_markets.cpp)
 target_link_libraries(test_markets generic_MC_lib)
 
 # Create executable for CIR bridge accuracy tests
-add_executable(test_cir_bridge test_cir_bridge.cpp)
-target_link_libraries(test_cir_bridge generic_MC_lib)
-
 # Create executable for CIR bridge distribution tests
-add_executable(test_cir_bridge_distribution test_cir_bridge_distribution.cpp)
-target_link_libraries(test_cir_bridge_distribution generic_MC_lib)
-
 # Create executable for improved CIR bridge tests
-add_executable(test_improved_bridges test_improved_bridges.cpp)
-target_link_libraries(test_improved_bridges generic_MC_lib)
-
 # Create executable for theoretical bridge variance tests
-add_executable(test_theoretical_bridge_variance test_theoretical_bridge_variance.cpp)
-target_link_libraries(test_theoretical_bridge_variance generic_MC_lib)
-
 # Create executable for asymmetric bridge tests
-add_executable(test_asymmetric_bridge test_asymmetric_bridge.cpp)
-target_link_libraries(test_asymmetric_bridge generic_MC_lib)
-
 # Create executable for analytical bridge variance tests
-add_executable(test_analytical_bridge_variance test_analytical_bridge_variance.cpp)
-target_link_libraries(test_analytical_bridge_variance generic_MC_lib)
-
 # Create executable for GBM bridge tests
-add_executable(test_gbm_bridge test_gbm_bridge.cpp)
-target_link_libraries(test_gbm_bridge generic_MC_lib)
-
 # Create executable for G2++ bridge tests
-add_executable(test_g2pp_bridge test_g2pp_bridge.cpp)
-target_link_libraries(test_g2pp_bridge generic_MC_lib)
-
 # Create executable for analytical bridge tests
-add_executable(test_analytical_bridges test_analytical_bridges.cpp)
-target_link_libraries(test_analytical_bridges generic_MC_lib)
-
 # Create executable for nonlinear correction tests
-add_executable(test_nonlinear_corrections test_nonlinear_corrections.cpp)
-target_link_libraries(test_nonlinear_corrections generic_MC_lib)
-
 # Create executable for explaining effective kappa
-add_executable(explain_effective_kappa explain_effective_kappa.cpp)
+add_executable(explain_effective_kappa examples/explain_effective_kappa.cpp)
 
 # Create executable for C++ references and pointers guide
-add_executable(cpp_references_pointers_guide cpp_references_pointers_guide.cpp)
+add_executable(cpp_references_pointers_guide examples/cpp_references_pointers_guide.cpp)
 
 # Create executable for smart pointers and algorithms implementation
 add_executable(smart_pointers_and_algorithms interview_prep/smart_pointers_and_algorithms.cpp)
@@ -273,7 +247,7 @@ add_executable(numpy_patterns interview_prep/numpy_patterns.cpp)
 add_executable(eigen_fancy_indexing interview_prep/eigen_fancy_indexing.cpp)
 
 # Create executable for AD (Automatic Differentiation) tests
-add_executable(test_ad test_ad.cpp)
+add_executable(test_ad tests/test_ad.cpp)
 
 # Link libraries for AD test
 target_link_libraries(test_ad PUBLIC
@@ -307,7 +281,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for Black-Scholes AD benchmark
-add_executable(test_bs_ad_bench test_bs_ad_bench.cpp)
+add_executable(test_bs_ad_bench benchmarks/test_bs_ad_bench.cpp)
 
 target_link_libraries(test_bs_ad_bench PUBLIC
     generic_MC_lib
@@ -333,7 +307,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for interpolation AD benchmark
-add_executable(test_interp_ad_bench test_interp_ad_bench.cpp)
+add_executable(test_interp_ad_bench benchmarks/test_interp_ad_bench.cpp)
 
 target_link_libraries(test_interp_ad_bench PUBLIC
     generic_MC_lib
@@ -359,7 +333,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for fast exp/log AD benchmark
-add_executable(test_fast_exp_log test_fast_exp_log.cpp)
+add_executable(test_fast_exp_log benchmarks/test_fast_exp_log.cpp)
 
 target_link_libraries(test_fast_exp_log PUBLIC
     generic_MC_lib
@@ -385,7 +359,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for bivariate normal CDF AD benchmark
-add_executable(test_bvn_ad_bench test_bvn_ad_bench.cpp)
+add_executable(test_bvn_ad_bench benchmarks/test_bvn_ad_bench.cpp)
 
 target_link_libraries(test_bvn_ad_bench PUBLIC
     generic_MC_lib
@@ -411,7 +385,7 @@ if(APPLE OR UNIX)
 endif()
 
 
-add_executable(test_bs_hessian_bench test_bs_hessian_bench.cpp)
+add_executable(test_bs_hessian_bench benchmarks/test_bs_hessian_bench.cpp)
 
 target_link_libraries(test_bs_hessian_bench PUBLIC
         generic_MC_lib
@@ -437,7 +411,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Black-76 analytical Greeks test
-add_executable(test_black76 test_black76.cpp)
+add_executable(test_black76 tests/test_black76.cpp)
 
 target_link_libraries(test_black76 PUBLIC
         generic_MC_lib
@@ -456,7 +430,7 @@ target_compile_definitions(test_black76 PRIVATE
 target_compile_options(test_black76 PRIVATE -Wall -Wextra -Wpedantic)
 
 # Cubic interpolation weight-matrix / branch-pinned probe validation
-add_executable(test_cubic_weights test_cubic_weights.cpp)
+add_executable(test_cubic_weights tests/test_cubic_weights.cpp)
 
 target_link_libraries(test_cubic_weights PUBLIC
         TBB::tbb
@@ -474,7 +448,7 @@ target_compile_definitions(test_cubic_weights PRIVATE
 target_compile_options(test_cubic_weights PRIVATE -Wall -Wextra -Wpedantic)
 
 # Bicubic interpolation weight-matrix / branch-pinned probe validation
-add_executable(test_bicubic_weights test_bicubic_weights.cpp)
+add_executable(test_bicubic_weights tests/test_bicubic_weights.cpp)
 
 target_link_libraries(test_bicubic_weights PUBLIC
         TBB::tbb
@@ -492,7 +466,7 @@ target_compile_definitions(test_bicubic_weights PRIVATE
 target_compile_options(test_bicubic_weights PRIVATE -Wall -Wextra -Wpedantic)
 
 # Tanh-sinh (double-exponential) quadrature: value + AD gradient/Hessian
-add_executable(test_tanh_sinh test_tanh_sinh.cpp)
+add_executable(test_tanh_sinh tests/test_tanh_sinh.cpp)
 
 target_link_libraries(test_tanh_sinh PUBLIC
         TBB::tbb
@@ -510,8 +484,7 @@ target_compile_definitions(test_tanh_sinh PRIVATE
 target_compile_options(test_tanh_sinh PRIVATE -Wall -Wextra -Wpedantic)
 
 # Integrator AD primitives: all Integrals classes at double/var/fvar<var>
-add_executable(test_integrator_primitives test_integrator_primitives.cpp)
-
+add_executable(test_integrator_primitives tests/test_integrator_primitives.cpp)
 target_link_libraries(test_integrator_primitives PUBLIC
         TBB::tbb
         SUNDIALS::nvecserial
@@ -527,6 +500,132 @@ target_compile_definitions(test_integrator_primitives PRIVATE
 
 target_compile_options(test_integrator_primitives PRIVATE -Wall -Wextra -Wpedantic)
 
+# 1-D solver AD dispatch: var IFT gradients + fvar pathwise Hessians
+add_executable(test_solvers_ad tests/test_solvers_ad.cpp)
+
+target_link_libraries(test_solvers_ad PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_solvers_ad PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_solvers_ad PRIVATE -Wall -Wextra -Wpedantic)
+
+# Interpolation evaluation-point AD (Phase 1): analytic dI/dx + mixed Hessians
+add_executable(test_interpolation_xad tests/test_interpolation_xad.cpp)
+
+target_link_libraries(test_interpolation_xad PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_interpolation_xad PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_interpolation_xad PRIVATE -Wall -Wextra -Wpedantic)
+
+# Autodiff primitives: HVP + cross-primitive composition (Phase 3)
+add_executable(test_autodiff_primitives tests/test_autodiff_primitives.cpp)
+
+target_link_libraries(test_autodiff_primitives PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_autodiff_primitives PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_autodiff_primitives PRIVATE -Wall -Wextra -Wpedantic)
+
+# Optimizer building blocks: stop criteria, CRTP base, AD evaluation helpers
+add_executable(test_optimization tests/test_optimization.cpp)
+
+target_link_libraries(test_optimization PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_optimization PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_optimization PRIVATE -Wall -Wextra -Wpedantic)
+
+# IFT sensitivity layer: dp/dm, multiplier sensitivities, var composition
+add_executable(test_ift tests/test_ift.cpp)
+
+target_link_libraries(test_ift PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_ift PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Optimizer benchmarking harness (timing + sampling profiler target)
+add_executable(test_optimizers_bench benchmarks/test_optimizers_bench.cpp)
+
+target_link_libraries(test_optimizers_bench PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_optimizers_bench PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_optimizers_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
+# Optimizer stress suite: hard problems, edge cases, scale probes
+add_executable(test_optimizers_stress tests/test_optimizers_stress.cpp)
+
+target_link_libraries(test_optimizers_stress PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_optimizers_stress PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_optimizers_stress PRIVATE -Wall -Wextra -Wpedantic -O2)
+
 if(APPLE OR UNIX)
     set_target_properties(test_black76 PROPERTIES
             INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
@@ -535,7 +634,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for mixed hessian benchmark
-add_executable(test_mixed_hessian test_mixed_hessian.cpp)
+add_executable(test_mixed_hessian tests/test_mixed_hessian.cpp)
 
 target_link_libraries(test_mixed_hessian PUBLIC
         generic_MC_lib
@@ -561,8 +660,6 @@ if(APPLE OR UNIX)
 endif()
 
 # precomputed_gradients vs custom vari example
-add_executable(test_precomputed_gradients test_precomputed_gradients.cpp)
-
 target_link_libraries(test_precomputed_gradients PUBLIC
         generic_MC_lib
         TBB::tbb
@@ -587,8 +684,6 @@ if(APPLE OR UNIX)
 endif()
 
 # Multi-component AD chain example
-add_executable(test_chain_ad test_chain_ad.cpp)
-
 target_link_libraries(test_chain_ad PUBLIC
         generic_MC_lib
         TBB::tbb
@@ -613,7 +708,7 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for pricer hierarchy hessian benchmark
-add_executable(test_pricer_hessian test_pricer_hessian.cpp)
+add_executable(test_pricer_hessian tests/test_pricer_hessian.cpp)
 
 target_link_libraries(test_pricer_hessian PUBLIC
         generic_MC_lib
@@ -639,12 +734,12 @@ if(APPLE OR UNIX)
 endif()
 
 # Create executable for ziggurat RNG tests
-add_executable(test_ziggurat test_ziggurat.cpp)
+add_executable(test_ziggurat tests/test_ziggurat.cpp)
 target_link_libraries(test_ziggurat generic_MC_lib)
 target_compile_options(test_ziggurat PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
 
 # Create executable for McFarland ziggurat tests
-add_executable(test_mcfarland test_mcfarland.cpp)
+add_executable(test_mcfarland tests/test_mcfarland.cpp)
 target_link_libraries(test_mcfarland generic_MC_lib)
 target_compile_options(test_mcfarland PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
 
@@ -662,6 +757,7 @@ if(MSVC)
     target_compile_options(generic_MC_lib PRIVATE /W4)
     target_compile_options(example_usage PRIVATE /W4)
     target_compile_options(test_math PRIVATE /W4)
+    target_compile_options(test_solvers PRIVATE /W4)
     target_compile_options(test_interpolation PRIVATE /W4)
     target_compile_options(test_markets PRIVATE /W4)
     target_compile_options(test_gbm_bridge PRIVATE /W4)
@@ -680,6 +776,7 @@ else()
     target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_solvers PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_interpolation PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_markets PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_gbm_bridge PRIVATE -Wall -Wextra -Wpedantic)

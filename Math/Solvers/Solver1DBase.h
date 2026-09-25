@@ -3,164 +3,217 @@
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
+
+#include "SolverPrimitives.h"
 
 namespace Math {
 /**
- * @brief Base class for 1-D solvers using CRTP
+ * @brief Base class for 1-D root finders using CRTP
  *
- * Uses the "Curiously Recurring Template Pattern" (CRTP) for static polymorphism.
  * Concrete solvers are declared as:
  *   class BrentSolver : public Solver1D<double, BrentSolver> { ... }
  *
- * Design based on QuantLib's Solver1D but templated for AD support.
+ * Design based on QuantLib's Solver1D, with two deliberate differences:
+ * - the objective is a template parameter instead of std::function, so the
+ *   evaluation loop inlines and no type-erased call / heap allocation is paid;
+ * - solve() keeps all working state in a SolverState local to the call rather
+ *   than in mutable members, so a solver is safe to share across threads and
+ *   to call recursively from inside another objective.
  *
- * @tparam DoubleT Numeric type (double or stan::math::var)
+ * AD dispatch is automatic by DoubleT, like the Integrals classes: include
+ * Solvers/SolverStanPrimitives.h (plus a Stan Math header) and
+ * Solver<stan::math::var>::solve returns exact implicit-function-theorem
+ * sensitivities, Solver<fvar<...>> keeps the pathwise route. See that header.
+ *
+ * @tparam DoubleT Numeric type (double or an AD scalar exposing val())
  * @tparam Impl Derived solver implementation (CRTP)
  */
 template <typename DoubleT, typename Impl>
+    requires SolverScalar<DoubleT>
 class Solver1D {
 public:
-    using FunctionType = std::function<DoubleT(DoubleT)>;
-
-    Solver1D()
-        : m_evaluationNumber(0), m_maxEvaluations(100), m_lowerBound(0.0), m_upperBound(0.0),
-          m_lowerBoundEnforced(false), m_upperBoundEnforced(false) {}
+    Solver1D() = default;
 
     /**
-     * @brief Solve for root with bracketing
-     * @param f Function to find root of
-     * @param accuracy Target accuracy
-     * @param guess Initial guess
-     * @param xMin Lower bracket
+     * @brief Solve for a root inside the bracket [xMin, xMax]
+     * @param f Objective, callable as DoubleT(DoubleT)
+     * @param accuracy Target accuracy (bracket width / step size)
+     * @param guess Initial guess, strictly inside the bracket
+     * @param xMin Lower bracket, f(xMin) and f(xMax) must straddle zero
      * @param xMax Upper bracket
      * @return Root value
      */
-    DoubleT solve(const FunctionType& f, double accuracy, DoubleT guess, DoubleT xMin,
-                  DoubleT xMax) const {
-        if (accuracy <= 0.0) {
-            throw std::invalid_argument("accuracy must be positive");
+    template <typename F>
+        requires SolverFunction<F, DoubleT>
+    DoubleT solve(const F& f, double accuracy, DoubleT guess, DoubleT xMin, DoubleT xMax) const {
+        if constexpr (std::is_same_v<DoubleT, double>) {
+            return solveGeneric(f, accuracy, guess, xMin, xMax);
+        } else {
+            return detail::solveWithSensitivity(static_cast<const Impl&>(*this), f, accuracy, guess,
+                                                xMin, xMax);
         }
-
-        // Use at least machine epsilon
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        accuracy = std::max(accuracy, EPSILON);
-
-        m_xMin = xMin;
-        m_xMax = xMax;
-
-        if (value(m_xMin) >= value(m_xMax)) {
-            throw std::invalid_argument("invalid range: xMin >= xMax");
-        }
-
-        if (m_lowerBoundEnforced && value(m_xMin) < m_lowerBound) {
-            throw std::invalid_argument("xMin < enforced lower bound");
-        }
-
-        if (m_upperBoundEnforced && value(m_xMax) > m_upperBound) {
-            throw std::invalid_argument("xMax > enforced upper bound");
-        }
-
-        m_fxMin = f(m_xMin);
-        if (isClose(m_fxMin, DoubleT(0.0))) {
-            return m_xMin;
-        }
-
-        m_fxMax = f(m_xMax);
-        if (isClose(m_fxMax, DoubleT(0.0))) {
-            return m_xMax;
-        }
-
-        m_evaluationNumber = 2;
-
-        // Check bracketing
-        if (value(m_fxMin) * value(m_fxMax) >= 0.0) {
-            throw std::runtime_error("root not bracketed");
-        }
-
-        if (value(guess) <= value(m_xMin) || value(guess) >= value(m_xMax)) {
-            throw std::invalid_argument("guess must be strictly between xMin and xMax");
-        }
-
-        m_root = guess;
-
-        // Call derived class implementation
-        return static_cast<const Impl*>(this)->solveImpl(f, accuracy);
     }
 
     /**
-     * @brief Solve for root with automatic bracketing
-     * @param f Function to find root of
+     * @brief Solve for a root with automatic bracketing
+     * @param f Objective, callable as DoubleT(DoubleT)
      * @param accuracy Target accuracy
      * @param guess Initial guess
      * @param step Initial step size for bracketing
      * @return Root value
      */
-    DoubleT solve(const FunctionType& f, double accuracy, DoubleT guess, DoubleT step) const {
+    template <typename F>
+        requires SolverFunction<F, DoubleT>
+    DoubleT solve(const F& f, double accuracy, DoubleT guess, DoubleT step) const {
+        if constexpr (std::is_same_v<DoubleT, double>) {
+            return solveGeneric(f, accuracy, guess, step);
+        } else {
+            return detail::solveWithAutoBracketSensitivity(static_cast<const Impl&>(*this), f,
+                                                           accuracy, guess, step);
+        }
+    }
+
+    /**
+     * @brief Value path of solve() (internal, public so the AD primitives in
+     *        SolverStanPrimitives.h can reuse it for the pathwise route).
+     *
+     * Solves for a root inside the bracket [xMin, xMax].
+     */
+    template <typename F>
+        requires SolverFunction<F, DoubleT>
+    DoubleT solveGeneric(const F& f, double accuracy, DoubleT guess, DoubleT xMin,
+                         DoubleT xMax) const {
         if (accuracy <= 0.0) {
             throw std::invalid_argument("accuracy must be positive");
         }
+        // Use at least machine epsilon
+        accuracy = std::max(accuracy, std::numeric_limits<double>::epsilon());
 
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        accuracy = std::max(accuracy, EPSILON);
+        if (detail::primalValue(xMin) >= detail::primalValue(xMax)) {
+            throw std::invalid_argument("invalid range: xMin >= xMax");
+        }
+        if (m_lowerBoundEnforced && detail::primalValue(xMin) < m_lowerBound) {
+            throw std::invalid_argument("xMin < enforced lower bound");
+        }
+        if (m_upperBoundEnforced && detail::primalValue(xMax) > m_upperBound) {
+            throw std::invalid_argument("xMax > enforced upper bound");
+        }
+
+        SolverState<DoubleT> s;
+        s.xMin = xMin;
+        s.xMax = xMax;
+        s.maxEvaluations = m_maxEvaluations;
+
+        s.fxMin = f(s.xMin);
+        if (isZero(s.fxMin, s.fScale)) {
+            return s.xMin;
+        }
+        s.fxMax = f(s.xMax);
+        if (isZero(s.fxMax, s.fScale)) {
+            return s.xMax;
+        }
+        s.evaluations = 2;
+        s.fScale = std::max(1.0, std::max(std::fabs(detail::primalValue(s.fxMin)),
+                                          std::fabs(detail::primalValue(s.fxMax))));
+
+        if (!oppositeSigns(s.fxMin, s.fxMax)) {
+            throw std::runtime_error("root not bracketed");
+        }
+        if (detail::primalValue(guess) <= detail::primalValue(s.xMin) ||
+            detail::primalValue(guess) >= detail::primalValue(s.xMax)) {
+            throw std::invalid_argument("guess must be strictly between xMin and xMax");
+        }
+        s.root = guess;
+
+        // Call derived class implementation
+        return static_cast<const Impl*>(this)->solveImpl(f, accuracy, s);
+    }
+
+    /**
+     * @brief Value path of solve() with automatic bracketing (internal).
+     */
+    template <typename F>
+        requires SolverFunction<F, DoubleT>
+    DoubleT solveGeneric(const F& f, double accuracy, DoubleT guess, DoubleT step) const {
+        if (accuracy <= 0.0) {
+            throw std::invalid_argument("accuracy must be positive");
+        }
+        accuracy = std::max(accuracy, std::numeric_limits<double>::epsilon());
+
+        SolverState<DoubleT> s;
+        s.maxEvaluations = m_maxEvaluations;
 
         const double growthFactor = 1.6;
         int flipflop = -1;
 
-        m_root = guess;
-        m_fxMax = f(m_root);
-
-        if (isClose(m_fxMax, DoubleT(0.0))) {
-            return m_root;
-        } else if (value(m_fxMax) > 0.0) {
-            m_xMin = enforceBounds(m_root - step);
-            m_fxMin = f(m_xMin);
-            m_xMax = m_root;
+        s.root = guess;
+        s.fxMax = f(s.root);
+        if (isZero(s.fxMax, s.fScale)) {
+            return s.root;
+        } else if (detail::primalValue(s.fxMax) > 0.0) {
+            s.xMin = enforceBounds(s.root - step);
+            s.fxMin = f(s.xMin);
+            s.xMax = s.root;
         } else {
-            m_xMin = m_root;
-            m_fxMin = m_fxMax;
-            m_xMax = enforceBounds(m_root + step);
-            m_fxMax = f(m_xMax);
+            s.xMin = s.root;
+            s.fxMin = s.fxMax;
+            s.xMax = enforceBounds(s.root + step);
+            s.fxMax = f(s.xMax);
         }
+        s.evaluations = 2;
 
-        m_evaluationNumber = 2;
-
-        while (m_evaluationNumber <= m_maxEvaluations) {
-            if (value(m_fxMin) * value(m_fxMax) <= 0.0) {
-                if (isClose(m_fxMin, DoubleT(0.0)))
-                    return m_xMin;
-                if (isClose(m_fxMax, DoubleT(0.0)))
-                    return m_xMax;
-                m_root = (m_xMax + m_xMin) / DoubleT(2.0);
-                return static_cast<const Impl*>(this)->solveImpl(f, accuracy);
+        while (s.evaluations <= s.maxEvaluations) {
+            s.fScale = std::max(1.0, std::max(std::fabs(detail::primalValue(s.fxMin)),
+                                              std::fabs(detail::primalValue(s.fxMax))));
+            if (isZero(s.fxMin, s.fScale)) {
+                return s.xMin;
+            }
+            if (isZero(s.fxMax, s.fScale)) {
+                return s.xMax;
+            }
+            if (oppositeSigns(s.fxMin, s.fxMax)) {
+                s.root = (s.xMax + s.xMin) / DoubleT(2.0);
+                return static_cast<const Impl*>(this)->solveImpl(f, accuracy, s);
             }
 
-            if (std::fabs(value(m_fxMin)) < std::fabs(value(m_fxMax))) {
-                m_xMin = enforceBounds(m_xMin + DoubleT(growthFactor) * (m_xMin - m_xMax));
-                m_fxMin = f(m_xMin);
-            } else if (std::fabs(value(m_fxMin)) > std::fabs(value(m_fxMax))) {
-                m_xMax = enforceBounds(m_xMax + DoubleT(growthFactor) * (m_xMax - m_xMin));
-                m_fxMax = f(m_xMax);
+            if (std::fabs(detail::primalValue(s.fxMin)) < std::fabs(detail::primalValue(s.fxMax))) {
+                s.xMin = enforceBounds(s.xMin + DoubleT(growthFactor) * (s.xMin - s.xMax));
+                s.fxMin = f(s.xMin);
+            } else if (std::fabs(detail::primalValue(s.fxMin)) >
+                       std::fabs(detail::primalValue(s.fxMax))) {
+                s.xMax = enforceBounds(s.xMax + DoubleT(growthFactor) * (s.xMax - s.xMin));
+                s.fxMax = f(s.xMax);
             } else if (flipflop == -1) {
-                m_xMin = enforceBounds(m_xMin + DoubleT(growthFactor) * (m_xMin - m_xMax));
-                m_fxMin = f(m_xMin);
-                m_evaluationNumber++;
+                s.xMin = enforceBounds(s.xMin + DoubleT(growthFactor) * (s.xMin - s.xMax));
+                s.fxMin = f(s.xMin);
                 flipflop = 1;
-            } else if (flipflop == 1) {
-                m_xMax = enforceBounds(m_xMax + DoubleT(growthFactor) * (m_xMax - m_xMin));
-                m_fxMax = f(m_xMax);
+            } else {
+                s.xMax = enforceBounds(s.xMax + DoubleT(growthFactor) * (s.xMax - s.xMin));
+                s.fxMax = f(s.xMax);
                 flipflop = -1;
             }
-            m_evaluationNumber++;
+            ++s.evaluations;
         }
 
         throw std::runtime_error("unable to bracket root in max function evaluations");
     }
 
     // Modifiers
-    void setMaxEvaluations(size_t evaluations) { m_maxEvaluations = evaluations; }
+    void setMaxEvaluations(std::size_t evaluations) { m_maxEvaluations = evaluations; }
+
+    /// Mirror a configuration onto this solver (used by the AD path to copy
+    /// the caller's settings onto the double-precision twin).
+    void setConfig(const SolverConfig& config) {
+        m_maxEvaluations = config.maxEvaluations;
+        m_lowerBound = config.lowerBound;
+        m_lowerBoundEnforced = config.lowerBoundEnforced;
+        m_upperBound = config.upperBound;
+        m_upperBoundEnforced = config.upperBoundEnforced;
+    }
 
     void setLowerBound(double lowerBound) {
         m_lowerBound = lowerBound;
@@ -173,38 +226,48 @@ public:
     }
 
     // Inspectors
-    size_t maxEvaluations() const { return m_maxEvaluations; }
+    std::size_t maxEvaluations() const { return m_maxEvaluations; }
+
+    SolverConfig config() const {
+        return SolverConfig{m_maxEvaluations, m_lowerBoundEnforced, m_lowerBound,
+                            m_upperBoundEnforced, m_upperBound};
+    }
 
 protected:
-    mutable DoubleT m_root, m_xMin, m_xMax, m_fxMin, m_fxMax;
-    mutable size_t m_evaluationNumber;
+    /// Primal value of a scalar (recursive for fvar<var>)
+    static double value(const DoubleT& x) { return detail::primalValue(x); }
+
+    static bool isZero(const DoubleT& x, double scale) { return detail::isZero(value(x), scale); }
+
+    static bool close(const DoubleT& x, const DoubleT& y) {
+        return detail::close(value(x), value(y));
+    }
+
+    static bool oppositeSigns(const DoubleT& a, const DoubleT& b) {
+        return detail::oppositeSigns(value(a), value(b));
+    }
 
 private:
-    size_t m_maxEvaluations;
-    double m_lowerBound, m_upperBound;
-    bool m_lowerBoundEnforced, m_upperBoundEnforced;
+    std::size_t m_maxEvaluations = 100;
+    double m_lowerBound = 0.0;
+    double m_upperBound = 0.0;
+    bool m_lowerBoundEnforced = false;
+    bool m_upperBoundEnforced = false;
 
+    /// Clamp an auto-bracket endpoint to the enforced bounds.
+    ///
+    /// Note for AD scalars: a clamped endpoint is a constant node, so if the
+    /// root lands exactly on an enforced bound its derivative w.r.t. the
+    /// caller's inputs is lost. Set bounds beyond the reachable root when the
+    /// derivative matters.
     DoubleT enforceBounds(DoubleT x) const {
-        if (m_lowerBoundEnforced && value(x) < m_lowerBound) {
+        if (m_lowerBoundEnforced && detail::primalValue(x) < m_lowerBound) {
             return DoubleT(m_lowerBound);
         }
-        if (m_upperBoundEnforced && value(x) > m_upperBound) {
+        if (m_upperBoundEnforced && detail::primalValue(x) > m_upperBound) {
             return DoubleT(m_upperBound);
         }
         return x;
-    }
-
-    static bool isClose(const DoubleT& x, const DoubleT& y) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x) - value(y)) < 42.0 * EPSILON;
-    }
-
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val(); // For stan::math::var
-        }
     }
 };
 } // namespace Math

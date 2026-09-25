@@ -43,6 +43,10 @@
  *   std::vector<ADVariableT> y_ad = {0.0, 1.0, 4.0, 9.0};
  *   Math::CubicInterpolation<ADVariableT> ad_spline(x_ad, y_ad);
  *   ADVariableT result_ad = ad_spline(ADVariableT(1.5));
+ *
+ *   // Optimized AD paths (passive-abscissa callbacks): also include
+ *   // "Math/Interpolations/InterpolationStanPrimitives.h" or the single AD
+ *   // umbrella "Math/StanPrimitives.h". This header stays Stan-free.
  */
 
 // Base classes
@@ -58,7 +62,8 @@
 #include "Interpolations/BicubicInterpolation.h"
 #include "Interpolations/BilinearInterpolation.h"
 
-// Stan AD specializations (var and fvar<var> optimized paths)
-#include "Interpolations/InterpolationStanPrimitives.h"
+// AD dispatch (var/fvar<var> optimized paths) lives in
+// Interpolations/InterpolationStanPrimitives.h: include it alongside a Stan
+// Math header, or use the single AD umbrella "Math/StanPrimitives.h".
 
 #endif // INTERPOLATIONS_H

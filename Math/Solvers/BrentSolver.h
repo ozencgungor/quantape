@@ -1,6 +1,7 @@
 #ifndef BRENT_SOLVER_H
 #define BRENT_SOLVER_H
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -19,105 +20,116 @@ namespace Math {
  * - Super-linear convergence (like secant/inverse quadratic)
  * - No derivative required
  *
+ * Formulation follows Forsythe-Malcolm-Moler's zeroin (also used by scipy's
+ * brentq): (a,b,c) always bracket the root, b is the best estimate, and d/e
+ * carry the last two steps.
+ *
  * @tparam DoubleT Numeric type (double or stan::math::var)
  */
 template <typename DoubleT>
 class BrentSolver : public Solver1D<DoubleT, BrentSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, BrentSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     BrentSolver() = default;
 
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
-        DoubleT a = this->m_xMin;
-        DoubleT b = this->m_xMax;
-        DoubleT fa = this->m_fxMin;
-        DoubleT fb = this->m_fxMax;
-
-        DoubleT c = a;
-        DoubleT fc = fa;
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
+        DoubleT a = s.xMin;
+        DoubleT b = s.xMax;
+        DoubleT c = s.xMax;
+        DoubleT fa = s.fxMin;
+        DoubleT fb = s.fxMax;
+        DoubleT fc = s.fxMax;
         DoubleT d = b - a;
         DoubleT e = d;
 
-        while (this->m_evaluationNumber < this->maxEvaluations()) {
-            if (std::fabs(value(fc)) < std::fabs(value(fb))) {
-                a = b;
-                b = c;
-                c = a;
-                fa = fb;
-                fb = fc;
-                fc = fa;
-            }
-
-            DoubleT tol =
-                DoubleT(2.0 * std::numeric_limits<double>::epsilon() * std::fabs(value(b)) +
-                        0.5 * accuracy);
-            DoubleT m = (c - b) / DoubleT(2.0);
-
-            if (std::fabs(value(m)) <= value(tol) || std::fabs(value(fb)) < accuracy) {
-                return b;
-            }
-
-            if (std::fabs(value(e)) < value(tol) || std::fabs(value(fa)) <= std::fabs(value(fb))) {
-                // Bisection
-                d = m;
-                e = m;
-            } else {
-                DoubleT s;
-                if (value(a) == value(c)) {
-                    // Linear interpolation (secant)
-                    s = fb * (b - a) / (fa - fb);
-                } else {
-                    // Inverse quadratic interpolation
-                    DoubleT p, q, r;
-                    q = fa / fc;
-                    r = fb / fc;
-                    p = (b - a) * r * (q - r) - (b - c) * (DoubleT(1.0) - r);
-                    q = (q - DoubleT(1.0)) * (r - DoubleT(1.0)) * ((DoubleT(1.0) - r));
-                    s = b - p / q;
-                }
-
-                if ((value(s) - value(b)) * (value(b) - value(c)) < 0.0 ||
-                    std::fabs(value(s) - value(b)) > std::fabs(value(e) / 2.0)) {
-                    d = m;
-                    e = m;
-                } else {
-                    e = d;
-                    d = s - b;
-                }
-            }
-
-            a = b;
-            fa = fb;
-
-            if (std::fabs(value(d)) > value(tol)) {
-                b = b + d;
-            } else {
-                b = b + (value(m) > 0.0 ? tol : -tol);
-            }
-
-            fb = f(b);
-            this->m_evaluationNumber++;
-
-            if (value(fb) * value(fc) > 0.0) {
+        while (s.evaluations < s.maxEvaluations) {
+            // f(b) and f(c) must straddle the root; otherwise rebracket
+            if (!Base::oppositeSigns(fb, fc)) {
                 c = a;
                 fc = fa;
                 d = b - a;
                 e = d;
             }
+
+            // Keep b the best estimate. The net effect is
+            // (a,b,c) <- (b_old,c_old,b_old), so a == c marks the linear
+            // (secant) interpolation branch below; it is not a typo.
+            if (std::fabs(Base::value(fc)) < std::fabs(Base::value(fb))) {
+                const DoubleT oldB = b;
+                b = c;
+                a = oldB;
+                c = oldB;
+                const DoubleT oldFb = fb;
+                fb = fc;
+                fa = oldFb;
+                fc = oldFb;
+            }
+
+            const DoubleT tol1 =
+                DoubleT(2.0 * std::numeric_limits<double>::epsilon() * std::fabs(Base::value(b)) +
+                        0.5 * accuracy);
+            const DoubleT xm = (c - b) / DoubleT(2.0);
+
+            if (std::fabs(Base::value(xm)) <= Base::value(tol1) || Base::value(fb) == 0.0 ||
+                Base::isZero(fb, s.fScale)) {
+                return b;
+            }
+
+            if (std::fabs(Base::value(e)) >= Base::value(tol1) &&
+                std::fabs(Base::value(fa)) > std::fabs(Base::value(fb))) {
+                DoubleT p, q;
+                const DoubleT r0 = fb / fa;
+
+                if (Base::value(a) == Base::value(c)) {
+                    // Linear interpolation (secant) through a and b
+                    p = DoubleT(2.0) * xm * r0;
+                    q = DoubleT(1.0) - r0;
+                } else {
+                    // Inverse quadratic interpolation through a, b, c
+                    q = fa / fc;
+                    const DoubleT r = fb / fc;
+                    p = r0 * (DoubleT(2.0) * xm * q * (q - r) - (b - a) * (r - DoubleT(1.0)));
+                    q = (q - DoubleT(1.0)) * (r - DoubleT(1.0)) * (r0 - DoubleT(1.0));
+                }
+
+                if (Base::value(p) > 0.0) {
+                    q = -q;
+                }
+                if (Base::value(p) < 0.0) {
+                    p = -p;
+                }
+
+                // Accept the interpolated step only if it falls well inside
+                // the bracket and shrinks it by at least a factor of two
+                const double min1 = 3.0 * Base::value(xm) * Base::value(q) -
+                                    std::fabs(Base::value(tol1) * Base::value(q));
+                const double min2 = std::fabs(Base::value(e) * Base::value(q));
+                if (2.0 * Base::value(p) < std::min(min1, min2)) {
+                    e = d;
+                    d = p / q;
+                } else {
+                    d = xm;
+                    e = d;
+                }
+            } else {
+                d = xm;
+                e = d;
+            }
+
+            a = b;
+            fa = fb;
+            if (std::fabs(Base::value(d)) > Base::value(tol1)) {
+                b = b + d;
+            } else {
+                b = b + DoubleT(Base::value(xm) > 0.0 ? Base::value(tol1) : -Base::value(tol1));
+            }
+            fb = f(b);
+            ++s.evaluations;
         }
 
         throw std::runtime_error("BrentSolver: max number of iterations reached");
-    }
-
-private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
     }
 };
 } // namespace Math

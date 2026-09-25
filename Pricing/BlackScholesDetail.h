@@ -112,7 +112,8 @@ inline Black76Result black76Analytical(double DF, double F, double K, double vol
     const double Ndp = detail::Phi(dp);
     const double Ndm = detail::Phi(dm);
     const double ndp = detail::phi(dp);
-    const double ndm = detail::phi(dm);
+    // Identity F n(d+) = K n(d-): avoids a second exp/sqrt in the hot path
+    const double ndm = (F / K) * ndp;
 
     const double call_undsc = F * Ndp - K * Ndm;
     const double put_undsc = K * (1.0 - Ndm) - F * (1.0 - Ndp);

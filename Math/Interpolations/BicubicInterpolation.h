@@ -15,19 +15,16 @@ namespace Math {
  * results along y. The x-row CubicInterpolation objects are precomputed at
  * construction.
  *
- * AD behaviour (after the weight-matrix / branch-pinned-probe rework):
- *   - construction puts NOTHING on the tape for any method (rows skip the
- *     coefficient path for AD types; linear methods build their weight
- *     matrices with pure-double probes);
- *   - a query costs O(ny) tape nodes (one per x-row evaluation), a
- *     tape-free y-interpolation (its grid weight matrix is cached here —
- *     the weights depend only on the grid, so they are shared across all
- *     queries), and one y-evaluation tape node with O(ny) adjoint pushes;
- *   - for exactly-linear methods (Spline/Parabolic) the full bicubic is
- *     linear in z, so the z-Hessian is identically zero;
- *   - adaptive methods (Akima/Kruger/Harmonic) evaluate through the
- *     branch-pinned probe in each direction, giving the active-branch
- *     subgradient per evaluation.
+ * AD behaviour:
+ *   - construction builds the coefficient path once for AD types (rows and
+ *     the cached y-weights), so nothing is probed per query;
+ *   - a query evaluates the row cubics at x (x is on the tape) and the
+ *     y-cubic at y (y is on the tape): df/dx, df/dy and the mixed
+ *     d2f/dxdy / d2f/dxdz / d2f/dydz blocks are exact for the active branch;
+ *   - evaluateFixed() restores the passive-abscissa paths (x/y adjoints not
+ *     pushed) using the cached weight matrices;
+ *   - adaptive methods (Akima/Kruger/Harmonic) use the branch-pinned probe,
+ *     giving the active-branch subgradient per evaluation.
  *
  * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
  * @tparam Smooth  Compile-time default for the runtime smoothing flag. The
@@ -94,6 +91,24 @@ public:
         }
         const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth);
         return y_interp(y, true);
+    }
+
+    /// Passive-abscissa policy (fast path): no adjoints pushed into x or y.
+    DoubleT valueFixedImpl(DoubleT x, DoubleT y) const {
+        std::vector<DoubleT> y_values(m_y.size());
+        for (size_t j = 0; j < m_y.size(); ++j) {
+            y_values[j] = m_x_interps[j].evaluateFixed(x, true);
+        }
+
+        if constexpr (!std::is_same_v<DoubleT, double>) {
+            if (!m_y_weights.empty()) {
+                const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth,
+                                                           m_y_weights);
+                return y_interp.evaluateFixed(y, true);
+            }
+        }
+        const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth);
+        return y_interp.evaluateFixed(y, true);
     }
 
     bool isInRange(DoubleT x, DoubleT y) const {
