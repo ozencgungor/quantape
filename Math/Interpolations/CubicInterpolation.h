@@ -45,20 +45,19 @@ struct CubicWeightMatrix {
  * derivative approximation methods. The polynomial form for each segment i is:
  *   P[i](x) = y[i] + a[i]*(x-x[i]) + b[i]*(x-x[i])^2 + c[i]*(x-x[i])^3
  *
- * Grid coordinates (m_x) are double. Coefficients m_a, m_b, m_c are DoubleT
- * since they depend on node values m_y through the derivative computation.
+ * Grid coordinates (m_x) are double; coefficients m_a, m_b, m_c are DoubleT
+ * since they depend on node values m_y. The default evaluation builds
+ * dx = x - x[i] as DoubleT, so the query coordinate is differentiated and
+ * mixed d2P/dxdy blocks are exact for the active (primal-pinned) branch.
  *
- * AD dispatch (selected at compile time via DoubleT, at runtime via method):
- *   - double:                     O(1) coefficient path (no tape concept)
- *   - AD + Spline/Parabolic:      global weight matrix — the method is
- *                                 EXACTLY linear in y, so one tape node per
- *                                 evaluation, O(n) adjoint pushes, and the
- *                                 y-Hessian is identically zero.
- *   - AD + Akima/Kruger/Harmonic: per-evaluation branch-pinned linearization
- *                                 via ProbeDual — one tape node, O(n) pushes,
- *                                 exact derivative of the ACTIVE branch (a
- *                                 subgradient at kinks, identical to what the
- *                                 generic tape path produces).
+ * AD dispatch:
+ *   - default (operator()/derivative()): coefficient path with DoubleT dx —
+ *     x is on the tape. Construction builds the coefficient vectors once
+ *     (O(n) tape nodes), every evaluation is then a short expression.
+ *   - passive-abscissa fast path (evaluateFixed/derivativeFixed):
+ *     Spline/Parabolic use the precomputed global weight matrix (one tape
+ *     node per evaluation, x adjoint not pushed); Akima/Kruger/Harmonic use
+ *     the branch-pinned ProbeDual linearization.
  *
  * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
  * @tparam Smooth  Compile-time default for the smoothing parameter: when true,
@@ -82,14 +81,10 @@ public:
         this->m_x = this->toDoubleVector(x);
         this->m_y = this->toVector(y);
         this->validate();
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            calculateCoefficients(); // coefficient fast path (double only)
-        } else {
-            // AD types never need the coefficient path: linear methods use
-            // the weight matrix, adaptive methods recompute branch-pinned
-            // coefficients per evaluation via the dual probe. Skipping
-            // calculateCoefficients() here removes ALL construction tape.
-            buildWeightMatrix();
+        this->cacheSharedValues(); // one snapshot for the Fixed-path callbacks
+        calculateCoefficients();
+        if constexpr (!std::is_same_v<DoubleT, double>) {
+            buildWeightMatrix(); // passive-abscissa fast path (linear methods)
         }
     }
 
@@ -103,9 +98,9 @@ public:
         this->m_x = this->toDoubleVector(x);
         this->m_y = this->toVector(y);
         this->validate();
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            calculateCoefficients();
-        } else {
+        this->cacheSharedValues(); // one snapshot for the Fixed-path callbacks
+        calculateCoefficients();
+        if constexpr (!std::is_same_v<DoubleT, double>) {
             if (!precomputed.empty())
                 applyWeights(precomputed);
             else
@@ -113,9 +108,15 @@ public:
         }
     }
 
-    DoubleT valueImpl(DoubleT x) const {
+    /// Default (AD-aware) value: dx is DoubleT, so x is on the tape.
+    DoubleT valueImpl(DoubleT x) const { return coefficientValue(x); }
+
+    DoubleT derivativeImpl(DoubleT x) const { return coefficientDerivative(x); }
+
+    /// Passive-abscissa policy (fast path): x adjoint not pushed.
+    DoubleT valueFixedImpl(DoubleT x) const {
         if constexpr (std::is_same_v<DoubleT, double>) {
-            return coefficientValue(x); // O(1) fast path, no tape concept
+            return coefficientValue(x);
         } else {
             if (m_useWeights)
                 return weightMatrixValue(x); // Spline/Parabolic: global weights
@@ -123,7 +124,7 @@ public:
         }
     }
 
-    DoubleT derivativeImpl(DoubleT x) const {
+    DoubleT derivativeFixedImpl(DoubleT x) const {
         if constexpr (std::is_same_v<DoubleT, double>) {
             return coefficientDerivative(x);
         } else {
@@ -162,7 +163,8 @@ private:
     std::vector<double> m_Wa, m_Wb, m_Wc; ///< flat (segment * n) rows
 
     // Defined for stan::math::var / stan::math::fvar<var> in
-    // InterpolationStanPrimitives.h. Never ODR-used for double.
+    // InterpolationStanPrimitives.h (passive-abscissa fast path). Never
+    // ODR-used for double.
     DoubleT weightMatrixValue(DoubleT x) const;
     DoubleT weightMatrixDerivative(DoubleT x) const;
     DoubleT localWeightsValue(DoubleT x) const;
@@ -223,9 +225,9 @@ private:
         if (i >= m_a.size())
             i = m_a.size() - 1;
 
-        double dx = this->extractDouble(x) - this->m_x[i];
+        // dx is DoubleT: x is on the tape together with y[i], a[i], b[i], c[i]
+        DoubleT dx = x - DoubleT(this->m_x[i]);
         // P[i](x) = y[i] + a[i]*dx + b[i]*dx^2 + c[i]*dx^3
-        // dx is double — only y[i], a[i], b[i], c[i] are on tape
         return this->m_y[i] + dx * (m_a[i] + dx * (m_b[i] + dx * m_c[i]));
     }
 
@@ -234,9 +236,9 @@ private:
         if (i >= m_a.size())
             i = m_a.size() - 1;
 
-        double dx = this->extractDouble(x) - this->m_x[i];
+        DoubleT dx = x - DoubleT(this->m_x[i]);
         // P'[i](x) = a[i] + 2*b[i]*dx + 3*c[i]*dx^2
-        return m_a[i] + dx * (2.0 * m_b[i] + 3.0 * m_c[i] * dx);
+        return m_a[i] + dx * (DoubleT(2.0) * m_b[i] + DoubleT(3.0) * m_c[i] * dx);
     }
 
     void calculateCoefficients() {

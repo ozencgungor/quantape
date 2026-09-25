@@ -39,9 +39,9 @@
 #include <string>
 #include <vector>
 
-#include "../Math/Sobol/CBCSearch.h"
-#include "../Math/Sobol/DirectionNumbers.h"
-#include "../Math/Sobol/GF2.h"
+#include "../Math/Random/Sobol/CBCSearch.h"
+#include "../Math/Random/Sobol/DirectionNumbers.h"
+#include "../Math/Random/Sobol/GF2.h"
 
 using namespace mc;
 

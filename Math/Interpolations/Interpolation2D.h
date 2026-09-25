@@ -28,6 +28,21 @@ public:
         return derived().valueImpl(x, y);
     }
 
+    /**
+     * @brief Evaluate treating both query coordinates as passive abscissae
+     *
+     * The default operator() differentiates the query coordinates (weights are
+     * DoubleT). evaluateFixed() restores the node-minimal callback paths from
+     * InterpolationStanPrimitives.h for hot loops: no adjoint is pushed into
+     * x or y.
+     */
+    DoubleT evaluateFixed(DoubleT x, DoubleT y, bool allowExtrapolation = false) const {
+        if (!allowExtrapolation && !derived().isInRange(x, y)) {
+            throw std::runtime_error("Interpolation2D: (x, y) is out of range");
+        }
+        return derived().valueFixedImpl(x, y);
+    }
+
     // ── Value extraction ──
 
     static double extractDouble(double x) { return x; }

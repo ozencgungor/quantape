@@ -2,6 +2,7 @@
 #define INTERPOLATION_H
 
 #include <cmath>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -14,16 +15,18 @@ namespace Math {
  * Node values (m_y) are DoubleT — these are the AD leaves.
  *
  * This separation is critical for AD performance: grid operations (locate,
- * weight computation) stay off the tape entirely. Only the final linear
- * combination of node values produces tape nodes.
+ * weight computation) stay off the tape, while the weights themselves are
+ * DoubleT so the query coordinate is differentiated by default.
  *
  * Derived classes must implement (non-virtual, accessible via friend):
  * - valueImpl(DoubleT x) const -> DoubleT
  * - derivativeImpl(DoubleT x) const -> DoubleT
+ * - valueFixedImpl(DoubleT x) const -> DoubleT      (passive-abscissa policy)
+ * - derivativeFixedImpl(DoubleT x) const -> DoubleT (passive-abscissa policy)
  *
- * Explicit template specializations of valueImpl/derivativeImpl for
- * stan::math::var and stan::math::fvar<var> go in InterpolationStanPrimitives.h,
- * following the same pattern as Pricing/StanPrimitives.h for Black76.
+ * Explicit template specializations of the Fixed methods for stan::math::var
+ * and stan::math::fvar<var> go in InterpolationStanPrimitives.h, following the
+ * same pattern as Pricing/StanPrimitives.h for Black76.
  *
  * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::fvar<var>)
  * @tparam Derived CRTP derived class
@@ -81,6 +84,29 @@ public:
         return derived().derivativeImpl(x);
     }
 
+    /**
+     * @brief Evaluate treating the query coordinate as a passive abscissa
+     *
+     * The default operator()/derivative() build weights as DoubleT, so the
+     * query point is on the AD tape and grad/Hessian include df/dx and mixed
+     * df/dxdy blocks. These Fixed variants restore the node-minimal callback
+     * paths (InterpolationStanPrimitives.h) for hot loops where x is known to
+     * be a constant: the x adjoint is intentionally not pushed there.
+     */
+    DoubleT evaluateFixed(DoubleT x, bool allowExtrapolation = false) const {
+        if (!allowExtrapolation && !isInRange(x)) {
+            throw std::runtime_error("Interpolation: x is out of range");
+        }
+        return derived().valueFixedImpl(x);
+    }
+
+    DoubleT derivativeFixed(DoubleT x, bool allowExtrapolation = false) const {
+        if (!allowExtrapolation && !isInRange(x)) {
+            throw std::runtime_error("Interpolation: x is out of range for derivative");
+        }
+        return derived().derivativeFixedImpl(x);
+    }
+
     double xMin() const {
         if (m_x.empty())
             throw std::runtime_error("Interpolation: no data");
@@ -123,6 +149,22 @@ public:
 protected:
     std::vector<double> m_x;  ///< Grid coordinates (double, never AD)
     std::vector<DoubleT> m_y; ///< Node values (DoubleT, AD-active)
+
+    /**
+     * @brief Shared snapshot of m_y for the Fixed-path callbacks
+     *
+     * The passive-abscissa callbacks (InterpolationStanPrimitives.h) need the
+     * node values after the interpolator goes out of scope, so they capture
+     * them by value. Capturing m_y directly copies the vector on EVERY
+     * evaluation; caching one shared snapshot at construction turns that
+     * into a shared_ptr copy (refcount bump). The elements alias the same
+     * varis as m_y, so adjoint accumulation is unchanged. The vector itself
+     * is never resized after caching; element adjoints are the only writes.
+     */
+    std::shared_ptr<std::vector<DoubleT>> m_y_shared;
+
+    /// Snapshot m_y for the Fixed-path callbacks (call after m_y is final)
+    void cacheSharedValues() { m_y_shared = std::make_shared<std::vector<DoubleT>>(m_y); }
 
     // ── Grid operations (all in double, never on tape) ──
 

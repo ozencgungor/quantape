@@ -11,10 +11,13 @@ namespace Math {
  * @brief Bilinear interpolation on a 2D grid
  *
  * f(x,y) = w00*z[j][i] + w10*z[j][i+1] + w01*z[j+1][i] + w11*z[j+1][i+1]
- * where weights are double (depend only on grid + query point).
  *
- * Linear in z values — Hessian w.r.t. z is zero.
- * var and fvar<var> specializations in InterpolationStanPrimitives.h.
+ * Default evaluation builds the weights as DoubleT, so both query
+ * coordinates are on the tape (df/dx, df/dy, mixed d2f/dxdy and d2f/dxdz
+ * blocks). Linear in z — the z-Hessian is zero.
+ *
+ * evaluateFixed() keeps the node-minimal callback specializations from
+ * InterpolationStanPrimitives.h (x/y treated as passive abscissae).
  */
 template <typename DoubleT>
 class BilinearInterpolation : public Interpolation2D<DoubleT, BilinearInterpolation<DoubleT>> {
@@ -49,18 +52,21 @@ public:
         double x1 = m_x[i], x2 = m_x[i + 1];
         double y1 = m_y[j], y2 = m_y[j + 1];
 
-        // Weights are double — off tape
         double inv_dx = 1.0 / (x2 - x1);
         double inv_dy = 1.0 / (y2 - y1);
-        double wx0 = (x2 - xv) * inv_dx;
-        double wx1 = (xv - x1) * inv_dx;
-        double wy0 = (y2 - yv) * inv_dy;
-        double wy1 = (yv - y1) * inv_dy;
 
-        // z values are DoubleT — on tape
+        // Weights are DoubleT — both query coordinates are on the tape
+        DoubleT wx0 = (DoubleT(x2) - x) * inv_dx;
+        DoubleT wx1 = (x - DoubleT(x1)) * inv_dx;
+        DoubleT wy0 = (DoubleT(y2) - y) * inv_dy;
+        DoubleT wy1 = (y - DoubleT(y1)) * inv_dy;
+
         return wy0 * (wx0 * m_z[j][i] + wx1 * m_z[j][i + 1]) +
                wy1 * (wx0 * m_z[j + 1][i] + wx1 * m_z[j + 1][i + 1]);
     }
+
+    /// Passive-abscissa policy (fast path)
+    DoubleT valueFixedImpl(DoubleT x, DoubleT y) const { return valueImpl(x, y); }
 
     bool isInRange(DoubleT x, DoubleT y) const {
         if (m_x.empty() || m_y.empty())

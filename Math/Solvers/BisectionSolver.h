@@ -22,54 +22,40 @@ template <typename DoubleT>
 class BisectionSolver : public Solver1D<DoubleT, BisectionSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, BisectionSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     BisectionSolver() = default;
 
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
+    /// Objective is a template parameter (no std::function): the loop inlines
+    /// and works for any callable DoubleT -> DoubleT, including AD lambdas.
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
         DoubleT dx, xMid, fMid;
 
         // Orient the search so that f>0 lies at root + dx
-        if (value(this->m_fxMin) < 0.0) {
-            dx = this->m_xMax - this->m_xMin;
-            this->m_root = this->m_xMin;
+        if (Base::value(s.fxMin) < 0.0) {
+            dx = s.xMax - s.xMin;
+            s.root = s.xMin;
         } else {
-            dx = this->m_xMin - this->m_xMax;
-            this->m_root = this->m_xMax;
+            dx = s.xMin - s.xMax;
+            s.root = s.xMax;
         }
 
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
+        while (s.evaluations <= s.maxEvaluations) {
             dx = dx / DoubleT(2.0);
-            xMid = this->m_root + dx;
+            xMid = s.root + dx;
             fMid = f(xMid);
-            ++this->m_evaluationNumber;
+            ++s.evaluations;
 
-            if (value(fMid) <= 0.0) {
-                this->m_root = xMid;
+            if (Base::value(fMid) <= 0.0) {
+                s.root = xMid;
             }
 
-            if (std::fabs(value(dx)) < accuracy || isClose(fMid, DoubleT(0.0))) {
-                f(this->m_root); // Final evaluation
-                ++this->m_evaluationNumber;
-                return this->m_root;
+            if (std::fabs(Base::value(dx)) < accuracy || Base::isZero(fMid, s.fScale)) {
+                return s.root;
             }
         }
 
         throw std::runtime_error("BisectionSolver: maximum number of evaluations exceeded");
-    }
-
-private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isClose(const DoubleT& x, const DoubleT& y) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x) - value(y)) < 42.0 * EPSILON;
     }
 };
 } // namespace Math

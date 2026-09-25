@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 #include "Solver1DBase.h"
 
@@ -26,76 +27,70 @@ template <typename DoubleT>
 class RidderSolver : public Solver1D<DoubleT, RidderSolver<DoubleT>> {
 public:
     using Base = Solver1D<DoubleT, RidderSolver<DoubleT>>;
-    using FunctionType = typename Base::FunctionType;
 
     RidderSolver() = default;
 
-    DoubleT solveImpl(const FunctionType& f, double accuracy) const {
-        DoubleT fxMid, froot, s, xMid, nextRoot;
+    template <typename F>
+    DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
+        DoubleT fxMid, froot, discriminant, xMid, nextRoot;
 
         // Ridder algorithm provides accuracy 100x below requested in practice
-        double xAccuracy = accuracy / 100.0;
+        const double xAccuracy = accuracy / 100.0;
 
         // Initialize with unlikely value
-        this->m_root = DoubleT(std::numeric_limits<double>::lowest());
+        s.root = DoubleT(std::numeric_limits<double>::lowest());
 
-        while (this->m_evaluationNumber <= this->maxEvaluations()) {
-            xMid = (this->m_xMin + this->m_xMax) / DoubleT(2.0);
+        while (s.evaluations <= s.maxEvaluations) {
+            xMid = (s.xMin + s.xMax) / DoubleT(2.0);
 
             // First of two function evaluations per iteration
             fxMid = f(xMid);
-            ++this->m_evaluationNumber;
+            ++s.evaluations;
 
             // Compute discriminant
-            s = sqrt(fxMid * fxMid - this->m_fxMin * this->m_fxMax);
+            discriminant = sqrtValue(fxMid * fxMid - s.fxMin * s.fxMax);
 
-            if (isClose(s, DoubleT(0.0))) {
-                f(this->m_root);
-                ++this->m_evaluationNumber;
-                return this->m_root;
+            if (Base::value(discriminant) == 0.0) {
+                return xMid;
             }
 
             // Ridder's update formula
-            DoubleT sign =
-                (value(this->m_fxMin) >= value(this->m_fxMax)) ? DoubleT(1.0) : DoubleT(-1.0);
-            nextRoot = xMid + (xMid - this->m_xMin) * sign * fxMid / s;
+            const DoubleT sign =
+                (Base::value(s.fxMin) >= Base::value(s.fxMax)) ? DoubleT(1.0) : DoubleT(-1.0);
+            nextRoot = xMid + (xMid - s.xMin) * sign * fxMid / discriminant;
 
-            if (std::fabs(value(nextRoot) - value(this->m_root)) <= xAccuracy) {
-                f(this->m_root);
-                ++this->m_evaluationNumber;
-                return this->m_root;
+            if (std::fabs(Base::value(nextRoot) - Base::value(s.root)) <= xAccuracy) {
+                return nextRoot;
             }
 
-            this->m_root = nextRoot;
+            s.root = nextRoot;
 
             // Second of two function evaluations per iteration
-            froot = f(this->m_root);
-            ++this->m_evaluationNumber;
+            froot = f(s.root);
+            ++s.evaluations;
 
-            if (isClose(froot, DoubleT(0.0))) {
-                return this->m_root;
+            if (Base::isZero(froot, s.fScale)) {
+                return s.root;
             }
 
             // Update brackets to keep root bracketed
-            if (signCopy(fxMid, froot) != value(fxMid)) {
-                this->m_xMin = xMid;
-                this->m_fxMin = fxMid;
-                this->m_xMax = this->m_root;
-                this->m_fxMax = froot;
-            } else if (signCopy(this->m_fxMin, froot) != value(this->m_fxMin)) {
-                this->m_xMax = this->m_root;
-                this->m_fxMax = froot;
-            } else if (signCopy(this->m_fxMax, froot) != value(this->m_fxMax)) {
-                this->m_xMin = this->m_root;
-                this->m_fxMin = froot;
+            if (Base::oppositeSigns(fxMid, froot)) {
+                s.xMin = xMid;
+                s.fxMin = fxMid;
+                s.xMax = s.root;
+                s.fxMax = froot;
+            } else if (Base::oppositeSigns(s.fxMin, froot)) {
+                s.xMax = s.root;
+                s.fxMax = froot;
+            } else if (Base::oppositeSigns(s.fxMax, froot)) {
+                s.xMin = s.root;
+                s.fxMin = froot;
             } else {
                 throw std::runtime_error("RidderSolver: internal error in bracketing logic");
             }
 
-            if (std::fabs(value(this->m_xMax) - value(this->m_xMin)) <= xAccuracy) {
-                f(this->m_root);
-                ++this->m_evaluationNumber;
-                return this->m_root;
+            if (std::fabs(Base::value(s.xMax) - Base::value(s.xMin)) <= xAccuracy) {
+                return s.root;
             }
         }
 
@@ -103,35 +98,14 @@ public:
     }
 
 private:
-    static double value(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val();
-        }
-    }
-
-    static bool isClose(const DoubleT& x, const DoubleT& y) {
-        constexpr double EPSILON = std::numeric_limits<double>::epsilon();
-        return std::fabs(value(x) - value(y)) < 42.0 * EPSILON;
-    }
-
-    static DoubleT sqrt(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
+    /// sqrt for double (std::) and AD scalars (ADL finds the AD overload)
+    static DoubleT sqrtValue(const DoubleT& x) {
+        if constexpr (std::is_arithmetic_v<DoubleT>) {
             return std::sqrt(x);
         } else {
-            // For AD types, use their sqrt implementation
             using std::sqrt;
             return sqrt(x);
         }
-    }
-
-    /**
-     * @brief Returns |a| if b >= 0, else -|a|
-     */
-    static double signCopy(const DoubleT& a, const DoubleT& b) {
-        double abs_a = std::fabs(value(a));
-        return value(b) >= 0.0 ? abs_a : -abs_a;
     }
 };
 } // namespace Math

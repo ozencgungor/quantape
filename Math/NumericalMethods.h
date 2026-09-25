@@ -3,53 +3,33 @@
 
 /**
  * @file NumericalMethods.h
- * @brief Main header for AD-compatible numerical methods library
+ * @brief Main convenience header for the numerical components (Stan-free)
  *
- * This library provides template-based numerical integration and
- * root finding methods that work with both regular floating point
- * (double) and automatic differentiation types (stan::math::var).
+ * Covers integration, root finding, interpolation and optimization through
+ * the component umbrellas:
  *
- * Usage:
- *   #include "Math/NumericalMethods.h"
+ *   #include "Math/NumericalMethods.h"   // double-only consumers
  *
- *   // For regular computation
- *   Math::TrapezoidIntegratorDefault<double> integrator(1e-6, 1000);
- *   double result = integrator([](double x) { return x*x; }, 0.0, 1.0);
+ *   Math::TrapezoidIntegratorDefault<double> integ(1e-6, 1000);
+ *   double I = integ([](double x) { return x * x; }, 0.0, 1.0);
  *
- *   // For automatic differentiation (requires Stan Math), also include
- *   // "Math/Integrals/IntegratorStanPrimitives.h": var and fvar<var>
- *   // integrator instantiations then use the optimized rule-extraction
- *   // path automatically (this umbrella stays Stan-free so double-only
- *   // consumers do not need the Stan Math / TBB include paths).
- *   using ADVariableT = stan::math::var;
- *   Math::TrapezoidIntegratorDefault<ADVariableT> ad_integrator(1e-6, 1000);
- *   ADVariableT result_ad = ad_integrator([](ADVariableT x) { return x*x; },
- *                                          ADVariableT(0.0), ADVariableT(1.0));
+ *   Math::BrentSolver<double> solver;
+ *   double root = solver.solve(f, 1e-12, guess, 0.0, 1.0);
+ *
+ * For automatic differentiation (stan::math::var / fvar<...>) include the
+ * single AD umbrella as well:
+ *
+ *   #include "Math/StanMath.h"
+ *   #include "Math/StanPrimitives.h"
+ *
+ * Random-number utilities (Math/Random/) are intentionally not included;
+ * include them directly, e.g. "Math/Random/PCGRandom.hpp".
  */
 
-// Integration methods
-#include "Integrals/GaussLobattoIntegrator.h"
-#include "Integrals/GaussianQuadrature.h"
-#include "Integrals/Integrator.h"
-#include "Integrals/SimpsonIntegrator.h"
-#include "Integrals/TanhSinhIntegrator.h"
-#include "Integrals/TrapezoidIntegrator.h"
-
-// Solver methods
-#include "Solvers/BisectionSolver.h"
-#include "Solvers/BrentSolver.h"
-#include "Solvers/FalsePositionSolver.h"
-#include "Solvers/NewtonSolver.h"
-#include "Solvers/RidderSolver.h"
-#include "Solvers/SecantSolver.h"
-#include "Solvers/Solver1DBase.h"
-
-// Type aliases for convenience
-namespace Math {
-// Stan Math AD type alias (when Stan Math is available)
-// Uncomment when linking with Stan Math:
-// #include <stan/math.hpp>
-// using ADVariableT = stan::math::var;
-}
+// Component umbrellas (all Stan-free)
+#include "Integrals.h"
+#include "Interpolations.h"
+#include "Optimization.h"
+#include "Solvers.h"
 
 #endif // NUMERICAL_METHODS_H

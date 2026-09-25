@@ -50,14 +50,14 @@
 // the same frozen rule.
 //
 
-#include <stan/math.hpp>
-#include <stan/math/mix.hpp>
+#include "Math/StanMath.h"
 
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <vector>
 
+#include "Autodiff/PrimalExtraction.h"
 #include "GaussLobattoIntegrator.h"
 #include "GaussianQuadrature.h"
 #include "SimpsonIntegrator.h"
@@ -208,15 +208,8 @@ inline RuleScalar operator/(double x, const RuleScalar& o) {
     return RuleScalar(x) / o;
 }
 
-/// Recursive primal extraction: double -> itself, var -> .val(),
-/// fvar<var> -> .val().val()
-inline double primalValue(double x) {
-    return x;
-}
-template <typename T>
-double primalValue(const T& x) {
-    return primalValue(x.val());
-}
+// Recursive primal extraction (primalValue) is shared with the solvers via
+// PrimalExtraction.h.
 
 /**
  * @brief One-pass primitives integration.

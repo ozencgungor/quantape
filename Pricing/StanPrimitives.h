@@ -8,7 +8,7 @@
 #ifndef STANPRIMITIVES_H
 #define STANPRIMITIVES_H
 
-#include <stan/math.hpp>
+#include "Math/StanMath.h"
 
 #include "BlackScholes.h"
 
@@ -38,8 +38,11 @@ inline stan::math::var Black76<stan::math::var>::price() const {
 // ============================================================================
 // Black76<fvar<var>>::price() -- nested analytical for stan::math::hessian
 //
-// Each 1st-order Greek becomes a callback var whose callback encodes
-// the corresponding Hessian row. Total: 4 callbacks + 7 arithmetic nodes.
+// The tangent var = sum_i Greek_i . tangent_i is built as ONE callback var:
+// its value is the directional derivative (exact, in double) and its adjoint
+// pushes sum_i tangent_i . (Hessian row i) = H . d into the leaves -- exactly
+// what hessian()'s column walk needs. 2 callbacks + 0 arithmetic nodes,
+// instead of the 4-callback / 7-node fan-out (identical adjoint semantics).
 // ============================================================================
 
 template <>
@@ -58,47 +61,25 @@ inline stan::math::fvar<stan::math::var> Black76<stan::math::fvar<stan::math::va
 
     var price_var(res.price);
 
-    var dV_dDF_var = make_callback_var(g1.dV_dDF, [DFv, Fv, Kv, volv, d2V_dDF_dF = g2.d2V_dDF_dF,
-                                                   d2V_dDF_dK = g2.d2V_dDF_dK,
-                                                   d2V_dDF_dvol = g2.d2V_dDF_dvol](auto& vi) {
-        double a = vi.adj();
-        Fv.adj() += a * d2V_dDF_dF;
-        Kv.adj() += a * d2V_dDF_dK;
-        volv.adj() += a * d2V_dDF_dvol;
+    // Tangent weights (the fvar tangent components, used linearly)
+    const double wD = DFd.val(), wF = Fd.val(), wK = Kd.val(), wV = vold.val();
+    const double tval = g1.dV_dDF * wD + g1.dV_dF * wF + g1.dV_dK * wK + g1.dV_dvol * wV;
+
+    stan::math::vari* pD = DFv.vi_;
+    stan::math::vari* pF = Fv.vi_;
+    stan::math::vari* pK = Kv.vi_;
+    stan::math::vari* pV = volv.vi_;
+
+    var tangent = make_callback_var(tval, [pD, pF, pK, pV, wD, wF, wK, wV, g2](auto& vi) {
+        const double a = vi.adj();
+        pD->adj_ += a * (wF * g2.d2V_dDF_dF + wK * g2.d2V_dDF_dK + wV * g2.d2V_dDF_dvol);
+        pF->adj_ +=
+            a * (wD * g2.d2V_dDF_dF + wF * g2.d2V_dF2 + wK * g2.d2V_dF_dK + wV * g2.d2V_dF_dvol);
+        pK->adj_ +=
+            a * (wD * g2.d2V_dDF_dK + wF * g2.d2V_dF_dK + wK * g2.d2V_dK2 + wV * g2.d2V_dK_dvol);
+        pV->adj_ += a * (wD * g2.d2V_dDF_dvol + wF * g2.d2V_dF_dvol + wK * g2.d2V_dK_dvol +
+                         wV * g2.d2V_dvol2);
     });
-
-    var dV_dF_var = make_callback_var(g1.dV_dF, [DFv, Fv, Kv, volv, d2V_dDF_dF = g2.d2V_dDF_dF,
-                                                 d2V_dF2 = g2.d2V_dF2, d2V_dF_dK = g2.d2V_dF_dK,
-                                                 d2V_dF_dvol = g2.d2V_dF_dvol](auto& vi) {
-        double a = vi.adj();
-        DFv.adj() += a * d2V_dDF_dF;
-        Fv.adj() += a * d2V_dF2;
-        Kv.adj() += a * d2V_dF_dK;
-        volv.adj() += a * d2V_dF_dvol;
-    });
-
-    var dV_dK_var = make_callback_var(g1.dV_dK, [DFv, Fv, Kv, volv, d2V_dDF_dK = g2.d2V_dDF_dK,
-                                                 d2V_dF_dK = g2.d2V_dF_dK, d2V_dK2 = g2.d2V_dK2,
-                                                 d2V_dK_dvol = g2.d2V_dK_dvol](auto& vi) {
-        double a = vi.adj();
-        DFv.adj() += a * d2V_dDF_dK;
-        Fv.adj() += a * d2V_dF_dK;
-        Kv.adj() += a * d2V_dK2;
-        volv.adj() += a * d2V_dK_dvol;
-    });
-
-    var dV_dvol_var =
-        make_callback_var(g1.dV_dvol, [DFv, Fv, Kv, volv, d2V_dDF_dvol = g2.d2V_dDF_dvol,
-                                       d2V_dF_dvol = g2.d2V_dF_dvol, d2V_dK_dvol = g2.d2V_dK_dvol,
-                                       d2V_dvol2 = g2.d2V_dvol2](auto& vi) {
-            double a = vi.adj();
-            DFv.adj() += a * d2V_dDF_dvol;
-            Fv.adj() += a * d2V_dF_dvol;
-            Kv.adj() += a * d2V_dK_dvol;
-            volv.adj() += a * d2V_dvol2;
-        });
-
-    var tangent = dV_dDF_var * DFd + dV_dF_var * Fd + dV_dK_var * Kd + dV_dvol_var * vold;
 
     return fvar<var>(price_var, tangent);
 }
@@ -129,8 +110,10 @@ inline stan::math::var GBS<stan::math::var>::price() const {
 // ============================================================================
 // GBS<fvar<var>>::price() -- nested analytical for stan::math::hessian
 //
-// Each 1st-order Greek becomes a callback var whose callback encodes
-// the corresponding Hessian row. Total: 5 callbacks + 14 arithmetic nodes.
+// Single-tangent-callback form (see Black76<fvar<var>> above): the tangent's
+// adjoint pushes H . d = sum_i tangent_i . (Hessian row i) into the leaves.
+// 2 callbacks + 0 arithmetic nodes instead of the 5-callback / 14-node
+// fan-out; identical adjoint semantics.
 // ============================================================================
 
 template <>
@@ -151,72 +134,29 @@ inline stan::math::fvar<stan::math::var> GBS<stan::math::fvar<stan::math::var>>:
 
     var price_var(res.price);
 
-    // Each callback var encodes one row of the symmetric 5x5 Hessian.
-    // Params order: S, K, rDisc, b, vol.
+    const double wS = Sd.val(), wK = Kd.val(), wR = rDiscd.val(), wB = bd.val(), wV = vold.val();
+    const double tval =
+        g1.dV_dS * wS + g1.dV_dK * wK + g1.dV_drDisc * wR + g1.dV_db * wB + g1.dV_dvol * wV;
 
-    var dV_dS_var = make_callback_var(
-        g1.dV_dS, [Sv, Kv, rDiscv, bv, volv, d2V_dS2 = g2.d2V_dS2, d2V_dS_dK = g2.d2V_dS_dK,
-                   d2V_dS_drDisc = g2.d2V_dS_drDisc, d2V_dS_db = g2.d2V_dS_db,
-                   d2V_dS_dvol = g2.d2V_dS_dvol](auto& vi) {
-            double a = vi.adj();
-            Sv.adj() += a * d2V_dS2;
-            Kv.adj() += a * d2V_dS_dK;
-            rDiscv.adj() += a * d2V_dS_drDisc;
-            bv.adj() += a * d2V_dS_db;
-            volv.adj() += a * d2V_dS_dvol;
-        });
+    stan::math::vari* pS = Sv.vi_;
+    stan::math::vari* pK = Kv.vi_;
+    stan::math::vari* pR = rDiscv.vi_;
+    stan::math::vari* pB = bv.vi_;
+    stan::math::vari* pV = volv.vi_;
 
-    var dV_dK_var = make_callback_var(
-        g1.dV_dK, [Sv, Kv, rDiscv, bv, volv, d2V_dS_dK = g2.d2V_dS_dK, d2V_dK2 = g2.d2V_dK2,
-                   d2V_drDisc_dK = g2.d2V_drDisc_dK, d2V_dK_db = g2.d2V_dK_db,
-                   d2V_dK_dvol = g2.d2V_dK_dvol](auto& vi) {
-            double a = vi.adj();
-            Sv.adj() += a * d2V_dS_dK;
-            Kv.adj() += a * d2V_dK2;
-            rDiscv.adj() += a * d2V_drDisc_dK;
-            bv.adj() += a * d2V_dK_db;
-            volv.adj() += a * d2V_dK_dvol;
-        });
-
-    var dV_drDisc_var = make_callback_var(
-        g1.dV_drDisc,
-        [Sv, Kv, rDiscv, bv, volv, d2V_dS_drDisc = g2.d2V_dS_drDisc,
-         d2V_drDisc_dK = g2.d2V_drDisc_dK, d2V_drDisc2 = g2.d2V_drDisc2,
-         d2V_drDisc_db = g2.d2V_drDisc_db, d2V_drDisc_dvol = g2.d2V_drDisc_dvol](auto& vi) {
-            double a = vi.adj();
-            Sv.adj() += a * d2V_dS_drDisc;
-            Kv.adj() += a * d2V_drDisc_dK;
-            rDiscv.adj() += a * d2V_drDisc2;
-            bv.adj() += a * d2V_drDisc_db;
-            volv.adj() += a * d2V_drDisc_dvol;
-        });
-
-    var dV_db_var =
-        make_callback_var(g1.dV_db, [Sv, Kv, rDiscv, bv, volv, d2V_dS_db = g2.d2V_dS_db,
-                                     d2V_dK_db = g2.d2V_dK_db, d2V_drDisc_db = g2.d2V_drDisc_db,
-                                     d2V_db2 = g2.d2V_db2, d2V_db_dvol = g2.d2V_db_dvol](auto& vi) {
-            double a = vi.adj();
-            Sv.adj() += a * d2V_dS_db;
-            Kv.adj() += a * d2V_dK_db;
-            rDiscv.adj() += a * d2V_drDisc_db;
-            bv.adj() += a * d2V_db2;
-            volv.adj() += a * d2V_db_dvol;
-        });
-
-    var dV_dvol_var = make_callback_var(
-        g1.dV_dvol, [Sv, Kv, rDiscv, bv, volv, d2V_dS_dvol = g2.d2V_dS_dvol,
-                     d2V_dK_dvol = g2.d2V_dK_dvol, d2V_drDisc_dvol = g2.d2V_drDisc_dvol,
-                     d2V_db_dvol = g2.d2V_db_dvol, d2V_dvol2 = g2.d2V_dvol2](auto& vi) {
-            double a = vi.adj();
-            Sv.adj() += a * d2V_dS_dvol;
-            Kv.adj() += a * d2V_dK_dvol;
-            rDiscv.adj() += a * d2V_drDisc_dvol;
-            bv.adj() += a * d2V_db_dvol;
-            volv.adj() += a * d2V_dvol2;
-        });
-
-    var tangent = dV_dS_var * Sd + dV_dK_var * Kd + dV_drDisc_var * rDiscd + dV_db_var * bd +
-                  dV_dvol_var * vold;
+    var tangent = make_callback_var(tval, [pS, pK, pR, pB, pV, wS, wK, wR, wB, wV, g2](auto& vi) {
+        const double a = vi.adj();
+        pS->adj_ += a * (wS * g2.d2V_dS2 + wK * g2.d2V_dS_dK + wR * g2.d2V_dS_drDisc +
+                         wB * g2.d2V_dS_db + wV * g2.d2V_dS_dvol);
+        pK->adj_ += a * (wS * g2.d2V_dS_dK + wK * g2.d2V_dK2 + wR * g2.d2V_drDisc_dK +
+                         wB * g2.d2V_dK_db + wV * g2.d2V_dK_dvol);
+        pR->adj_ += a * (wS * g2.d2V_dS_drDisc + wK * g2.d2V_drDisc_dK + wR * g2.d2V_drDisc2 +
+                         wB * g2.d2V_drDisc_db + wV * g2.d2V_drDisc_dvol);
+        pB->adj_ += a * (wS * g2.d2V_dS_db + wK * g2.d2V_dK_db + wR * g2.d2V_drDisc_db +
+                         wB * g2.d2V_db2 + wV * g2.d2V_db_dvol);
+        pV->adj_ += a * (wS * g2.d2V_dS_dvol + wK * g2.d2V_dK_dvol + wR * g2.d2V_drDisc_dvol +
+                         wB * g2.d2V_db_dvol + wV * g2.d2V_dvol2);
+    });
 
     return fvar<var>(price_var, tangent);
 }
