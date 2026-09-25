@@ -1,7 +1,7 @@
-#include "Math/Interpolations/BicubicInterpolation.h"
-#include "Math/Interpolations/BilinearInterpolation.h"
-#include "Math/Interpolations/CubicInterpolation.h"
-#include "Math/Interpolations/LogLinearInterpolation.h"
+#include "quantape/math/Interpolations/BicubicInterpolation.h"
+#include "quantape/math/Interpolations/BilinearInterpolation.h"
+#include "quantape/math/Interpolations/CubicInterpolation.h"
+#include "quantape/math/Interpolations/LogLinearInterpolation.h"
 
 #include <cassert>
 #include <cmath>
@@ -14,7 +14,7 @@ void testLogLinearInterpolation() {
     std::vector<double> x = {0.0, 1.0, 2.0, 3.0, 4.0};
     std::vector<double> y = {1.0, 2.718, 7.389, 20.086, 54.598}; // approx exp(x)
 
-    Math::LogLinearInterpolation<double> interp(x, y);
+    quantape::math::LogLinearInterpolation<double> interp(x, y);
 
     double val1 = interp(1.5);
     double expected1 = exp(1.5);
@@ -31,8 +31,8 @@ void testCubicSplineInterpolation() {
     std::vector<double> x_simple = {0.0, 1.0, 2.0};
     std::vector<double> y_simple = {0.0, 1.0, 0.0};
 
-    Math::CubicInterpolation<double> interp_simple(x_simple, y_simple,
-                                                   Math::CubicDerivativeApprox::Spline);
+    quantape::math::CubicInterpolation<double> interp_simple(
+        x_simple, y_simple, quantape::math::CubicDerivativeApprox::Spline);
     // For natural cubic spline through (0,0), (1,1), (2,0):
     // First derivatives: d0=1.5, d1=0, d2=-1.5
     // Coefficients: a[0]=1.5, b[0]=0, c[0]=-0.5
@@ -48,8 +48,8 @@ void testCubicSplineInterpolation() {
     std::vector<double> x_poly = {0.0, 1.0, 2.0, 3.0};
     std::vector<double> y_poly = {0.0, 1.0, 4.0, 9.0}; // x^2
 
-    Math::CubicInterpolation<double> interp_poly(x_poly, y_poly,
-                                                 Math::CubicDerivativeApprox::Spline);
+    quantape::math::CubicInterpolation<double> interp_poly(
+        x_poly, y_poly, quantape::math::CubicDerivativeApprox::Spline);
     double val_poly = interp_poly(1.5);
     double expected_poly = 2.25; // 1.5^2
     std::cout << "Value at 1.5 (Polynomial x^2): " << val_poly << " (expected: " << expected_poly
@@ -62,8 +62,8 @@ void testCubicSplineInterpolation() {
     std::vector<double> x_sin = {0.0, 1.0, 2.0, 3.0, 4.0};
     std::vector<double> y_sin = {0.0, 0.84147098, 0.90929743, 0.14112001, -0.7568025}; // sin(x)
 
-    Math::CubicInterpolation<double> interp_natural_sin(x_sin, y_sin,
-                                                        Math::CubicDerivativeApprox::Spline);
+    quantape::math::CubicInterpolation<double> interp_natural_sin(
+        x_sin, y_sin, quantape::math::CubicDerivativeApprox::Spline);
     double val_natural_sin = interp_natural_sin(1.5);
     double expected_sin = sin(1.5);
     std::cout << "Value at 1.5 (Natural, sin(x)): " << val_natural_sin
@@ -79,7 +79,7 @@ void testBilinearInterpolation() {
     std::vector<double> x = {0, 1};
     std::vector<double> y = {0, 1};
     std::vector<std::vector<double>> z = {{0, 1}, {1, 2}};
-    Math::BilinearInterpolation<double> interp(x, y, z);
+    quantape::math::BilinearInterpolation<double> interp(x, y, z);
     double val = interp(0.5, 0.5);
     std::cout << "Value at (0.5, 0.5): " << val << " (expected: 1.0)" << std::endl;
     assert(std::abs(val - 1.0) < 1e-9);
@@ -98,7 +98,7 @@ void testBicubicInterpolation() {
         }
     }
 
-    Math::BicubicInterpolation<double> interp(x, y, z);
+    quantape::math::BicubicInterpolation<double> interp(x, y, z);
     double val = interp(0.5, 0.5);
     double expected = f(0.5, 0.5);
     std::cout << "Value at (0.5, 0.5): " << val << " (expected: " << expected << ")" << std::endl;

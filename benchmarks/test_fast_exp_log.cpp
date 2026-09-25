@@ -13,7 +13,7 @@
  *   3. std::exp/log: full precision baseline
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>

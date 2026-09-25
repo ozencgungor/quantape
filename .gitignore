@@ -48,3 +48,7 @@ internal_docs/
 
 # Internal experiments (bridges, disconnected prototypes)
 internal_tests/
+
+# Sublime Text project/workspace files
+*.sublime-project
+*.sublime-workspace

@@ -9,8 +9,8 @@
 //   5. dispatch: usesWeightMatrix() true iff Spline/Parabolic
 //
 // Run: ./test_cubic_weights
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -26,7 +26,7 @@
         }                                                                                          \
     } while (0)
 
-using Math::CubicInterpolation;
+using quantape::math::CubicInterpolation;
 
 namespace {
 
@@ -132,15 +132,15 @@ double maxHessian(double x, CubicInterpolation<double>::DerivativeApprox da, boo
 
 const char* methodName(CubicInterpolation<double>::DerivativeApprox da) {
     switch (da) {
-        case Math::CubicDerivativeApprox::Spline:
+        case quantape::math::CubicDerivativeApprox::Spline:
             return "Spline";
-        case Math::CubicDerivativeApprox::Parabolic:
+        case quantape::math::CubicDerivativeApprox::Parabolic:
             return "Parabolic";
-        case Math::CubicDerivativeApprox::Akima:
+        case quantape::math::CubicDerivativeApprox::Akima:
             return "Akima";
-        case Math::CubicDerivativeApprox::Kruger:
+        case quantape::math::CubicDerivativeApprox::Kruger:
             return "Kruger";
-        case Math::CubicDerivativeApprox::Harmonic:
+        case quantape::math::CubicDerivativeApprox::Harmonic:
             return "Harmonic";
     }
     return "?";
@@ -151,9 +151,11 @@ const char* methodName(CubicInterpolation<double>::DerivativeApprox da) {
 int main() {
     std::cout << std::setprecision(6);
     const std::vector<CubicInterpolation<double>::DerivativeApprox> methods = {
-        Math::CubicDerivativeApprox::Spline,   Math::CubicDerivativeApprox::Parabolic,
-        Math::CubicDerivativeApprox::Akima,    Math::CubicDerivativeApprox::Kruger,
-        Math::CubicDerivativeApprox::Harmonic,
+        quantape::math::CubicDerivativeApprox::Spline,
+        quantape::math::CubicDerivativeApprox::Parabolic,
+        quantape::math::CubicDerivativeApprox::Akima,
+        quantape::math::CubicDerivativeApprox::Kruger,
+        quantape::math::CubicDerivativeApprox::Harmonic,
     };
 
     for (auto da : methods) {
@@ -193,8 +195,8 @@ int main() {
             //    path now exposes the true active-branch curvature, verified
             //    against second-order finite differences (g_eval avoids kinks)
             if (!smooth) {
-                const bool linearInY = (da == Math::CubicDerivativeApprox::Spline ||
-                                        da == Math::CubicDerivativeApprox::Parabolic);
+                const bool linearInY = (da == quantape::math::CubicDerivativeApprox::Spline ||
+                                        da == quantape::math::CubicDerivativeApprox::Parabolic);
                 for (double x : g_eval) {
                     const auto H = adHessian(x, da, smooth);
                     if (linearInY) {
@@ -243,8 +245,8 @@ int main() {
         {
             std::vector<stan::math::var> yv(g_y.begin(), g_y.end());
             const CubicInterpolation<stan::math::var> interp(g_x, yv, da);
-            const bool expectWeights = (da == Math::CubicDerivativeApprox::Spline ||
-                                        da == Math::CubicDerivativeApprox::Parabolic);
+            const bool expectWeights = (da == quantape::math::CubicDerivativeApprox::Spline ||
+                                        da == quantape::math::CubicDerivativeApprox::Parabolic);
             CHECK(interp.usesWeightMatrix() == expectWeights);
         }
 

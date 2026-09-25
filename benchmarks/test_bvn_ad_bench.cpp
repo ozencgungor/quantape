@@ -12,7 +12,7 @@
  * This is a textbook case for analytical adjoints.
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>

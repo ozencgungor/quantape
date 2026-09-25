@@ -19,7 +19,7 @@
  *   4. Full analytical:   all second-order Greeks in double, zero AD
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <Eigen/Dense>
 

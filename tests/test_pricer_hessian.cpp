@@ -24,7 +24,7 @@
  * The TradePricer doesn't know or care which level each pricer uses.
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <Eigen/Dense>
 

@@ -1,5 +1,5 @@
 // test_integrator_primitives.cpp — validates the automatic AD dispatch of the
-// Math::Integrals classes (Math/Integrals/IntegratorStanPrimitives.h)
+// quantape::math::Integrals classes (Math/Integrals/IntegratorStanPrimitives.h)
 //
 // Tested: TrapezoidIntegratorDefault, TrapezoidIntegratorMidPoint,
 // SimpsonIntegrator, GaussLobattoIntegrator, GaussLegendreIntegrator(20),
@@ -20,8 +20,8 @@
 //       H = 2/(1+theta)^3 (non-polynomial; all methods accurate to << 1e-6)
 //
 // Run: ./test_integrator_primitives
-#include "Math/Integrals/IntegratorStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstddef>
@@ -85,7 +85,7 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
     // ── double: value + converged-rule evaluation count ──
     size_t n_evals = 0;
     {
-        auto integ = factory(Math::ScalarTag<double>{});
+        auto integ = factory(quantape::math::ScalarTag<double>{});
         const double I = integ([&](double x) { return f(x, theta_d); }, A, B);
         CHECK(close(I, value_ref, tol));
         n_evals = integ.numberOfEvaluations();
@@ -100,7 +100,7 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
         for (double t : theta_d)
             th.push_back(var(t));
 
-        auto integ = factory(Math::ScalarTag<var>{});
+        auto integ = factory(quantape::math::ScalarTag<var>{});
         var I = integ([&](auto x) { return f(x, th); }, var(A), var(B));
         I.grad();
 
@@ -121,7 +121,7 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
         const auto runner = [&](const auto& th_eig) {
             using S = typename std::decay_t<decltype(th_eig)>::Scalar;
             std::vector<S> th(th_eig.data(), th_eig.data() + th_eig.size());
-            auto integ = factory(Math::ScalarTag<S>{});
+            auto integ = factory(quantape::math::ScalarTag<S>{});
             return integ([&](auto x) { return f(x, th); }, S(A), S(B));
         };
 
@@ -153,7 +153,7 @@ void runIntegrator(const char* name, const Factory& factory, double tol_quad, do
     {
         stan::math::recover_memory();
         var theta = 2.0;
-        auto integ = factory(Math::ScalarTag<var>{});
+        auto integ = factory(quantape::math::ScalarTag<var>{});
         var I = integ([](auto x) { return x * x; }, var(0.0), theta);
         I.grad();
         CHECK(close(I.val(), 8.0 / 3.0, tol_quad));
@@ -170,7 +170,7 @@ int main() {
 
     auto trapezoid = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::TrapezoidIntegratorDefault<S>(1e-9, MAX_EVALS);
+        return quantape::math::TrapezoidIntegratorDefault<S>(1e-9, MAX_EVALS);
     };
     // MidPointPolicy's nodes do not nest across the 3x refinement, so its
     // recurrence converges only linearly (~1/3 error decay per level). The
@@ -178,23 +178,23 @@ int main() {
     // tolerance the policy reaches in ~2e4 evaluations instead.
     auto trapezoid_mid = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::TrapezoidIntegratorMidPoint<S>(1e-3, MAX_EVALS);
+        return quantape::math::TrapezoidIntegratorMidPoint<S>(1e-3, MAX_EVALS);
     };
     auto simpson = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::SimpsonIntegrator<S>(1e-10, MAX_EVALS);
+        return quantape::math::SimpsonIntegrator<S>(1e-10, MAX_EVALS);
     };
     auto lobatto = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::GaussLobattoIntegrator<S>(1e-9, MAX_EVALS);
+        return quantape::math::GaussLobattoIntegrator<S>(1e-9, MAX_EVALS);
     };
     auto legendre = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::GaussLegendreIntegrator<S>(20);
+        return quantape::math::GaussLegendreIntegrator<S>(20);
     };
     auto tanh_sinh = [](auto tag) {
         using S = typename decltype(tag)::type;
-        return Math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
+        return quantape::math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
     };
 
     std::cout << "── analytic value/gradient/Hessian, all scalar types ──\n";

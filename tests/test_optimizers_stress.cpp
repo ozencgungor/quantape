@@ -3,11 +3,11 @@
 // converge?) and optimization opportunities (where does time go at scale).
 //
 // Run: ./build/test_optimizers_stress
-#include "Math/Optimization/AugLag.h"
-#include "Math/Optimization/LBFGS.h"
-#include "Math/Optimization/OptimizerStanPrimitives.h"
-#include "Math/Optimization/SLSQP.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Optimization/AugLag.h"
+#include "quantape/math/Optimization/LBFGS.h"
+#include "quantape/math/Optimization/OptimizerStanPrimitives.h"
+#include "quantape/math/Optimization/SLSQP.h"
+#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>
@@ -160,35 +160,35 @@ struct CurveArb {
 
 void stressLbfgs() {
     std::printf("=== LBFGS stress ===\n");
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.maxeval = 100000;
 
     // 2-D Rosenbrock
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{-1.2, 1.0};
-        Math::OptimizerState state;
+        quantape::math::OptimizerState state;
         const auto r = solver.minimize(Rosenbrock{}, x, state);
-        check("rosenbrock2 converged", r == Math::OptimizeResult::GradientTolReached);
+        check("rosenbrock2 converged", r == quantape::math::OptimizeResult::GradientTolReached);
         checkClose("rosenbrock2 x0", x[0], 1.0, 1e-6);
         checkClose("rosenbrock2 x1", x[1], 1.0, 1e-6);
     }
     // 10-D Rosenbrock
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x(10, -1.2);
         const auto r = solver.minimize(Rosenbrock{}, x);
-        check("rosenbrock10 converged", r == Math::OptimizeResult::GradientTolReached);
+        check("rosenbrock10 converged", r == quantape::math::OptimizeResult::GradientTolReached);
         checkClose("rosenbrock10 x0", x[0], 1.0, 1e-4);
     }
     // 50-D Rosenbrock: hard; check progress and time
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 20);
+        quantape::math::LBFGS<var> solver(criteria, 20);
         std::vector<double> x(50, -1.2);
-        Math::OptimizerState state;
+        quantape::math::OptimizerState state;
         const double us = timeit([&] {
             solver.minimize(Rosenbrock{}, x, state);
             return static_cast<double>(state.evals);
@@ -201,29 +201,29 @@ void stressLbfgs() {
     // Beale
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{1.0, 1.0};
         const auto r = solver.minimize(Beale{}, x);
-        check("beale converged", r == Math::OptimizeResult::GradientTolReached);
+        check("beale converged", r == quantape::math::OptimizeResult::GradientTolReached);
         checkClose("beale x0", x[0], 3.0, 1e-5);
         checkClose("beale x1", x[1], 0.5, 1e-5);
     }
     // Himmelblau: different starts reach different minima
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{1.0, 1.0};
-        check("himmelblau(1,1) converged",
-              solver.minimize(Himmelblau{}, x) == Math::OptimizeResult::GradientTolReached);
+        check("himmelblau(1,1) converged", solver.minimize(Himmelblau{}, x) ==
+                                               quantape::math::OptimizeResult::GradientTolReached);
         checkClose("himmelblau(1,1) x0", x[0], 3.0, 1e-5);
         checkClose("himmelblau(1,1) x1", x[1], 2.0, 1e-5);
     }
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{-2.0, 2.0};
-        check("himmelblau(-2,2) converged",
-              solver.minimize(Himmelblau{}, x) == Math::OptimizeResult::GradientTolReached);
+        check("himmelblau(-2,2) converged", solver.minimize(Himmelblau{}, x) ==
+                                                quantape::math::OptimizeResult::GradientTolReached);
         checkClose("himmelblau(-2,2) x0", x[0], -2.80511808695, 1e-4);
         checkClose("himmelblau(-2,2) x1", x[1], 3.13131251825, 1e-4);
     }
@@ -235,9 +235,9 @@ void stressLbfgs() {
         WeightedQuadratic q;
         q.w = {1.0, 1e4, 1e8, 1e12, 1e16};
         q.target = {1.0, 1.0, 1.0, 1.0, 1.0};
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x(5, 0.0);
-        Math::OptimizerState state;
+        quantape::math::OptimizerState state;
         const double us = timeit([&] {
             solver.minimize(q, x, state);
             return static_cast<double>(state.evals);
@@ -254,38 +254,40 @@ void stressLbfgs() {
         WeightedQuadratic q;
         q.w = {1.0, 1e2, 1e4, 1e6, 1e8};
         q.target = {1.0, 1.0, 1.0, 1.0, 1.0};
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x(5, 0.0);
         const auto r = solver.minimize(q, x);
-        check("illcond1e8 converged", r == Math::OptimizeResult::GradientTolReached);
+        check("illcond1e8 converged", r == quantape::math::OptimizeResult::GradientTolReached);
         checkClose("illcond1e8 x0", x[0], 1.0, 1e-4);
         checkClose("illcond1e8 x4", x[4], 1.0, 1e-6);
     }
     // Edge: start at the optimum (zero gradient)
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{1.0, 1.0};
-        Math::OptimizerState state;
+        quantape::math::OptimizerState state;
         const auto r = solver.minimize(Rosenbrock{}, x, state);
-        check("start at optimum -> gradient stop", r == Math::OptimizeResult::GradientTolReached);
+        check("start at optimum -> gradient stop",
+              r == quantape::math::OptimizeResult::GradientTolReached);
         check("start at optimum uses 1 eval", state.evals == 1);
     }
     // Edge: constant objective, any start
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 10);
+        quantape::math::LBFGS<var> solver(criteria, 10);
         std::vector<double> x{3.0, -4.0};
         const auto r = solver.minimize(ConstantObjective{}, x);
-        check("constant objective -> gradient stop", r == Math::OptimizeResult::GradientTolReached);
+        check("constant objective -> gradient stop",
+              r == quantape::math::OptimizeResult::GradientTolReached);
     }
     // Edge: n = 1
     {
         stan::math::recover_memory();
-        Math::LBFGS<var> solver(criteria, 1);
+        quantape::math::LBFGS<var> solver(criteria, 1);
         std::vector<double> x{-5.0};
         const auto r = solver.minimize(Shift{{2.0}}, x);
-        check("n=1 converged", r == Math::OptimizeResult::GradientTolReached);
+        check("n=1 converged", r == quantape::math::OptimizeResult::GradientTolReached);
         checkClose("n=1 x", x[0], 2.0, 1e-10);
     }
 }
@@ -294,55 +296,56 @@ void stressLbfgs() {
 
 void stressConstrained() {
     std::printf("=== SLSQP / AugLag stress ===\n");
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.maxeval = 200000;
 
     // Equality + inequality both active: min ||x-(2,2)||^2 s.t. x0+x1=2, x0<=x1
     // -> (1,1); multipliers: lambda_ineq = 2, nu_eq = 0
     {
         stan::math::recover_memory();
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         std::vector<double> x{0.0, 0.0};
-        const auto none = Math::Bounds::unbounded(2);
+        const auto none = quantape::math::Bounds::unbounded(2);
         const auto r = solver.minimize(Shift{{2.0, 2.0}}, SumLeq{}, SumEqual{}, none, x);
-        check("mixed constraints converged", r == Math::OptimizeResult::Success);
+        check("mixed constraints converged", r == quantape::math::OptimizeResult::Success);
         checkClose("mixed x0", x[0], 1.0, 1e-6);
         checkClose("mixed x1", x[1], 1.0, 1e-6);
     }
     // Redundant (linearly dependent) constraints
     {
         stan::math::recover_memory();
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         std::vector<double> x{0.0, 0.0};
-        const auto none = Math::Bounds::unbounded(2);
+        const auto none = quantape::math::Bounds::unbounded(2);
         const auto r = solver.minimize(Shift{{2.0, 2.0}}, SumLeqRedundant{}, none, x);
-        check("redundant constraints converged", r == Math::OptimizeResult::Success);
+        check("redundant constraints converged", r == quantape::math::OptimizeResult::Success);
         checkClose("redundant x0", x[0], 1.0, 1e-6);
         checkClose("redundant x1", x[1], 1.0, 1e-6);
     }
     // Degenerate: optimum exactly at a bound with zero gradient component
     {
         stan::math::recover_memory();
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         std::vector<double> x{0.5};
-        const auto bounds = Math::Bounds::fromVectors({0.0}, {Math::Bounds::kNoUpper});
-        const auto r = solver.minimize(Shift{{-1.0}}, Math::NoConstraint{}, bounds, x);
-        check("bound-active converged", r == Math::OptimizeResult::Success);
+        const auto bounds =
+            quantape::math::Bounds::fromVectors({0.0}, {quantape::math::Bounds::kNoUpper});
+        const auto r = solver.minimize(Shift{{-1.0}}, quantape::math::NoConstraint{}, bounds, x);
+        check("bound-active converged", r == quantape::math::OptimizeResult::Success);
         checkClose("bound-active x", x[0], 0.0, 1e-8);
     }
     // Many constraints: 100-D lower bounds x_j >= 1, target 0 -> all active
     {
         stan::math::recover_memory();
         const std::size_t n = 100;
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         std::vector<double> x(n, 2.0); // feasible start (NLopt contract)
         std::vector<double> lower(n, 1.0);
-        std::vector<double> upper(n, Math::Bounds::kNoUpper);
-        const auto bounds = Math::Bounds::fromVectors(lower, upper);
-        Math::OptimizerState state;
+        std::vector<double> upper(n, quantape::math::Bounds::kNoUpper);
+        const auto bounds = quantape::math::Bounds::fromVectors(lower, upper);
+        quantape::math::OptimizerState state;
         const double us = timeit([&] {
-            solver.minimize(Shift{std::vector<double>(n, 0.0)}, Math::NoConstraint{}, bounds, x,
-                            state);
+            solver.minimize(Shift{std::vector<double>(n, 0.0)}, quantape::math::NoConstraint{},
+                            bounds, x, state);
             return static_cast<double>(state.evals);
         });
         bool all_one = true;
@@ -359,10 +362,10 @@ void stressConstrained() {
         const std::size_t n = 20;
         std::vector<double> target(n, 1.0);
         target[n / 2] = 2.0; // creates violations
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         std::vector<double> p = target;
-        const auto none = Math::Bounds::unbounded(n);
-        Math::OptimizerState state;
+        const auto none = quantape::math::Bounds::unbounded(n);
+        quantape::math::OptimizerState state;
         const double us = timeit([&] {
             solver.minimize(Shift{target}, CurveArb{}, none, p, state);
             return static_cast<double>(state.evals);
@@ -381,11 +384,11 @@ void stressConstrained() {
     // AUGLAG on the mixed-constraint problem
     {
         stan::math::recover_memory();
-        Math::AugLag<var> solver(criteria);
+        quantape::math::AugLag<var> solver(criteria);
         std::vector<double> x{0.0, 0.0};
-        const auto none = Math::Bounds::unbounded(2);
+        const auto none = quantape::math::Bounds::unbounded(2);
         const auto r = solver.minimize(Shift{{2.0, 2.0}}, SumLeq{}, SumEqual{}, none, x);
-        check("auglag mixed converged", r == Math::OptimizeResult::Success);
+        check("auglag mixed converged", r == quantape::math::OptimizeResult::Success);
         checkClose("auglag mixed x0", x[0], 1.0, 1e-4);
         checkClose("auglag mixed x1", x[1], 1.0, 1e-4);
     }
@@ -395,10 +398,10 @@ void stressConstrained() {
         const std::size_t n = 20;
         std::vector<double> target(n, 1.0);
         target[n / 2] = 2.0;
-        Math::AugLag<var> solver(criteria);
+        quantape::math::AugLag<var> solver(criteria);
         std::vector<double> p = target;
-        const auto none = Math::Bounds::unbounded(n);
-        Math::OptimizerState state;
+        const auto none = quantape::math::Bounds::unbounded(n);
+        quantape::math::OptimizerState state;
         const double us = timeit([&] {
             solver.minimize(Shift{target}, CurveArb{}, none, p, state);
             return static_cast<double>(state.evals);

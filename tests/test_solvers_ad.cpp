@@ -15,11 +15,11 @@
 //   auto-bracketing: var gradient through the guess+step overload
 //
 // Run: ./test_solvers_ad
-#include "Math/Interpolations.h"
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/NumericalMethods.h"
-#include "Math/Solvers/SolverStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Interpolations.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/NumericalMethods.h"
+#include "quantape/math/Solvers/SolverStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>
@@ -93,7 +93,7 @@ void checkAutoBracket() {
     stan::math::recover_memory();
 
     var theta = 1.0;
-    Math::BrentSolver<var> solver;
+    quantape::math::BrentSolver<var> solver;
     solver.setMaxEvaluations(300);
     auto f = [&theta](const auto& x) { return x * x * x - x - 2.0 * theta; };
 
@@ -109,7 +109,7 @@ void checkVarOnlyObjective() {
     stan::math::recover_memory();
 
     var theta = 4.0;
-    Math::BrentSolver<var> solver;
+    quantape::math::BrentSolver<var> solver;
     solver.setMaxEvaluations(300);
     // Non-generic objective: only callable with var (no double overload)
     auto f = [&theta](const var& x) { return x * x - theta; };
@@ -125,7 +125,7 @@ void checkNewtonWithDerivative() {
     var theta = 4.0;
     auto f = [&theta](const var& x) { return x * x - theta; };
     auto df = [](const var& x) { return var(2.0) * x; };
-    Math::NewtonSolverWithDerivative<var, decltype(df)> solver(df);
+    quantape::math::NewtonSolverWithDerivative<var, decltype(df)> solver(df);
     solver.setMaxEvaluations(300);
 
     var root = solver.solve(f, 1e-12, var(1.5), var(0.0), var(3.0));
@@ -138,7 +138,7 @@ void checkComposite() {
     {
         stan::math::recover_memory();
         var theta = 4.0;
-        Math::BrentSolver<var> solver;
+        quantape::math::BrentSolver<var> solver;
         solver.setMaxEvaluations(300);
         auto f = [&theta](const auto& x) { return x * x - theta; };
         var root = solver.solve(f, 1e-12, var(1.5), var(0.0), var(3.0));
@@ -151,7 +151,7 @@ void checkComposite() {
     {
         stan::math::recover_memory();
         var theta = 4.0;
-        Math::BrentSolver<var> solver;
+        quantape::math::BrentSolver<var> solver;
         solver.setMaxEvaluations(300);
         auto f = [&theta](const auto& x) { return x * x - theta; };
         var root = solver.solve(f, 1e-12, var(1.5), var(0.0), var(3.0));
@@ -169,9 +169,9 @@ void checkComposite() {
         var theta = 2.25;
         std::vector<var> xs{0.0, 1.0, 2.0, 3.0};
         std::vector<var> ys{0.0, 1.0, 4.0, 9.0};
-        Math::LinearInterpolation<var> interp(xs, ys);
+        quantape::math::LinearInterpolation<var> interp(xs, ys);
 
-        Math::BrentSolver<var> solver;
+        quantape::math::BrentSolver<var> solver;
         solver.setMaxEvaluations(300);
         auto f = [&theta](const auto& x) { return x * x - theta; };
 
@@ -189,8 +189,8 @@ void checkComposite() {
         var theta_fixed = 2.25;
         std::vector<var> xs_fixed{0.0, 1.0, 2.0, 3.0};
         std::vector<var> ys_fixed{0.0, 1.0, 4.0, 9.0};
-        Math::LinearInterpolation<var> interp_fixed(xs_fixed, ys_fixed);
-        Math::BrentSolver<var> solver_fixed;
+        quantape::math::LinearInterpolation<var> interp_fixed(xs_fixed, ys_fixed);
+        quantape::math::BrentSolver<var> solver_fixed;
         solver_fixed.setMaxEvaluations(300);
         auto f_fixed = [&theta_fixed](const auto& x) { return x * x - theta_fixed; };
         var root_fixed = solver_fixed.solve(f_fixed, 1e-12, var(1.5), var(0.0), var(3.0));
@@ -204,23 +204,23 @@ void checkComposite() {
 
 int main() {
     std::printf("=== var: implicit-function-theorem gradients ===\n");
-    checkVarGradient<Math::BisectionSolver<var>>("bisection", 1e-12);
-    checkVarGradient<Math::BrentSolver<var>>("brent", 1e-12);
-    checkVarGradient<Math::SecantSolver<var>>("secant", 1e-12);
-    checkVarGradient<Math::FalsePositionSolver<var>>("falsepos", 1e-12);
-    checkVarGradient<Math::RidderSolver<var>>("ridder", 1e-12);
-    checkVarGradient<Math::NewtonSolver<var>>("newton-fd", 1e-12);
+    checkVarGradient<quantape::math::BisectionSolver<var>>("bisection", 1e-12);
+    checkVarGradient<quantape::math::BrentSolver<var>>("brent", 1e-12);
+    checkVarGradient<quantape::math::SecantSolver<var>>("secant", 1e-12);
+    checkVarGradient<quantape::math::FalsePositionSolver<var>>("falsepos", 1e-12);
+    checkVarGradient<quantape::math::RidderSolver<var>>("ridder", 1e-12);
+    checkVarGradient<quantape::math::NewtonSolver<var>>("newton-fd", 1e-12);
     checkVarOnlyObjective();
     checkAutoBracket();
     checkNewtonWithDerivative();
     checkComposite();
 
     std::printf("=== fvar<...>: pathwise value/gradient/Hessian ===\n");
-    checkHessian<Math::BrentSolver>("brent", 1e-8);
-    checkHessian<Math::SecantSolver>("secant", 1e-8);
-    checkHessian<Math::FalsePositionSolver>("falsepos", 1e-8);
-    checkHessian<Math::RidderSolver>("ridder", 1e-8);
-    checkHessian<Math::NewtonSolver>("newton-fd", 1e-8);
+    checkHessian<quantape::math::BrentSolver>("brent", 1e-8);
+    checkHessian<quantape::math::SecantSolver>("secant", 1e-8);
+    checkHessian<quantape::math::FalsePositionSolver>("falsepos", 1e-8);
+    checkHessian<quantape::math::RidderSolver>("ridder", 1e-8);
+    checkHessian<quantape::math::NewtonSolver>("newton-fd", 1e-8);
 
     stan::math::recover_memory();
 

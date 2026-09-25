@@ -26,7 +26,7 @@
  * — giving the Hessian automatically, regardless of how J was computed.
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <Eigen/Dense>
 

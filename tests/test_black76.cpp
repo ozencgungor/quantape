@@ -5,19 +5,18 @@
 
 // #include <Eigen/Dense>
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
+#include "quantape/pricing/StanPrimitives.h"
 
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 
-#include "Pricing/StanPrimitives.h"
-
-using Pricing::Black76;
-using Pricing::black76Analytical;
-using Pricing::Black76Result;
-using Pricing::GBS;
-using Pricing::OptionType;
+using quantape::pricing::Black76;
+using quantape::pricing::black76Analytical;
+using quantape::pricing::Black76Result;
+using quantape::pricing::GBS;
+using quantape::pricing::OptionType;
 using stan::math::fvar;
 using stan::math::var;
 

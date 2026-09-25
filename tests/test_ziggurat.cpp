@@ -3,7 +3,7 @@
  * @brief Tests for the Ziggurat normal RNG: table verification, statistical tests, benchmarks
  */
 
-#include "Math/Random/ZigguratNormal.h"
+#include "quantape/math/Random/ZigguratNormal.h"
 
 #include <algorithm>
 #include <chrono>
@@ -42,8 +42,8 @@ void testTableGeneration() {
     std::cout << " ZIGGURAT TABLE VERIFICATION\n";
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
-    auto tab = mc::generateZigguratTables();
-    auto v = mc::verifyZigguratTables(tab);
+    auto tab = quantape::math::mc::generateZigguratTables();
+    auto v = quantape::math::mc::verifyZigguratTables(tab);
 
     std::cout << std::setprecision(16);
     std::cout << "  r (tail cutoff)      = " << tab.r << "\n";
@@ -99,7 +99,7 @@ void testStatistics() {
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
     constexpr int N = 10'000'000;
-    mc::ZigguratNormal zig(12345);
+    quantape::math::mc::ZigguratNormal zig(12345);
 
     // Accumulate moments using compensated summation
     double sum1 = 0, sum2 = 0, sum3 = 0, sum4 = 0;
@@ -173,7 +173,7 @@ void testTails() {
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
     constexpr long N = 50'000'000;
-    mc::ZigguratNormal zig(67890);
+    quantape::math::mc::ZigguratNormal zig(67890);
 
     // Count samples beyond various thresholds
     double thresholds[] = {1.0, 2.0, 3.0, 4.0, 5.0};
@@ -210,7 +210,7 @@ void benchmark() {
     std::cout << " BENCHMARK  (1,000,000 samples each)\n";
     std::cout << "═══════════════════════════════════════════════════════════\n\n";
 
-    mc::ZigguratNormal zig(42);
+    quantape::math::mc::ZigguratNormal zig(42);
     std::mt19937_64 mt(42);
     std::normal_distribution<double> std_normal(0.0, 1.0);
 

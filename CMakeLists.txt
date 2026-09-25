@@ -135,11 +135,7 @@ endif()
 # Include directories
 # ============================================================================
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Models)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Math)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Markets)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Third-party includes
 include_directories(${Boost_INCLUDE_DIRS})
@@ -148,36 +144,29 @@ include_directories(${Boost_INCLUDE_DIRS})
 # Project source files
 # ============================================================================
 
-# Add subdirectories to gather sources and headers
-add_subdirectory(Models)
-add_subdirectory(ScenarioGeneration)
-add_subdirectory(Math)
-add_subdirectory(Markets)
-
-# Combine all sources and headers
-set(LIB_SOURCES ${MODEL_SOURCES_ABS} ${SCENARIO_SOURCES_ABS})
-set(LIB_HEADERS ${MODEL_HEADERS_ABS} ${SCENARIO_HEADERS_ABS} ${MATH_HEADERS_ABS} ${MARKETS_HEADERS_ABS}
-        Pricing/BlackScholes.h)
+# Library sources and headers (header-heavy; implementations in src/)
+file(GLOB_RECURSE QUANTAPE_HEADERS CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/quantape/*.h)
+file(GLOB_RECURSE QUANTAPE_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
 # ============================================================================
 # Library target
 # ============================================================================
 
 # Create static library
-add_library(generic_MC_lib STATIC ${LIB_SOURCES} ${LIB_HEADERS})
+add_library(quantape STATIC ${QUANTAPE_SOURCES} ${QUANTAPE_HEADERS})
 
-# Set include directories for the library
-target_include_directories(generic_MC_lib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/Models
-    ${CMAKE_CURRENT_SOURCE_DIR}/ScenarioGeneration
-    ${CMAKE_CURRENT_SOURCE_DIR}/Math
-    ${CMAKE_CURRENT_SOURCE_DIR}/Markets
+# Public include interface: consumers (tests, bindings, downstream) see
+# quantape/... with include/, installed as include/
+target_include_directories(quantape PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
     ${Boost_INCLUDE_DIRS}
 )
 
 # Link third-party libraries
-# target_link_libraries(generic_MC_lib PUBLIC
+# target_link_libraries(quantape PUBLIC
 #     Eigen3::Eigen
 #     # dlib::dlib  # Disabled due to C++20 compatibility issues
 # )
@@ -188,23 +177,23 @@ target_include_directories(generic_MC_lib PUBLIC
 
 # Create executable for example usage
 add_executable(example_usage examples/example_usage.cpp)
-target_link_libraries(example_usage generic_MC_lib)
+target_link_libraries(example_usage quantape)
 
 # Create executable for Math library tests
 add_executable(test_math tests/test_math.cpp)
-target_link_libraries(test_math generic_MC_lib)
+target_link_libraries(test_math quantape)
 
 # Create executable for 1-D root solver regression tests
 add_executable(test_solvers tests/test_solvers.cpp)
-target_link_libraries(test_solvers generic_MC_lib)
+target_link_libraries(test_solvers quantape)
 
 # Create executable for Interpolation library tests
 add_executable(test_interpolation tests/test_interpolation.cpp)
-target_link_libraries(test_interpolation generic_MC_lib)
+target_link_libraries(test_interpolation quantape)
 
 # Create executable for Markets library tests
 add_executable(test_markets tests/test_markets.cpp)
-target_link_libraries(test_markets generic_MC_lib)
+target_link_libraries(test_markets quantape)
 
 # Create executable for CIR bridge accuracy tests
 # Create executable for CIR bridge distribution tests
@@ -217,10 +206,10 @@ target_link_libraries(test_markets generic_MC_lib)
 # Create executable for analytical bridge tests
 # Create executable for nonlinear correction tests
 # Create executable for explaining effective kappa
-add_executable(explain_effective_kappa examples/explain_effective_kappa.cpp)
+add_executable(explain_effective_kappa interview_prep/explain_effective_kappa.cpp)
 
 # Create executable for C++ references and pointers guide
-add_executable(cpp_references_pointers_guide examples/cpp_references_pointers_guide.cpp)
+add_executable(cpp_references_pointers_guide interview_prep/cpp_references_pointers_guide.cpp)
 
 # Create executable for smart pointers and algorithms implementation
 add_executable(smart_pointers_and_algorithms interview_prep/smart_pointers_and_algorithms.cpp)
@@ -251,7 +240,7 @@ add_executable(test_ad tests/test_ad.cpp)
 
 # Link libraries for AD test
 target_link_libraries(test_ad PUBLIC
-    generic_MC_lib
+    quantape
     TBB::tbb
     SUNDIALS::nvecserial
     SUNDIALS::cvodes
@@ -284,7 +273,7 @@ endif()
 add_executable(test_bs_ad_bench benchmarks/test_bs_ad_bench.cpp)
 
 target_link_libraries(test_bs_ad_bench PUBLIC
-    generic_MC_lib
+    quantape
     TBB::tbb
     SUNDIALS::nvecserial
     SUNDIALS::cvodes
@@ -310,7 +299,7 @@ endif()
 add_executable(test_interp_ad_bench benchmarks/test_interp_ad_bench.cpp)
 
 target_link_libraries(test_interp_ad_bench PUBLIC
-    generic_MC_lib
+    quantape
     TBB::tbb
     SUNDIALS::nvecserial
     SUNDIALS::cvodes
@@ -336,7 +325,7 @@ endif()
 add_executable(test_fast_exp_log benchmarks/test_fast_exp_log.cpp)
 
 target_link_libraries(test_fast_exp_log PUBLIC
-    generic_MC_lib
+    quantape
     TBB::tbb
     SUNDIALS::nvecserial
     SUNDIALS::cvodes
@@ -362,7 +351,7 @@ endif()
 add_executable(test_bvn_ad_bench benchmarks/test_bvn_ad_bench.cpp)
 
 target_link_libraries(test_bvn_ad_bench PUBLIC
-    generic_MC_lib
+    quantape
     TBB::tbb
     SUNDIALS::nvecserial
     SUNDIALS::cvodes
@@ -388,7 +377,7 @@ endif()
 add_executable(test_bs_hessian_bench benchmarks/test_bs_hessian_bench.cpp)
 
 target_link_libraries(test_bs_hessian_bench PUBLIC
-        generic_MC_lib
+        quantape
         TBB::tbb
         SUNDIALS::nvecserial
         SUNDIALS::cvodes
@@ -414,7 +403,7 @@ endif()
 add_executable(test_black76 tests/test_black76.cpp)
 
 target_link_libraries(test_black76 PUBLIC
-        generic_MC_lib
+        quantape
         TBB::tbb
         SUNDIALS::nvecserial
         SUNDIALS::cvodes
@@ -637,7 +626,7 @@ endif()
 add_executable(test_mixed_hessian tests/test_mixed_hessian.cpp)
 
 target_link_libraries(test_mixed_hessian PUBLIC
-        generic_MC_lib
+        quantape
         TBB::tbb
         SUNDIALS::nvecserial
         SUNDIALS::cvodes
@@ -660,58 +649,12 @@ if(APPLE OR UNIX)
 endif()
 
 # precomputed_gradients vs custom vari example
-target_link_libraries(test_precomputed_gradients PUBLIC
-        generic_MC_lib
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_precomputed_gradients PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_precomputed_gradients PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ferror-limit=0)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_precomputed_gradients PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
 # Multi-component AD chain example
-target_link_libraries(test_chain_ad PUBLIC
-        generic_MC_lib
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_chain_ad PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_chain_ad PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ferror-limit=0)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_chain_ad PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
 # Create executable for pricer hierarchy hessian benchmark
 add_executable(test_pricer_hessian tests/test_pricer_hessian.cpp)
 
 target_link_libraries(test_pricer_hessian PUBLIC
-        generic_MC_lib
+        quantape
         TBB::tbb
         SUNDIALS::nvecserial
         SUNDIALS::cvodes
@@ -735,12 +678,12 @@ endif()
 
 # Create executable for ziggurat RNG tests
 add_executable(test_ziggurat tests/test_ziggurat.cpp)
-target_link_libraries(test_ziggurat generic_MC_lib)
+target_link_libraries(test_ziggurat quantape)
 target_compile_options(test_ziggurat PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
 
 # Create executable for McFarland ziggurat tests
 add_executable(test_mcfarland tests/test_mcfarland.cpp)
-target_link_libraries(test_mcfarland generic_MC_lib)
+target_link_libraries(test_mcfarland quantape)
 target_compile_options(test_mcfarland PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
 
 # ============================================================================
@@ -754,15 +697,12 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast
 
 # Enable warnings
 if(MSVC)
-    target_compile_options(generic_MC_lib PRIVATE /W4)
+    target_compile_options(quantape PRIVATE /W4)
     target_compile_options(example_usage PRIVATE /W4)
     target_compile_options(test_math PRIVATE /W4)
     target_compile_options(test_solvers PRIVATE /W4)
     target_compile_options(test_interpolation PRIVATE /W4)
     target_compile_options(test_markets PRIVATE /W4)
-    target_compile_options(test_gbm_bridge PRIVATE /W4)
-    target_compile_options(test_g2pp_bridge PRIVATE /W4)
-    target_compile_options(test_nonlinear_corrections PRIVATE /W4)
     target_compile_options(explain_effective_kappa PRIVATE /W4)
     target_compile_options(cpp_references_pointers_guide PRIVATE /W4)
     target_compile_options(smart_pointers_and_algorithms PRIVATE /W4)
@@ -773,15 +713,12 @@ if(MSVC)
     target_compile_options(numerical_methods PRIVATE /W4)
     target_compile_options(test_ad PRIVATE /W4)
 else()
-    target_compile_options(generic_MC_lib PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(quantape PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_solvers PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_interpolation PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_markets PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_gbm_bridge PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_g2pp_bridge PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_nonlinear_corrections PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(explain_effective_kappa PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(cpp_references_pointers_guide PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(smart_pointers_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
@@ -808,3 +745,16 @@ message(STATUS "  SUNDIALS:   ${SUNDIALS_INCLUDE_DIR}")
 message(STATUS "  dlib:       ${THIRD_PARTY_DIR}/dlib")
 message(STATUS "  Stan Math:  ${STAN_MATH_INCLUDE_DIR}")
 message(STATUS "===========================================")
+
+# ============================================================================
+# API documentation (Doxygen)
+# ============================================================================
+find_package(Doxygen QUIET)
+if(Doxygen_FOUND)
+    add_custom_target(doc
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/build/docs/doxygen
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating API documentation (build/docs/doxygen/html)"
+        VERBATIM)
+endif()

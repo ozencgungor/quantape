@@ -3,7 +3,7 @@
  * @brief Benchmark: naive templated interpolation AD vs analytical adjoints
  *
  * For each interpolation type we compare:
- *   Naive:      existing Math:: classes instantiated with stan::math::var
+ *   Naive:      existing quantape::math:: classes instantiated with stan::math::var
  *   Analytical: hand-coded make_callback_var with precomputed ∂output/∂y_data
  *
  * Interpolation types tested:
@@ -12,9 +12,9 @@
  *   3. Cubic Spline 1D     (adjoint tridiagonal solve — all y-values contribute)
  */
 
-#include "Math/Interpolations.h"
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Interpolations.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>
@@ -24,7 +24,7 @@
 #include <vector>
 
 using stan::math::var;
-using namespace Math;
+using namespace quantape::math;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS

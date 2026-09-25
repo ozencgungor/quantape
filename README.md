@@ -1,4 +1,4 @@
-# generic_MC
+# Quantape
 
 C++20 library for Monte Carlo and derivatives pricing, built around one idea:
 **every numerical primitive is AD-compatible and composes**. Integrators,
@@ -6,28 +6,56 @@ solvers and interpolators work with `double`, `stan::math::var` (exact
 gradients) and `stan::math::fvar<...>` (Hessians / Hessian-vector products),
 selected automatically by the scalar template parameter.
 
+## Layout
+
+```
+include/quantape/      public headers (namespace quantape::)
+    math/              integrators, solvers, interpolation, optimization, AD, RNG
+    markets/           curves (yield, IR, survival), volatility (IR, EQ, FX)
+    models/            stochastic models and bridge samplers
+    pricing/           pricers (e.g. Black-Scholes) and AD primitives
+    scenario/          Monte Carlo scenario machinery
+src/                   implementation files (model/simulator .cpp)
+tests/                 correctness gates (exit code 0)
+benchmarks/            timing harnesses (not correctness gates)
+examples/              usage demos
+docs/                  Doxyfile (generated HTML -> build/docs/doxygen)
+scripts/               format_code.sh
+```
+
+All headers live under one include root: consumers include
+`"quantape/math/..."`, `"quantape/pricing/..."`, etc. The AD single-include is
+`quantape/math/StanMath.h` (plugin-safe stan + Eigen ordering); the Stan-free
+umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
+`quantape/math/StanPrimitives.h`.
+
 ## Components
 
-| Directory | Contents |
+| Module | Contents |
 |---|---|
-| `Math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol) |
-| `Math/Optimization/` | Optimizer stack: result codes, stop criteria, CRTP `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export, and the first-order IFT layer (dp/dm, KKT sensitivities, var composition — `docs/ad_optimizers.md`) |
-| `Math/*/*StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP (single include: `Math/StanPrimitives.h`; `Math/NumericalMethods.h` is the Stan-free umbrella for the rest) |
-| `Markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX) |
-| `Models/` | Stochastic models and bridge samplers |
-| `ScenarioGeneration/` | Monte Carlo scenario machinery |
-| `Pricing/` | Pricers (e.g. Black-Scholes) and AD primitives |
+| `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol) |
+| `quantape/math/Optimization/` | Optimizer stack: result codes, stop criteria, CRTP `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export, and the first-order IFT layer (dp/dm, KKT sensitivities, var composition — `internal_docs/ad_optimizers.md`) |
+| `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP |
+| `quantape/markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX) |
+| `quantape/models/` | Stochastic models and bridge samplers |
+| `quantape/scenario/` | Monte Carlo scenario machinery |
+| `quantape/pricing/` | Pricers (e.g. Black-Scholes) and AD primitives |
 
 ## Build
 
 ```bash
 cmake -S . -B build
 cmake --build build --target <target> -j 8
+
+# API documentation (Doxygen) -> build/docs/doxygen/html
+cmake --build build --target doc
 ```
 
 Requires C++20 (tested with Homebrew LLVM 20). Third-party dependencies
 (Stan Math 4.9, Eigen, Boost, oneTBB, SUNDIALS) are fetched/configured by
-CMake; see the top-level `CMakeLists.txt` for the exact versions.
+CMake; see the top-level `CMakeLists.txt` for the exact versions. The static
+library target is `quantape`; tests, benchmarks and examples link it
+transitively.
 
 ## Tests
 
@@ -51,10 +79,13 @@ Run a target and check the exit code; all of the following must exit `0`.
 | `test_autodiff_primitives` | Hessian-vector products, `solve(interp)`, `integrate(interp)`, nested solves — all with analytic references and FD cross-checks |
 | `test_optimization` | Optimizer stack: stop criteria, CRTP base, exact gradients/HVPs/constraint Jacobians, Wolfe line search, L-BFGS, QP, SLSQP/AUGLAG constrained fixtures |
 | `test_optimizers_stress` | Hard/edge problems: Rosenbrock n=50, Beale, Himmelblau, 1e8/1e16 conditioning, degenerate constraints, 20-point arbitrage curve, NLopt parity |
-| `test_optimizers_bench` | Timing harness for the sampling profiler |
 | `test_ift` | IFT sensitivities: `dp/dm` vs analytic + bump-and-recalibrate FD, KKT multiplier sensitivities, degenerate active sets, ridge escalation, condition reporting, var composition |
 | `test_ziggurat` / `test_mcfarland` | Ziggurat / McFarland normal samplers: correctness and throughput |
 | `test_tanh_sinh` | Tanh-Sinh quadrature value + AD gradients/Hessians |
+
+Benchmarks live in `benchmarks/` (`test_optimizers_bench`,
+`test_bs_hessian_bench`, AD benches, exp/log bit-trick bench) — timing
+harnesses for the sampling profiler, not correctness gates.
 
 ## AD architecture in one paragraph
 
@@ -67,11 +98,19 @@ build weights as `AD` expressions so the query coordinate is differentiated by
 default. `fvar<...>` keeps the generic pathwise route (exact for smooth
 functions, all orders) and powers Hessians and HVPs. Control flow is always
 primal-pinned; derivative semantics at branches are the one-sided values of
-the selected branch. See `Math/README.md` for details and contracts.
+the selected branch. See `include/quantape/math/README.md` for details and
+contracts.
 
 The optimizer building blocks follow the same pattern: iteration state in
 double, exact AD gradients and HVPs per step (no finite differences), final
 multipliers exported by the constrained solvers, and first-order IFT/KKT
 sensitivities of the optimum w.r.t. market data (`dp/dm`, multiplier
 sensitivities, `var` composition on the caller's tape) — see
-`docs/ad_optimizers.md`.
+`internal_docs/ad_optimizers.md`.
+
+## Documentation
+
+Headers are comment-dense (`/** ... */` file/class/method docs). Generate the
+API reference with `cmake --build build --target doc` (Doxygen,
+`docs/Doxyfile`); output lands in `build/docs/doxygen/html` and the repository
+README is rendered as the landing page.

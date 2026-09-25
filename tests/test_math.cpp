@@ -1,10 +1,10 @@
-#include "Math/NumericalMethods.h"
+#include "quantape/math/NumericalMethods.h"
 
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 
-using namespace Math;
+using namespace quantape::math;
 
 void testIntegration() {
     std::cout << "=== Integration Tests ===\n\n";

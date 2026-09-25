@@ -9,12 +9,12 @@
 //      equals the quadrature/trapezoid weights on the knots
 //
 // Run: ./test_autodiff_primitives
-#include "Math/Autodiff/Hvp.h"
-#include "Math/Integrals/IntegratorStanPrimitives.h"
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/NumericalMethods.h"
-#include "Math/Solvers/SolverStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Autodiff/Hvp.h"
+#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/NumericalMethods.h"
+#include "quantape/math/Solvers/SolverStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>
@@ -49,7 +49,7 @@ void testHvp() {
     auto f = [](const auto& x) { return x * x * x * x - 3.0 * x * x + 2.0 * x; };
     const double x = 0.7, v = 2.3;
     const double analytic = (12.0 * x * x - 6.0) * v;
-    checkClose("hvp f''(x)*v", Math::hvp(f, x, v), analytic, 1e-10);
+    checkClose("hvp f''(x)*v", quantape::math::hvp(f, x, v), analytic, 1e-10);
 
     // matches the Hessian-vector product from a dense Hessian
     double fx = 0.0;
@@ -63,7 +63,7 @@ void testHvp() {
             return f(xx(0));
         },
         xv, fx, grad, H);
-    checkClose("hvp vs dense Hessian", Math::hvp(f, x, v), H(0, 0) * v, 1e-9);
+    checkClose("hvp vs dense Hessian", quantape::math::hvp(f, x, v), H(0, 0) * v, 1e-9);
 }
 
 /// Double-precision twin of the composite pipeline for FD cross-checks.
@@ -74,8 +74,8 @@ double fdSolveInterpPipeline(const std::vector<double>& theta, double h, int per
     for (size_t i = 0; i < theta.size(); ++i) {
         knots[i] = std::sqrt(theta[i] + (static_cast<int>(i) == perturb ? h : 0.0));
     }
-    const Math::LinearInterpolation<double> interp(kGrid, knots);
-    Math::BisectionSolver<double> solver;
+    const quantape::math::LinearInterpolation<double> interp(kGrid, knots);
+    quantape::math::BisectionSolver<double> solver;
     auto f = [&](double x) { return interp(x) - 2.5; };
     return solver.solve(f, 1e-12, 1.5, 1.0, 2.0);
 }
@@ -92,11 +92,11 @@ void testSolveInterp() {
         knots[i] = stan::math::sqrt(theta[i]);
 
     auto f = [&](const var& x) {
-        const Math::LinearInterpolation<var> interp(kGrid, knots);
+        const quantape::math::LinearInterpolation<var> interp(kGrid, knots);
         return interp(x) - 2.5;
     };
 
-    Math::BrentSolver<var> solver;
+    quantape::math::BrentSolver<var> solver;
     solver.setMaxEvaluations(200);
     var root = solver.solve(f, 1e-12, var(1.5), var(1.0), var(2.0));
     root.grad();
@@ -130,10 +130,10 @@ void testIntegrateInterp() {
     // trapezoids = 0.5 k0 + k1 + k2 + 0.5 k3
     var total = 0.0;
     for (size_t i = 0; i + 1 < kGrid.size(); ++i) {
-        Math::TrapezoidIntegratorDefault<var> integ(1e-12, 100);
+        quantape::math::TrapezoidIntegratorDefault<var> integ(1e-12, 100);
         total += integ(
             [&](const var& x) {
-                const Math::LinearInterpolation<var> interp(kGrid, knots);
+                const quantape::math::LinearInterpolation<var> interp(kGrid, knots);
                 return interp(x);
             },
             var(kGrid[i]), var(kGrid[i + 1]));
@@ -158,12 +158,12 @@ void testNestedSolve() {
     var theta = 16.0;
 
     auto inner = [&](const var& z) { return z * z - theta; };
-    Math::BrentSolver<var> innerSolver;
+    quantape::math::BrentSolver<var> innerSolver;
     innerSolver.setMaxEvaluations(200);
     var y = innerSolver.solve(inner, 1e-12, var(1.0), var(0.0), var(10.0));
 
     auto outer = [&](const var& x) { return x * x - y; };
-    Math::BrentSolver<var> outerSolver;
+    quantape::math::BrentSolver<var> outerSolver;
     outerSolver.setMaxEvaluations(200);
     var x = outerSolver.solve(outer, 1e-12, var(1.0), var(0.0), var(5.0));
     x.grad();

@@ -1,0 +1,49 @@
+# Doxyfile for Quantape — API documentation
+#
+# The headers are comment-dense (/** ... */ file/class/method docs), so the
+# defaults plus these settings produce complete reference output. Generated
+# HTML goes to build/docs/doxygen (build/ is gitignored); regenerate with
+#   cmake --build build --target doc
+# or directly:  doxygen docs/Doxyfile
+
+PROJECT_NAME           = "Quantape"
+PROJECT_BRIEF          = "Differentiable quant library (AD, integrators, solvers, interpolation, optimization, IFT)"
+PROJECT_LOGO           =
+OUTPUT_DIRECTORY       = build/docs/doxygen
+
+INPUT                  = include/quantape \
+                         src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.cpp
+
+# Render the repository README as the landing page
+USE_MDFILE_AS_MAINPAGE = README.md
+
+# C++20: silence unknown-command warnings from modern constructs
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = DOXYGEN_ONLY
+
+# Extraction: rely on the existing documentation comments
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+
+# Output
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+JAVADOC_AUTOBRIEF      = YES
+SORT_MEMBER_DOCS       = YES
+
+# Enable only if graphviz is installed: CALL_GRAPH / CALLER_GRAPH below
+HAVE_DOT               = NO
+
+# Group the top-level modules by directory
+LAYOUT_FILE            =

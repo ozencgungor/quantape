@@ -10,8 +10,8 @@
 //   4. dispatch: usesWeightMatrix() true iff Spline/Parabolic with AD
 //
 // Run: ./test_bicubic_weights
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -27,8 +27,8 @@
         }                                                                                          \
     } while (0)
 
-using Math::BicubicInterpolation;
-using Math::CubicDerivativeApprox;
+using quantape::math::BicubicInterpolation;
+using quantape::math::CubicDerivativeApprox;
 
 namespace {
 
