@@ -3,13 +3,13 @@
 // Schedules are specified in days and automatically converted to years for simulation
 //
 
+#include "quantape/scenario/CreditGenerator.h"
+#include "quantape/scenario/CreditSimulator.h"
+#include "quantape/scenario/EquityGenerator.h"
+#include "quantape/scenario/EquitySimulator.h"
+
 #include <iomanip>
 #include <iostream>
-
-#include "CreditGenerator.h"
-#include "CreditSimulator.h"
-#include "EquityGenerator.h"
-#include "EquitySimulator.h"
 
 void exampleEquityLazy() {
     std::cout << "=== Equity Lazy Evaluation Example (Day-Based Schedule) ===" << std::endl;

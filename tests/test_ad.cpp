@@ -6,11 +6,11 @@
  * using Stan Math's reverse-mode automatic differentiation.
  */
 
-#include "Math/Integrals/IntegratorStanPrimitives.h"
-#include "Math/Interpolations.h"
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/NumericalMethods.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
+#include "quantape/math/Interpolations.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/NumericalMethods.h"
+#include "quantape/math/StanMath.h"
 
 #include <algorithm> // For std::copy
 #include <cmath>
@@ -20,7 +20,7 @@
 #include <vector>
 
 using ADVariableT = stan::math::var;
-using namespace Math;
+using namespace quantape::math;
 
 void testLinearInterpolationAD() {
     std::cout << "=== Linear Interpolation with AD ===\n\n";

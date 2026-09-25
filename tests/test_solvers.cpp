@@ -1,11 +1,11 @@
-#include "Math/NumericalMethods.h"
+#include "quantape/math/NumericalMethods.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <stdexcept>
 
-using namespace Math;
+using namespace quantape::math;
 
 namespace {
 

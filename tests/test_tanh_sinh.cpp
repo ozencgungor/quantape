@@ -1,4 +1,4 @@
-// test_tanh_sinh.cpp — validates Math::TanhSinhIntegrator
+// test_tanh_sinh.cpp — validates quantape::math::TanhSinhIntegrator
 //
 //   double: polynomial, trigonometric, endpoint-singular integrands,
 //           reversed bounds, infinite and half-infinite domains
@@ -7,9 +7,9 @@
 //   fvar<var>: second derivative (Hessian) matches the analytic value
 //
 // Run: ./test_tanh_sinh
-#include "Math/Integrals/IntegratorStanPrimitives.h"
-#include "Math/Integrals/TanhSinhIntegrator.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
+#include "quantape/math/Integrals/TanhSinhIntegrator.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -25,7 +25,7 @@
         }                                                                                          \
     } while (0)
 
-using Math::TanhSinhIntegrator;
+using quantape::math::TanhSinhIntegrator;
 
 namespace {
 

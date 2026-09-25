@@ -8,13 +8,13 @@
 // bump-and-recalibrate finite differences (the gates from
 // docs/ad_optimizers.md §8.3: IFT vs FD <= 1e-6), plus multiplier
 // sensitivities vs one-sided re-optimization.
-#include "Math/Optimization/AugLag.h"
-#include "Math/Optimization/ImplicitFunction.h"
-#include "Math/Optimization/LBFGS.h"
-#include "Math/Optimization/OptimizerStanPrimitives.h"
-#include "Math/Optimization/SLSQP.h"
-#include "Math/Optimization/TNewton.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Optimization/AugLag.h"
+#include "quantape/math/Optimization/ImplicitFunction.h"
+#include "quantape/math/Optimization/LBFGS.h"
+#include "quantape/math/Optimization/OptimizerStanPrimitives.h"
+#include "quantape/math/Optimization/SLSQP.h"
+#include "quantape/math/Optimization/TNewton.h"
+#include "quantape/math/StanMath.h"
 
 #include <Eigen/Dense>
 
@@ -33,9 +33,11 @@ using stan::math::var;
         }                                                                                          \
     } while (0)
 
-static bool converged(Math::OptimizeResult r) {
-    return r == Math::OptimizeResult::Success || r == Math::OptimizeResult::GradientTolReached ||
-           r == Math::OptimizeResult::FtolReached || r == Math::OptimizeResult::XtolReached;
+static bool converged(quantape::math::OptimizeResult r) {
+    return r == quantape::math::OptimizeResult::Success ||
+           r == quantape::math::OptimizeResult::GradientTolReached ||
+           r == quantape::math::OptimizeResult::FtolReached ||
+           r == quantape::math::OptimizeResult::XtolReached;
 }
 
 void checkClose(const char* label, double got, double expected, double tol) {
@@ -97,9 +99,9 @@ void testUnconstrainedLsq() {
     std::vector<double> p_hat(3);
     for (std::size_t i = 0; i < n; ++i)
         p_hat[i] = p_ref(static_cast<Eigen::Index>(i));
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm;
-    Math::iftUnconstrained(obj, p_hat, m, dp_dm, ift);
+    quantape::math::iftUnconstrained(obj, p_hat, m, dp_dm, ift);
     CHECK(!ift.regularized);
     CHECK(dp_dm.size() == n * M);
     for (std::size_t i = 0; i < n; ++i)
@@ -113,10 +115,10 @@ void testUnconstrainedLsq() {
                es.eigenvalues().maxCoeff() / es.eigenvalues().minCoeff(), 1e-9);
 
     // Bump-and-recalibrate central FD cross-check (grad_tol tight for clean FD)
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
-    Math::TNewton<var> solver(criteria);
+    quantape::math::TNewton<var> solver(criteria);
     const double h = 1e-4;
     for (std::size_t j = 0; j < M; ++j) {
         std::vector<double> m_plus = m, m_minus = m;
@@ -156,9 +158,9 @@ void testUnconstrainedNonlinear() {
     const std::vector<double> x_hat{1.0, 1.0};
 
     // Hessian symmetry + exactness vs stan::math::hessian
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm;
-    Math::iftUnconstrained(ShiftedRosenbrock{}, x_hat, m, dp_dm, ift);
+    quantape::math::iftUnconstrained(ShiftedRosenbrock{}, x_hat, m, dp_dm, ift);
     checkClose("rosen-shift dp0/dm", dp_dm[0], 1.0, 1e-9);
     checkClose("rosen-shift dp1/dm", dp_dm[1], 2.0, 1e-9);
     CHECK(!ift.regularized);
@@ -167,14 +169,14 @@ void testUnconstrainedNonlinear() {
     std::vector<stan::math::fvar<var>> theta;
     std::vector<double> e, col, H;
     const auto fx = [&](const auto& th) { return ShiftedRosenbrock{}(th, m); };
-    Math::detail::denseHessian(fx, x_hat, H, theta, e, col);
+    quantape::math::detail::denseHessian(fx, x_hat, H, theta, e, col);
     checkClose("rosen-shift H symmetry", H[1], H[2], 1e-10);
 
     // FD bump-and-recalibrate
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
-    Math::TNewton<var> solver(criteria);
+    quantape::math::TNewton<var> solver(criteria);
     const double h = 1e-4;
     std::vector<double> mp{1.0 + h}, mm{1.0 - h};
     const auto fp = [&](const auto& th) { return ShiftedRosenbrock{}(th, mp); };
@@ -215,24 +217,26 @@ void testActiveBound() {
     const std::vector<double> x_hat{0.0};
     const std::vector<double> lambda{0.5};
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(BoundQuadratic{}, NonNegative{}, Math::NoConstraint{}, Math::Bounds{}, x_hat, m,
-                 lambda, {}, dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(BoundQuadratic{}, NonNegative{}, quantape::math::NoConstraint{},
+                           quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
+                           ift);
     CHECK(ift.active_ineq.size() == 1);
     checkClose("bound-active dp/dm", dp_dm[0], 0.0, 1e-12);
     checkClose("bound-active dlam/dm", dlam_dm[0], -1.0, 1e-12);
 
     // One-sided FD (moves deeper into the active side): p stays 0
     {
-        Math::StopCriteria criteria;
+        quantape::math::StopCriteria criteria;
         criteria.grad_tol = 1e-12;
         criteria.maxeval = 100000;
-        Math::SLSQP<var> solver(criteria);
+        quantape::math::SLSQP<var> solver(criteria);
         const auto fx = [&](const auto& th) { return BoundQuadratic{}(th, m); };
         const auto gx = [&](const auto& th, auto& out) { NonNegative{}(th, m, out); };
         std::vector<double> xp = x_hat;
-        CHECK(solver.minimize(fx, gx, Math::Bounds{}, xp) == Math::OptimizeResult::Success);
+        CHECK(solver.minimize(fx, gx, quantape::math::Bounds{}, xp) ==
+              quantape::math::OptimizeResult::Success);
         CHECK(std::fabs(xp[0]) < 1e-10);
         checkClose("bound-active one-sided FD", 0.0, (xp[0] - x_hat[0]) / (-1e-4), 1e-10);
     }
@@ -256,10 +260,11 @@ void testInactiveInequality() {
     stan::math::recover_memory();
     const std::vector<double> m{2.0};
     const std::vector<double> x_hat{2.0};
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(BoundQuadratic{}, UpperTen{}, Math::NoConstraint{}, Math::Bounds{}, x_hat, m,
-                 {0.0}, {}, dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(BoundQuadratic{}, UpperTen{}, quantape::math::NoConstraint{},
+                           quantape::math::Bounds{}, x_hat, m, {0.0}, {}, dp_dm, dlam_dm, dnu_dm,
+                           ift);
     CHECK(ift.active_ineq.empty());
     checkClose("inactive-ineq dp/dm", dp_dm[0], 1.0, 1e-12);
     CHECK(dlam_dm.empty());
@@ -294,10 +299,10 @@ void testEquality() {
     const std::vector<double> x_hat{-1.0, 1.0};
     const std::vector<double> nu{2.0}; // nu = (m0+m1)/2
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(TwoQuad{}, Math::NoConstraint{}, SumZero{}, Math::Bounds{}, x_hat, m, {}, nu,
-                 dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(TwoQuad{}, quantape::math::NoConstraint{}, SumZero{},
+                           quantape::math::Bounds{}, x_hat, m, {}, nu, dp_dm, dlam_dm, dnu_dm, ift);
     checkClose("eq dp0/dm0", dp_dm[0], 0.5, 1e-12);
     checkClose("eq dp0/dm1", dp_dm[1], -0.5, 1e-12);
     checkClose("eq dp1/dm0", dp_dm[2], -0.5, 1e-12);
@@ -306,10 +311,10 @@ void testEquality() {
     checkClose("eq dnu/dm1", dnu_dm[1], 0.5, 1e-12);
 
     // FD of nu via re-optimization (SLSQP exports multipliers)
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
-    Math::SLSQP<var> solver(criteria);
+    quantape::math::SLSQP<var> solver(criteria);
     const double h = 1e-4;
     for (std::size_t j = 0; j < 2; ++j) {
         std::vector<double> mj = m;
@@ -317,9 +322,9 @@ void testEquality() {
         const auto fx = [&](const auto& th) { return TwoQuad{}(th, mj); };
         const auto hx = [&](const auto& th, auto& out) { SumZero{}(th, mj, out); };
         std::vector<double> xp = x_hat;
-        Math::OptimizerState state;
-        CHECK(solver.minimize(fx, Math::NoConstraint{}, hx, Math::Bounds{}, xp, state) ==
-              Math::OptimizeResult::Success);
+        quantape::math::OptimizerState state;
+        CHECK(solver.minimize(fx, quantape::math::NoConstraint{}, hx, quantape::math::Bounds{}, xp,
+                              state) == quantape::math::OptimizeResult::Success);
         checkClose("eq dnu/dm FD", dnu_dm[j], (state.eq_multipliers[0] - nu[0]) / h, 1e-6);
         for (std::size_t i = 0; i < 2; ++i)
             checkClose("eq dp/dm FD", dp_dm[i * 2 + j], (xp[i] - x_hat[i]) / h, 1e-6);
@@ -365,10 +370,10 @@ void testCombinedActive() {
     const std::vector<double> lambda{2.4};
     const std::vector<double> nu{-1.2};
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(SepQuad{}, X0Cap{}, SumOne{}, Math::Bounds{}, x_hat, m, lambda, nu, dp_dm, dlam_dm,
-                 dnu_dm, ift);
+    quantape::math::iftKkt(SepQuad{}, X0Cap{}, SumOne{}, quantape::math::Bounds{}, x_hat, m, lambda,
+                           nu, dp_dm, dlam_dm, dnu_dm, ift);
     CHECK(ift.active_ineq.size() == 1);
     for (std::size_t i = 0; i < 4; ++i)
         checkClose("combined dp/dm", dp_dm[i], 0.0, 1e-12);
@@ -378,17 +383,17 @@ void testCombinedActive() {
     checkClose("combined dnu/dm1", dnu_dm[1], 1.0, 1e-12);
 
     // Full pipeline: minimizeDifferential (SLSQP) — multiplier export path
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
     std::vector<double> x{0.0, 0.0};
-    Math::OptimizerState state;
-    Math::IftResult ift2;
+    quantape::math::OptimizerState state;
+    quantape::math::IftResult ift2;
     std::vector<double> dp2, dl2, dn2;
-    const Math::OptimizeResult r =
-        Math::minimizeDifferential(SepQuad{}, X0Cap{}, SumOne{}, Math::Bounds{}, m, x, state, ift2,
-                                   &dp2, &dl2, &dn2, criteria);
-    CHECK(r == Math::OptimizeResult::Success);
+    const quantape::math::OptimizeResult r =
+        quantape::math::minimizeDifferential(SepQuad{}, X0Cap{}, SumOne{}, quantape::math::Bounds{},
+                                             m, x, state, ift2, &dp2, &dl2, &dn2, criteria);
+    CHECK(r == quantape::math::OptimizeResult::Success);
     CHECK(state.ineq_multipliers.size() == 1);
     CHECK(state.eq_multipliers.size() == 1);
     checkClose("pipeline lambda", state.ineq_multipliers[0], 2.4, 1e-8);
@@ -400,7 +405,7 @@ void testCombinedActive() {
 
     // One-sided FD of the multipliers near the active set (m0 - eps keeps
     // the inequality active; m1 + eps as well)
-    Math::SLSQP<var> solver(criteria);
+    quantape::math::SLSQP<var> solver(criteria);
     for (std::size_t j = 0; j < 2; ++j) {
         std::vector<double> mj = m;
         mj[j] += 1e-4;
@@ -408,8 +413,9 @@ void testCombinedActive() {
         const auto gx = [&](const auto& th, auto& out) { X0Cap{}(th, mj, out); };
         const auto hx = [&](const auto& th, auto& out) { SumOne{}(th, mj, out); };
         std::vector<double> xp = x_hat;
-        Math::OptimizerState st;
-        CHECK(solver.minimize(fx, gx, hx, Math::Bounds{}, xp, st) == Math::OptimizeResult::Success);
+        quantape::math::OptimizerState st;
+        CHECK(solver.minimize(fx, gx, hx, quantape::math::Bounds{}, xp, st) ==
+              quantape::math::OptimizeResult::Success);
         checkClose("combined dlam FD", dlam_dm[j], (st.ineq_multipliers[0] - lambda[0]) / 1e-4,
                    1e-6);
         checkClose("combined dnu FD", dnu_dm[j], (st.eq_multipliers[0] - nu[0]) / 1e-4, 1e-6);
@@ -441,10 +447,11 @@ void testDegenerate() {
     // complementarity rows are linearly dependent and the system is singular.
     const std::vector<double> lambda{0.5, 0.25};
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(BoundQuadratic{}, DoubleIneq{}, Math::NoConstraint{}, Math::Bounds{}, x_hat, m,
-                 lambda, {}, dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(BoundQuadratic{}, DoubleIneq{}, quantape::math::NoConstraint{},
+                           quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
+                           ift);
     CHECK(ift.active_ineq.size() == 2);
     CHECK(ift.pseudo_inverse);
     CHECK(ift.rank < 3);
@@ -461,12 +468,13 @@ void testBoundsOnly() {
     stan::math::recover_memory();
     const std::vector<double> m{-0.5, 3.0};
     const std::vector<double> x_hat{0.0, 3.0};
-    Math::Bounds b = Math::Bounds::fromVectors({0.0, -1e30}, {1e30, 1e30});
+    quantape::math::Bounds b = quantape::math::Bounds::fromVectors({0.0, -1e30}, {1e30, 1e30});
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(TwoQuad{}, Math::NoConstraint{}, Math::NoConstraint{}, b, x_hat, m, {}, {}, dp_dm,
-                 dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(TwoQuad{}, quantape::math::NoConstraint{},
+                           quantape::math::NoConstraint{}, b, x_hat, m, {}, {}, dp_dm, dlam_dm,
+                           dnu_dm, ift);
     CHECK(ift.active_bounds.size() == 1);
     CHECK(ift.active_bounds[0] == 0);
     checkClose("bounds dp0/dm0", dp_dm[0], 0.0, 1e-12);
@@ -491,9 +499,9 @@ void testConditionNumber() {
     };
     const std::vector<double> m{1.0, 2.0};
     const std::vector<double> x_hat{1.0, 2.0};
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm;
-    Math::iftUnconstrained(f2, x_hat, m, dp_dm, ift);
+    quantape::math::iftUnconstrained(f2, x_hat, m, dp_dm, ift);
     checkClose("cond number", ift.condition_number, 1.0 / eps, 1e-6);
     CHECK(!ift.regularized);
     checkClose("ill-cond dp/dm diagonal", dp_dm[0], 1.0, 1e-12);
@@ -514,9 +522,10 @@ void testVarComposition() {
     for (std::size_t j = 0; j < 3; ++j)
         m_var[j] = m[j];
     std::vector<var> p_hat;
-    const Math::OptimizeResult r = Math::minimizeDifferentialVar(
-        obj, Math::NoConstraint{}, Math::NoConstraint{}, Math::Bounds{}, m_var, {0.0, 0.0}, p_hat,
-        nullptr, nullptr, Math::StopCriteria{});
+    const quantape::math::OptimizeResult r = quantape::math::minimizeDifferentialVar(
+        obj, quantape::math::NoConstraint{}, quantape::math::NoConstraint{},
+        quantape::math::Bounds{}, m_var, {0.0, 0.0}, p_hat, nullptr, nullptr,
+        quantape::math::StopCriteria{});
     CHECK(converged(r));
     CHECK(p_hat.size() == 2);
 
@@ -545,26 +554,28 @@ void testVarComposition() {
 void testAugLagIntegration() {
     stan::math::recover_memory();
     const std::vector<double> m{2.0, -1.0};
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
 
-    Math::AugLag<var> solver(criteria);
+    quantape::math::AugLag<var> solver(criteria);
     const auto fx = [&](const auto& th) { return SepQuad{}(th, m); };
     const auto gx = [&](const auto& th, auto& out) { X0Cap{}(th, m, out); };
     const auto hx = [&](const auto& th, auto& out) { SumOne{}(th, m, out); };
     std::vector<double> x{0.0, 0.0};
-    Math::OptimizerState state;
-    const Math::OptimizeResult r = solver.minimize(fx, gx, hx, Math::Bounds{}, x, state);
-    CHECK(r == Math::OptimizeResult::Success);
+    quantape::math::OptimizerState state;
+    const quantape::math::OptimizeResult r =
+        solver.minimize(fx, gx, hx, quantape::math::Bounds{}, x, state);
+    CHECK(r == quantape::math::OptimizeResult::Success);
     CHECK(state.ineq_multipliers.size() == 1);
     checkClose("auglag x0", x[0], 0.8, 1e-7);
     checkClose("auglag x1", x[1], 0.2, 1e-7);
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(SepQuad{}, X0Cap{}, SumOne{}, Math::Bounds{}, x, m, state.ineq_multipliers,
-                 state.eq_multipliers, dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(SepQuad{}, X0Cap{}, SumOne{}, quantape::math::Bounds{}, x, m,
+                           state.ineq_multipliers, state.eq_multipliers, dp_dm, dlam_dm, dnu_dm,
+                           ift);
     for (std::size_t i = 0; i < 4; ++i)
         checkClose("auglag dp/dm", dp_dm[i], 0.0, 1e-6);
     checkClose("auglag dlam/dm0", dlam_dm[0], 1.0, 1e-6);
@@ -594,10 +605,11 @@ void testNonlinearConstraint() {
     const std::vector<double> x_hat{1.0, 0.0};
     const std::vector<double> lambda{0.25};
 
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
-    Math::iftKkt(TwoQuad{}, UnitDisk{}, Math::NoConstraint{}, Math::Bounds{}, x_hat, m, lambda, {},
-                 dp_dm, dlam_dm, dnu_dm, ift);
+    quantape::math::iftKkt(TwoQuad{}, UnitDisk{}, quantape::math::NoConstraint{},
+                           quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
+                           ift);
     CHECK(ift.active_ineq.size() == 1);
     checkClose("disk dp0/dm0", dp_dm[0], 0.0, 1e-12);
     checkClose("disk dp0/dm1", dp_dm[1], 0.0, 1e-12);
@@ -607,21 +619,21 @@ void testNonlinearConstraint() {
     checkClose("disk dlam/dm1", dlam_dm[1], 0.0, 1e-12);
 
     // One-sided FD of p and lambda
-    Math::StopCriteria criteria;
+    quantape::math::StopCriteria criteria;
     criteria.grad_tol = 1e-12;
     criteria.maxeval = 100000;
-    Math::SLSQP<var> solver(criteria);
+    quantape::math::SLSQP<var> solver(criteria);
     const double h = 1e-4;
     {
         std::vector<double> mj{1.5, h};
         const auto fx = [&](const auto& th) { return TwoQuad{}(th, mj); };
         const auto gx = [&](const auto& th, auto& out) { UnitDisk{}(th, mj, out); };
         std::vector<double> xp = x_hat;
-        Math::OptimizerState st;
+        quantape::math::OptimizerState st;
         // SLSQP nails the point (x1 -> 2/3*h) but reports RoundoffLimited at
         // the curved boundary (merit search); the primal FD is still exact
-        const auto rj = solver.minimize(fx, gx, Math::Bounds{}, xp, st);
-        CHECK(converged(rj) || rj == Math::OptimizeResult::RoundoffLimited);
+        const auto rj = solver.minimize(fx, gx, quantape::math::Bounds{}, xp, st);
+        CHECK(converged(rj) || rj == quantape::math::OptimizeResult::RoundoffLimited);
         checkClose("disk dp1/dm1 FD", dp_dm[3], (xp[1] - x_hat[1]) / h, 1e-6);
     }
     {
@@ -629,9 +641,9 @@ void testNonlinearConstraint() {
         const auto fx = [&](const auto& th) { return TwoQuad{}(th, mj); };
         const auto gx = [&](const auto& th, auto& out) { UnitDisk{}(th, mj, out); };
         std::vector<double> xp = x_hat;
-        Math::OptimizerState st;
-        const auto rj = solver.minimize(fx, gx, Math::Bounds{}, xp, st);
-        CHECK(converged(rj) || rj == Math::OptimizeResult::RoundoffLimited);
+        quantape::math::OptimizerState st;
+        const auto rj = solver.minimize(fx, gx, quantape::math::Bounds{}, xp, st);
+        CHECK(converged(rj) || rj == quantape::math::OptimizeResult::RoundoffLimited);
         checkClose("disk dp0/dm0 FD", dp_dm[0], (xp[0] - x_hat[0]) / h, 1e-6);
     }
     std::printf("  [ok] nonlinear active constraint: lambda*H_g in H_L + FD (disk)\n");
@@ -650,9 +662,9 @@ void testRidgeEscalation() {
         const Sx d = x[0] - Sx(m[0]);
         return Sx(-0.5) * d * d;
     };
-    Math::IftResult ift;
+    quantape::math::IftResult ift;
     std::vector<double> dp_dm;
-    Math::iftUnconstrained(f2, {1.0}, {1.0}, dp_dm, ift);
+    quantape::math::iftUnconstrained(f2, {1.0}, {1.0}, dp_dm, ift);
     CHECK(ift.regularized);
     CHECK(ift.ridge_used > 0.0);
     CHECK(std::isfinite(dp_dm[0]));
@@ -665,9 +677,9 @@ void testRidgeEscalation() {
         const Sx d1 = x[1] - Sx(m[1]);
         return Sx(0.5) * (d0 * d0 + Sx(1e-16) * d1 * d1);
     };
-    Math::IftResult ift2;
+    quantape::math::IftResult ift2;
     std::vector<double> dp2;
-    Math::iftUnconstrained(flat, {1.0, 2.0}, {1.0, 2.0}, dp2, ift2);
+    quantape::math::iftUnconstrained(flat, {1.0, 2.0}, {1.0, 2.0}, dp2, ift2);
     CHECK(!ift2.regularized);
     checkClose("flat-PD dp0/dm0", dp2[0], 1.0, 1e-12);
     checkClose("flat-PD dp1/dm1", dp2[3], 1.0, 1e-12);
@@ -687,12 +699,12 @@ void testConstrainedVarComposition() {
     m_var[0] = m[0];
     m_var[1] = m[1];
     std::vector<var> p_hat;
-    Math::IftResult ift;
-    Math::OptimizerState state;
-    const Math::OptimizeResult r =
-        Math::minimizeDifferentialVar(SepQuad{}, X0Cap{}, SumOne{}, Math::Bounds{}, m_var,
-                                      {0.0, 0.0}, p_hat, &ift, &state, Math::StopCriteria{});
-    CHECK(r == Math::OptimizeResult::Success);
+    quantape::math::IftResult ift;
+    quantape::math::OptimizerState state;
+    const quantape::math::OptimizeResult r = quantape::math::minimizeDifferentialVar(
+        SepQuad{}, X0Cap{}, SumOne{}, quantape::math::Bounds{}, m_var, {0.0, 0.0}, p_hat, &ift,
+        &state, quantape::math::StopCriteria{});
+    CHECK(r == quantape::math::OptimizeResult::Success);
     checkClose("constrained var p0", p_hat[0].val(), 0.8, 1e-7);
     checkClose("constrained var p1", p_hat[1].val(), 0.2, 1e-7);
     CHECK(ift.active_ineq.size() == 1);

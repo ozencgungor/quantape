@@ -3,9 +3,9 @@
  * @brief Tests for the McFarland modified ziggurat: statistical tests, benchmarks
  */
 
-#include "Math/Random/McFarlandNormal.h"
-#include "Math/Random/PCGRandom.hpp"
-#include "Math/Random/ZigguratNormal.h"
+#include "quantape/math/Random/McFarlandNormal.h"
+#include "quantape/math/Random/PCGRandom.hpp"
+#include "quantape/math/Random/ZigguratNormal.h"
 
 #include <chrono>
 #include <cmath>
@@ -42,7 +42,7 @@ void testStatistics() {
 
     constexpr int N = 1'000'000'000;
     pcg64 rng(12345);
-    mc::McFarlandNormal<pcg64> gen(rng);
+    quantape::math::mc::McFarlandNormal<pcg64> gen(rng);
 
     double sum1 = 0, sum2 = 0, sum3 = 0, sum4 = 0;
     double c1 = 0, c2 = 0, c3 = 0, c4 = 0;
@@ -114,7 +114,7 @@ void testTails() {
 
     constexpr long N = 10'000'000'000;
     pcg64 rng(67890);
-    mc::McFarlandNormal<pcg64> gen(rng);
+    quantape::math::mc::McFarlandNormal<pcg64> gen(rng);
 
     double thresholds[] = {1.0, 2.0, 3.0, 4.0, 5.0};
     long counts[5] = {};
@@ -152,14 +152,14 @@ void benchmark() {
 
     // McFarland + PCG64
     pcg64 rng_pcg(42);
-    mc::McFarlandNormal<pcg64> mcf_pcg(rng_pcg);
+    quantape::math::mc::McFarlandNormal<pcg64> mcf_pcg(rng_pcg);
 
     // McFarland + Xoshiro
-    mc::Xoshiro256ss rng_xo(42);
-    mc::McFarlandNormal<mc::Xoshiro256ss> mcf_xo(rng_xo);
+    quantape::math::mc::Xoshiro256ss rng_xo(42);
+    quantape::math::mc::McFarlandNormal<quantape::math::mc::Xoshiro256ss> mcf_xo(rng_xo);
 
     // Marsaglia Ziggurat + Xoshiro
-    mc::ZigguratNormal zig(42);
+    quantape::math::mc::ZigguratNormal zig(42);
 
     // std::normal_distribution + mt19937_64
     std::mt19937_64 mt(42);

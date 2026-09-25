@@ -95,7 +95,7 @@ BreakStringLiterals: true
 IncludeBlocks: Regroup
 IncludeCategories:
   # Project headers
-  - Regex: '^"(Models|ScenarioGeneration|Math)/'
+  - Regex: '^"quantape/'
     Priority: 1
   # C++ standard library headers
   - Regex: '^<[a-z_]+>'

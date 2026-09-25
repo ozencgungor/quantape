@@ -6,13 +6,13 @@
  * and market data objects with both double and AD types.
  */
 
+#include "quantape/markets/MarketData.h"
+
 #include <iomanip>
 #include <iostream>
 #include <vector>
 
-#include "Markets/MarketData.h"
-
-using namespace Markets;
+using namespace quantape::markets;
 
 void testIRCurve() {
     std::cout << "=== IR Curve Test ===\n\n";

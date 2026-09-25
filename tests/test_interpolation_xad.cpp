@@ -10,8 +10,8 @@
 //   5. evaluateFixed: x adjoint stays zero (passive-abscissa policy)
 //
 // Run: ./test_interpolation_xad
-#include "Math/Interpolations/InterpolationStanPrimitives.h"
-#include "Math/StanMath.h"
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>
@@ -26,11 +26,11 @@
         }                                                                                          \
     } while (0)
 
-using Math::BilinearInterpolation;
-using Math::CubicDerivativeApprox;
-using Math::CubicInterpolation;
-using Math::LinearInterpolation;
-using Math::LogLinearInterpolation;
+using quantape::math::BilinearInterpolation;
+using quantape::math::CubicDerivativeApprox;
+using quantape::math::CubicInterpolation;
+using quantape::math::LinearInterpolation;
+using quantape::math::LogLinearInterpolation;
 
 namespace {
 

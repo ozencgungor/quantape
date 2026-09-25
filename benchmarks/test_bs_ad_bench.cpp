@@ -10,7 +10,7 @@
  * Measures: correctness, wall-clock time, and AD arena memory consumption.
  */
 
-#include "Math/StanMath.h"
+#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>
@@ -44,7 +44,7 @@ DoubleT blackScholesNaive(DoubleT S, DoubleT K, DoubleT sigma, DoubleT r, Double
 // 2. ANALYTICAL ADJOINT BLACK-SCHOLES  (hand-coded Greeks, 1 tape node)
 // ═══════════════════════════════════════════════════════════════════════════
 
-namespace detail {
+namespace quantape::math::detail {
 
 inline double phi_pdf(double x) {
     return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
@@ -54,7 +54,7 @@ inline double Phi_cdf(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);
 }
 
-} // namespace detail
+} // namespace quantape::math::detail
 
 inline var blackScholesAnalytical(const var& S_v, const var& K_v, const var& sigma_v,
                                   const var& r_v, const var& T_v) {
@@ -68,9 +68,9 @@ inline var blackScholesAnalytical(const var& S_v, const var& K_v, const var& sig
     const double d1 = (std::log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
     const double d2 = d1 - sigma * sqrtT;
 
-    const double Nd1 = detail::Phi_cdf(d1);
-    const double Nd2 = detail::Phi_cdf(d2);
-    const double nd1 = detail::phi_pdf(d1);
+    const double Nd1 = quantape::math::detail::Phi_cdf(d1);
+    const double Nd2 = quantape::math::detail::Phi_cdf(d2);
+    const double nd1 = quantape::math::detail::phi_pdf(d1);
     const double disc = std::exp(-r * T);
 
     const double price = S * Nd1 - K * disc * Nd2;
