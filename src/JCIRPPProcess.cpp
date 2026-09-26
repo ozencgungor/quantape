@@ -1,16 +1,18 @@
-#include "quantape/models/CIRPPModel.h"
+#include "quantape/processes/JCIRPPProcess.h"
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <stdexcept>
 
 // ============================================================================
-// CIRPPParams Implementation
+// JCIRPPParams Implementation
 // ============================================================================
 
-CIRPPParams::CIRPPParams(double x0, double kappa, double theta, double sigma,
-                         const std::vector<double>& shifts)
-    : x0(x0), kappa(kappa), theta(theta), sigma(sigma), shifts(shifts) {
+JCIRPPParams::JCIRPPParams(double x0, double kappa, double theta, double sigma,
+                           double jumpIntensity, double jumpMean, const std::vector<double>& shifts)
+    : x0(x0), kappa(kappa), theta(theta), sigma(sigma), shifts(shifts),
+      jumpIntensity(jumpIntensity), jumpMean(jumpMean) {
     if (x0 < 0.0)
         throw std::invalid_argument("Initial x value must be non-negative");
     if (kappa <= 0.0)
@@ -19,25 +21,29 @@ CIRPPParams::CIRPPParams(double x0, double kappa, double theta, double sigma,
         throw std::invalid_argument("Long-term mean must be non-negative");
     if (sigma < 0.0)
         throw std::invalid_argument("Volatility must be non-negative");
+    if (jumpIntensity < 0.0)
+        throw std::invalid_argument("Jump intensity must be non-negative");
+    if (jumpMean <= 0.0)
+        throw std::invalid_argument("Jump mean must be positive");
 }
 
 // ============================================================================
-// CIRPPState Implementation
+// JCIRPPState Implementation
 // ============================================================================
 
-CIRPPState::CIRPPState(double intensity, double cumulativeIntensity)
-    : intensity(intensity), cumulativeIntensity(cumulativeIntensity) {}
+JCIRPPState::JCIRPPState(double intensity, double cumulativeIntensity, int totalJumps)
+    : intensity(intensity), cumulativeIntensity(cumulativeIntensity), totalJumps(totalJumps) {}
 
 // ============================================================================
-// CIRPPModel Implementation
+// JCIRPPProcess Implementation
 // ============================================================================
 
-CIRPPModel::CIRPPModel(const CIRPPParams& params) : m_params(params) {}
+JCIRPPProcess::JCIRPPProcess(const JCIRPPParams& params) : m_params(params) {}
 
-void CIRPPModel::update(CIRPPState& current, const CIRPPState& previous, size_t stepIndex,
-                        double dt, const std::vector<double>& dW) const {
+void JCIRPPProcess::update(JCIRPPState& current, const JCIRPPState& previous, size_t stepIndex,
+                           double dt, const std::vector<double>& dW, unsigned int seed) const {
     if (dW.empty()) {
-        throw std::invalid_argument("CIR++ model requires at least 1 Brownian motion");
+        throw std::invalid_argument("JCIR++ model requires at least 1 Brownian motion");
     }
 
     // Initial state
@@ -46,6 +52,7 @@ void CIRPPModel::update(CIRPPState& current, const CIRPPState& previous, size_t 
         double shift = m_params.shifts.empty() ? 0.0 : m_params.shifts[0];
         current.intensity = m_params.x0 + shift;
         current.cumulativeIntensity = 0.0;
+        current.totalJumps = 0;
         return;
     }
 
@@ -57,31 +64,59 @@ void CIRPPModel::update(CIRPPState& current, const CIRPPState& previous, size_t 
     // Extract x(t) from previous intensity: x = λ - φ
     double x_prev = previous.intensity - prevShift;
 
-    // CIR dynamics for x(t): dx = κ[θ - x]dt + σ√x dW
-    // Truncate to ensure non-negativity
+    // ========================================================================
+    // CIR diffusion component: dx = κ[θ - x]dt + σ√x dW
+    // ========================================================================
     double x = std::max(x_prev, 0.0);
-    double dx = m_params.kappa * (m_params.theta - x) * dt + m_params.sigma * std::sqrt(x) * dW[0];
-    double x_curr = std::max(x + dx, 0.0);
+    double dx_diffusion =
+        m_params.kappa * (m_params.theta - x) * dt + m_params.sigma * std::sqrt(x) * dW[0];
+
+    // ========================================================================
+    // Jump component: J·dN
+    // ========================================================================
+    // Generate Poisson jumps
+    std::mt19937 gen(seed + stepIndex * 1000); // Seed based on step for reproducibility
+
+    // Number of jumps in time interval dt follows Poisson(ν * dt)
+    std::poisson_distribution<int> poissonDist(m_params.jumpIntensity * dt);
+    int numJumps = poissonDist(gen);
+
+    // Generate jump sizes (exponential distribution with mean jumpMean)
+    std::exponential_distribution<double> expDist(1.0 / m_params.jumpMean);
+    double totalJumpSize = 0.0;
+    for (int i = 0; i < numJumps; ++i) {
+        totalJumpSize += expDist(gen);
+    }
+
+    // ========================================================================
+    // Combine all components
+    // ========================================================================
+    double x_curr = std::max(x + dx_diffusion + totalJumpSize, 0.0);
 
     // Add current shift to get intensity: λ(t) = x(t) + φ(t)
     current.intensity = x_curr + currShift;
 
     // Update cumulative intensity using trapezoidal rule
-    // ∫[t_{i-1}, t_i] λ(s) ds ≈ (λ_{i-1} + λ_i) * dt / 2
+    // Note: This is approximate since jumps create discontinuities
+    // For more accuracy, could use left-continuous or right-continuous integration
     double intensityIncrement = 0.5 * (previous.intensity + current.intensity) * dt;
     current.cumulativeIntensity = previous.cumulativeIntensity + intensityIncrement;
+
+    // Update jump counter
+    current.totalJumps = previous.totalJumps + numJumps;
 }
 
 // ============================================================================
 // Credit Risk Helper Functions
 // ============================================================================
 
-namespace quantape::models::cirpp {
+namespace quantape::processes::jcirpp {
 // ============================================================================
 // Credit Risk Helper Functions
 // ============================================================================
 
-double calculateSurvivalProbability(const std::map<int, CIRPPState>& path, int fromDay, int toDay) {
+double calculateSurvivalProbability(const std::map<int, JCIRPPState>& path, int fromDay,
+                                    int toDay) {
     auto fromIt = path.find(fromDay);
     auto toIt = path.find(toDay);
 
@@ -94,17 +129,16 @@ double calculateSurvivalProbability(const std::map<int, CIRPPState>& path, int f
     }
 
     // Survival probability: SP(t,T) = exp(-∫[t,T] λ(s) ds)
-    // = exp(-(CumulativeIntensity[T] - CumulativeIntensity[t]))
     double integralDifference =
         toIt->second.cumulativeIntensity - fromIt->second.cumulativeIntensity;
     return std::exp(-integralDifference);
 }
 
-double calculateDefaultProbability(const std::map<int, CIRPPState>& path, int fromDay, int toDay) {
+double calculateDefaultProbability(const std::map<int, JCIRPPState>& path, int fromDay, int toDay) {
     return 1.0 - calculateSurvivalProbability(path, fromDay, toDay);
 }
 
-std::map<int, double> calculateSurvivalCurve(const std::map<int, CIRPPState>& path, int fromDay,
+std::map<int, double> calculateSurvivalCurve(const std::map<int, JCIRPPState>& path, int fromDay,
                                              const std::vector<int>& tenorDays) {
     std::map<int, double> survivalCurve;
 
@@ -118,13 +152,8 @@ std::map<int, double> calculateSurvivalCurve(const std::map<int, CIRPPState>& pa
     return survivalCurve;
 }
 
-double calculateForwardSurvivalProbability(const std::map<int, CIRPPState>& path,
+double calculateForwardSurvivalProbability(const std::map<int, JCIRPPState>& path,
                                            int observationDay, int fromDay, int toDay) {
-    // Forward survival probability given information at observationDay
-    // P(τ > T2 | τ > T1, F_{T0}) = P(τ > T2 | F_{T0}) / P(τ > T1 | F_{T0})
-    // Since we're on a path (no conditioning needed for simulation):
-    // = exp(-∫[T1,T2] λ(s) ds)
-
     if (observationDay > fromDay || fromDay > toDay) {
         throw std::invalid_argument("Days must satisfy: observationDay <= fromDay <= toDay");
     }
@@ -132,7 +161,7 @@ double calculateForwardSurvivalProbability(const std::map<int, CIRPPState>& path
     return calculateSurvivalProbability(path, fromDay, toDay);
 }
 
-double getHazardRate(const std::map<int, CIRPPState>& path, int day) {
+double getHazardRate(const std::map<int, JCIRPPState>& path, int day) {
     auto it = path.find(day);
     if (it == path.end()) {
         throw std::out_of_range("Day not found in path");
@@ -141,7 +170,7 @@ double getHazardRate(const std::map<int, CIRPPState>& path, int day) {
     return it->second.intensity;
 }
 
-double getAverageHazardRate(const std::map<int, CIRPPState>& path, int fromDay, int toDay) {
+double getAverageHazardRate(const std::map<int, JCIRPPState>& path, int fromDay, int toDay) {
     auto fromIt = path.find(fromDay);
     auto toIt = path.find(toDay);
 
@@ -163,4 +192,28 @@ double getAverageHazardRate(const std::map<int, CIRPPState>& path, int fromDay, 
 
     return integralDifference / timeInYears;
 }
-} // namespace quantape::models::cirpp
+
+int getTotalJumps(const std::map<int, JCIRPPState>& path, int day) {
+    auto it = path.find(day);
+    if (it == path.end()) {
+        throw std::out_of_range("Day not found in path");
+    }
+
+    return it->second.totalJumps;
+}
+
+int getJumpsInPeriod(const std::map<int, JCIRPPState>& path, int fromDay, int toDay) {
+    auto fromIt = path.find(fromDay);
+    auto toIt = path.find(toDay);
+
+    if (fromIt == path.end() || toIt == path.end()) {
+        throw std::out_of_range("Day not found in path");
+    }
+
+    if (fromDay > toDay) {
+        throw std::invalid_argument("fromDay must be <= toDay");
+    }
+
+    return toIt->second.totalJumps - fromIt->second.totalJumps;
+}
+} // namespace quantape::processes::jcirpp

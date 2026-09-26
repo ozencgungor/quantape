@@ -3,11 +3,12 @@
 // converge?) and optimization opportunities (where does time go at scale).
 //
 // Run: ./build/test_optimizers_stress
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
-#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>

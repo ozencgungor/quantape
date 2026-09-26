@@ -6,6 +6,7 @@
 // #include <Eigen/Dense>
 
 #include "quantape/math/StanMath.h"
+
 #include "quantape/pricing/StanPrimitives.h"
 
 #include <cmath>

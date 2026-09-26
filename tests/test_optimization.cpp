@@ -12,6 +12,8 @@
 //      are checked for each exit path
 //
 // Run: ./test_optimization
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/Constraint.h"
 #include "quantape/math/Optimization/LBFGS.h"
@@ -19,7 +21,6 @@
 #include "quantape/math/Optimization/QpSolver.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
-#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>

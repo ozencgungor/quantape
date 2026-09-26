@@ -1,4 +1,4 @@
-#include "quantape/models/HestonModel.h"
+#include "quantape/processes/HestonProcess.h"
 
 #include <algorithm>
 #include <cmath>
@@ -32,13 +32,13 @@ HestonParams::HestonParams(double s0, double v0, double mu, double kappa, double
 HestonState::HestonState(double spot, double variance) : spot(spot), variance(variance) {}
 
 // ============================================================================
-// HestonModel Implementation
+// HestonProcess Implementation
 // ============================================================================
 
-HestonModel::HestonModel(const HestonParams& params) : m_params(params) {}
+HestonProcess::HestonProcess(const HestonParams& params) : m_params(params) {}
 
-void HestonModel::update(HestonState& current, const HestonState& previous, size_t stepIndex,
-                         double dt, const std::vector<double>& dW) const {
+void HestonProcess::update(HestonState& current, const HestonState& previous, size_t stepIndex,
+                           double dt, const std::vector<double>& dW) const {
     if (dW.size() < 2) {
         throw std::invalid_argument("Heston model requires 2 Brownian motions");
     }

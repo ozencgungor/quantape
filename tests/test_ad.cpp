@@ -6,11 +6,12 @@
  * using Stan Math's reverse-mode automatic differentiation.
  */
 
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
-#include "quantape/math/StanMath.h"
 
 #include <algorithm> // For std::copy
 #include <cmath>

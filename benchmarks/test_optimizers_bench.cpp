@@ -7,13 +7,14 @@
 //   /usr/bin/sample test_optimizers_bench 5 -file /tmp/prof.txt
 //
 // Run: ./test_optimizers_bench 200
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/ImplicitFunction.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
-#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cstdio>

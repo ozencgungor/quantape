@@ -9,8 +9,9 @@
 //   5. dispatch: usesWeightMatrix() true iff Spline/Parabolic
 //
 // Run: ./test_cubic_weights
-#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 
 #include <cmath>
 #include <cstdlib>

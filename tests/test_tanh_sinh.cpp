@@ -7,9 +7,10 @@
 //   `fvar<var>`: second derivative (Hessian) matches the analytic value
 //
 // Run: ./test_tanh_sinh
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Integrals/TanhSinhIntegrator.h"
-#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdlib>

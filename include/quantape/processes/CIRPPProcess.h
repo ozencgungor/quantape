@@ -1,5 +1,5 @@
-#ifndef CIRPP_MODEL_H
-#define CIRPP_MODEL_H
+#ifndef CIRPP_PROCESS_H
+#define CIRPP_PROCESS_H
 
 #include <map>
 #include <vector>
@@ -29,10 +29,10 @@ struct CIRPPState {
 };
 
 // CIR++ model class
-class CIRPPModel {
+class CIRPPProcess {
 public:
     // Constructor takes params struct
-    explicit CIRPPModel(const CIRPPParams& params);
+    explicit CIRPPProcess(const CIRPPParams& params);
 
     // Update function for CIR++ model
     void update(CIRPPState& current, const CIRPPState& previous, size_t stepIndex, double dt,
@@ -46,7 +46,7 @@ private:
 };
 
 // Namespace for CIR++ helper functions
-namespace quantape::models::cirpp {
+namespace quantape::processes::cirpp {
 // ========================================================================
 // Credit Risk Helper Functions
 // ========================================================================
@@ -74,6 +74,6 @@ double getHazardRate(const std::map<int, CIRPPState>& path, int day);
 
 // Calculate average hazard rate over a period
 double getAverageHazardRate(const std::map<int, CIRPPState>& path, int fromDay, int toDay);
-} // namespace quantape::models::cirpp
+} // namespace quantape::processes::cirpp
 
-#endif // CIRPP_MODEL_H
+#endif // CIRPP_PROCESS_H

@@ -1,7 +1,7 @@
 #ifndef EQUITY_GENERATOR_H
 #define EQUITY_GENERATOR_H
 
-#include "quantape/models/HestonModel.h"
+#include "quantape/processes/HestonProcess.h"
 #include "quantape/scenario/EquitySimulator.h"
 #include "quantape/scenario/ModelGenerator.h"
 

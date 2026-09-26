@@ -1,5 +1,5 @@
-#ifndef CIR_MODEL_H
-#define CIR_MODEL_H
+#ifndef CIR_PROCESS_H
+#define CIR_PROCESS_H
 
 #include <vector>
 
@@ -21,10 +21,10 @@ struct CIRState {
 };
 
 // CIR model class
-class CIRModel {
+class CIRProcess {
 public:
     // Constructor takes params struct
-    explicit CIRModel(const CIRParams& params);
+    explicit CIRProcess(const CIRParams& params);
 
     // Update function for CIR model
     void update(CIRState& current, const CIRState& previous, size_t stepIndex, double dt,
@@ -37,4 +37,4 @@ private:
     CIRParams m_params;
 };
 
-#endif // CIR_MODEL_H
+#endif // CIR_PROCESS_H

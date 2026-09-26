@@ -10,8 +10,9 @@
 //   4. dispatch: usesWeightMatrix() true iff Spline/Parabolic with AD
 //
 // Run: ./test_bicubic_weights
-#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 
 #include <cmath>
 #include <cstdlib>

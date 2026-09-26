@@ -14,7 +14,7 @@ void CreditSimulator::addCredit(const std::string& name, const CIRParams& params
     if (m_creditModels.find(name) != m_creditModels.end()) {
         throw std::invalid_argument("Credit '" + name + "' already exists");
     }
-    m_creditModels.insert({name, CIRModel(params)});
+    m_creditModels.insert({name, CIRProcess(params)});
 }
 
 void CreditSimulator::simulateCredit(const std::string& name) {
@@ -29,7 +29,7 @@ void CreditSimulator::simulateCredit(const std::string& name) {
         throw std::invalid_argument("Credit '" + name + "' not found");
     }
 
-    const CIRModel& model = it->second;
+    const CIRProcess& model = it->second;
     size_t creditIndex = std::distance(m_creditModels.begin(), it);
 
     // Generate single independent Brownian motion for this credit (CIR is 1-factor)

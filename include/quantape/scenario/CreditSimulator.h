@@ -1,7 +1,7 @@
 #ifndef CREDIT_SIMULATOR_H
 #define CREDIT_SIMULATOR_H
 
-#include "quantape/models/CIRModel.h"
+#include "quantape/processes/CIRProcess.h"
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>
@@ -34,7 +34,7 @@ public:
     bool isSimulated(const std::string& name) const;
 
 private:
-    std::map<std::string, CIRModel> m_creditModels;
+    std::map<std::string, CIRProcess> m_creditModels;
     std::map<std::string, std::map<int, CIRState>> m_creditPaths;
     std::set<std::string> m_simulatedCredits;
 };

@@ -15,11 +15,12 @@
 //   auto-bracketing: var gradient through the guess+step overload
 //
 // Run: ./test_solvers_ad
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
-#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>

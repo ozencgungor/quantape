@@ -1,5 +1,5 @@
-#ifndef GBM_MODEL_H
-#define GBM_MODEL_H
+#ifndef GBM_PROCESS_H
+#define GBM_PROCESS_H
 
 #include <cmath>
 #include <type_traits>
@@ -29,7 +29,7 @@ struct GBMState {
 };
 
 // Namespace for GBM model functions
-namespace quantape::models::gbm {
+namespace quantape::processes::gbm {
 // Generic update function for any MarketObject type
 // Evolution: S_t = S_0 * exp((mu - sigma^2/2)*t + sigma*W_t)
 // Discrete form: S_new = S_old * exp((mu - sigma^2/2)*dt + sigma*dW)
@@ -55,6 +55,6 @@ inline void updateGBM(GBMState<MarketObject>& current, const GBMState<MarketObje
     double factor = std::exp(drift_correction + diffusion);
     current.value = previous.value * factor;
 }
-} // namespace quantape::models::gbm
+} // namespace quantape::processes::gbm
 
-#endif // GBM_MODEL_H
+#endif // GBM_PROCESS_H

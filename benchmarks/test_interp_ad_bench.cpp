@@ -12,9 +12,10 @@
  *   3. Cubic Spline 1D     (adjoint tridiagonal solve — all y-values contribute)
  */
 
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
-#include "quantape/math/StanMath.h"
 
 #include <chrono>
 #include <cmath>

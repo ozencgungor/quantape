@@ -1,4 +1,4 @@
-#include "quantape/models/CIRModel.h"
+#include "quantape/processes/CIRProcess.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,13 +27,13 @@ CIRParams::CIRParams(double r0, double kappa, double theta, double sigma)
 CIRState::CIRState(double value) : value(value) {}
 
 // ============================================================================
-// CIRModel Implementation
+// CIRProcess Implementation
 // ============================================================================
 
-CIRModel::CIRModel(const CIRParams& params) : m_params(params) {}
+CIRProcess::CIRProcess(const CIRParams& params) : m_params(params) {}
 
-void CIRModel::update(CIRState& current, const CIRState& previous, size_t stepIndex, double dt,
-                      const std::vector<double>& dW) const {
+void CIRProcess::update(CIRState& current, const CIRState& previous, size_t stepIndex, double dt,
+                        const std::vector<double>& dW) const {
     if (dW.empty()) {
         throw std::invalid_argument("CIR model requires at least 1 Brownian motion");
     }

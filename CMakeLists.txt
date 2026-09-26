@@ -579,6 +579,65 @@ target_compile_definitions(test_ift PRIVATE
 
 target_compile_options(test_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
 
+# SDE simulation engine core (Stan-free: Eigen only)
+add_executable(test_sde_simulator tests/test_sde_simulator.cpp)
+
+target_link_libraries(test_sde_simulator PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_options(test_sde_simulator PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# SDE schemes (Milstein uses Stan forward-mode fvar)
+add_executable(test_sde_schemes tests/test_sde_schemes.cpp)
+
+target_link_libraries(test_sde_schemes PUBLIC
+        quantape
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_sde_schemes PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_sde_schemes PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# SDE moment matching (QE) — Stan-free
+add_executable(test_sde_moment_matching tests/test_sde_moment_matching.cpp)
+
+target_link_libraries(test_sde_moment_matching PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_options(test_sde_moment_matching PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# SDE process bundles + Heston QE — Stan-free
+add_executable(test_sde_processes tests/test_sde_processes.cpp)
+
+target_link_libraries(test_sde_processes PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_options(test_sde_processes PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# SDE engine benchmarking harness (sampling profiler target)
+add_executable(bench_sde benchmarks/bench_sde.cpp)
+
+target_link_libraries(bench_sde PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_options(bench_sde PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
+
 # Optimizer benchmarking harness (timing + sampling profiler target)
 add_executable(test_optimizers_bench benchmarks/test_optimizers_bench.cpp)
 

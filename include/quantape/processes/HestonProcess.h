@@ -1,5 +1,5 @@
-#ifndef HESTON_MODEL_H
-#define HESTON_MODEL_H
+#ifndef HESTON_PROCESS_H
+#define HESTON_PROCESS_H
 
 #include <vector>
 
@@ -26,10 +26,10 @@ struct HestonState {
 };
 
 // Heston model class
-class HestonModel {
+class HestonProcess {
 public:
     // Constructor takes params struct
-    explicit HestonModel(const HestonParams& params);
+    explicit HestonProcess(const HestonParams& params);
 
     // Update function for Heston model
     void update(HestonState& current, const HestonState& previous, size_t stepIndex, double dt,
@@ -42,4 +42,4 @@ private:
     HestonParams m_params;
 };
 
-#endif // HESTON_MODEL_H
+#endif // HESTON_PROCESS_H

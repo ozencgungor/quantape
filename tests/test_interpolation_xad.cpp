@@ -10,8 +10,9 @@
 //   5. evaluateFixed: x adjoint stays zero (passive-abscissa policy)
 //
 // Run: ./test_interpolation_xad
-#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 
 #include <cmath>
 #include <cstdio>

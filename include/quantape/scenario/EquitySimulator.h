@@ -1,7 +1,7 @@
 #ifndef EQUITY_SIMULATOR_H
 #define EQUITY_SIMULATOR_H
 
-#include "quantape/models/HestonModel.h"
+#include "quantape/processes/HestonProcess.h"
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>
@@ -34,7 +34,7 @@ public:
     bool isSimulated(const std::string& name) const;
 
 private:
-    std::map<std::string, HestonModel> m_equityModels;
+    std::map<std::string, HestonProcess> m_equityModels;
     std::map<std::string, std::map<int, HestonState>> m_equityPaths;
     std::set<std::string> m_simulatedEquities;
 };

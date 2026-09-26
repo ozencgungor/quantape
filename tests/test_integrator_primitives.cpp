@@ -20,8 +20,9 @@
 //       H = 2/(1+theta)^3 (non-polynomial; all methods accurate to << 1e-6)
 //
 // Run: ./test_integrator_primitives
-#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 
 #include <cmath>
 #include <cstddef>

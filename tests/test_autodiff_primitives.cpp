@@ -9,12 +9,13 @@
 //      equals the quadrature/trapezoid weights on the knots
 //
 // Run: ./test_autodiff_primitives
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Autodiff/Hvp.h"
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
-#include "quantape/math/StanMath.h"
 
 #include <cmath>
 #include <cstdio>

@@ -1,5 +1,5 @@
-#ifndef JCIRPP_MODEL_H
-#define JCIRPP_MODEL_H
+#ifndef JCIRPP_PROCESS_H
+#define JCIRPP_PROCESS_H
 
 #include <map>
 #include <vector>
@@ -33,10 +33,10 @@ struct JCIRPPState {
 };
 
 // JCIR++ model class
-class JCIRPPModel {
+class JCIRPPProcess {
 public:
     // Constructor takes params struct
-    explicit JCIRPPModel(const JCIRPPParams& params);
+    explicit JCIRPPProcess(const JCIRPPParams& params);
 
     // Update function for JCIR++ model
     // Note: Requires a seed for Poisson/exponential random generation
@@ -51,7 +51,7 @@ private:
 };
 
 // Namespace for JCIR++ helper functions
-namespace quantape::models::jcirpp {
+namespace quantape::processes::jcirpp {
 // ========================================================================
 // Credit Risk Helper Functions
 // ========================================================================
@@ -84,6 +84,6 @@ int getTotalJumps(const std::map<int, JCIRPPState>& path, int day);
 
 // Get number of jumps in a period
 int getJumpsInPeriod(const std::map<int, JCIRPPState>& path, int fromDay, int toDay);
-} // namespace quantape::models::jcirpp
+} // namespace quantape::processes::jcirpp
 
-#endif // JCIRPP_MODEL_H
+#endif // JCIRPP_PROCESS_H

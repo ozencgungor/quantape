@@ -14,7 +14,7 @@ void EquitySimulator::addEquity(const std::string& name, const HestonParams& par
     if (m_equityModels.find(name) != m_equityModels.end()) {
         throw std::invalid_argument("Equity '" + name + "' already exists");
     }
-    m_equityModels.insert({name, HestonModel(params)});
+    m_equityModels.insert({name, HestonProcess(params)});
 }
 
 void EquitySimulator::simulateEquity(const std::string& name) {
@@ -29,7 +29,7 @@ void EquitySimulator::simulateEquity(const std::string& name) {
         throw std::invalid_argument("Equity '" + name + "' not found");
     }
 
-    const HestonModel& model = it->second;
+    const HestonProcess& model = it->second;
     size_t equityIndex = std::distance(m_equityModels.begin(), it);
 
     // Create correlation matrix for Heston (spot and variance)

@@ -94,6 +94,9 @@ BreakStringLiterals: true
 # Includes
 IncludeBlocks: Regroup
 IncludeCategories:
+  # Stan single-include must sort first (Eigen plugin ordering)
+  - Regex: '^"quantape/math/StanMath\.h"$'
+    Priority: 0
   # Project headers
   - Regex: '^"quantape/'
     Priority: 1

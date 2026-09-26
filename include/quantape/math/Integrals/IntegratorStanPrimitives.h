@@ -50,8 +50,9 @@
 // the same frozen rule.
 //
 
-#include "quantape/math/Autodiff/PrimalExtraction.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/math/Autodiff/PrimalExtraction.h"
 
 #include <cstddef>
 #include <memory>

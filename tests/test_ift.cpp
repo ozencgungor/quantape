@@ -8,13 +8,14 @@
 // bump-and-recalibrate finite differences (the gates from
 // docs/ad_optimizers.md §8.3: IFT vs FD <= 1e-6), plus multiplier
 // sensitivities vs one-sided re-optimization.
+#include "quantape/math/StanMath.h"
+
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/ImplicitFunction.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
-#include "quantape/math/StanMath.h"
 
 #include <Eigen/Dense>
 
