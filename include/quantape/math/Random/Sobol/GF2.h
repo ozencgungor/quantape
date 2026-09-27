@@ -115,15 +115,16 @@ inline bool is_irreducible(uint64_t p, int s) {
     uint64_t xpow = 2;
     for (int i = 0; i < s; ++i)
         xpow = mod(mul(xpow, xpow), p);
-    if (xpow != 2)
+    const uint64_t x = mod(2, p);
+    if (xpow != x)
         return false;
 
     for (uint64_t q : prime_factors(s)) {
         uint64_t xp = 2;
         for (int i = 0; i < s / (int)q; ++i)
             xp = mod(mul(xp, xp), p);
-        if (gcd(xp ^ 2, p) != 1)
-            return false; // xp - x = xp ^ x = xp ^ 2 (polynomial "x" = 0b10)
+        if (gcd(xp ^ x, p) != 1)
+            return false; // xp - x = xp ^ x
     }
     return true;
 }

@@ -1,163 +1,124 @@
 /**
  * @file extend_sobol.cpp
- * @brief Extend Joe-Kuo Sobol direction numbers from 21,201 to 100,000+ dimensions.
+ * @brief Extend Joe-Kuo Sobol direction numbers beyond 21201 dimensions.
+ *
+ * Standalone tool: only the C++ standard library and the headers under
+ * include/quantape/math/Random/Sobol/ are needed (no Stan, Eigen, TBB or the
+ * quantape library). Build:
+ *
+ *   g++ -O3 -std=c++20 -pthread -I include tools/extend_sobol.cpp -o extend_sobol
  *
  * Three modes of operation:
  *
- *   --local     Run everything in-process with thread pool.
- *               Good for extending to ~50K with CBC, or 100K+ with RANDOM.
+ *   --local     Run everything in-process with a thread pool. This is the
+ *               supported path for criterion search: dimensions are chosen
+ *               sequentially (component-by-component), candidates of each
+ *               dimension are evaluated in parallel.
  *
- *   --dispatch  Generate work batches as files for container execution.
- *               Each batch is a text file consumed by --worker mode.
+ *   --dispatch  Generate work batches as files (RANDOM level only in worker
+ *               mode; criterion search needs the chosen prefix).
  *
  *   --worker    Read work items from stdin, write results to stdout.
- *               Run inside Docker containers for distributed CBC search.
+ *
+ * Search levels:
+ *   0 (random)    random valid direction numbers; seconds for any target.
+ *   1 (windowed)  minimise the weighted 2D-projection criterion D(q) against
+ *                 the last --window dimensions (default 128). Recommended.
+ *   2 (full)      criterion against every previous dimension (Joe-Kuo style;
+ *                 cost grows linearly with dimension).
  *
  * Examples:
- *   # Extend to 100K locally, CBC search, 16 threads
- *   ./extend_sobol --local --target=100000 --level=1 --threads=16 \
- *       --input=new-joe-kuo-6.21201 --output=joe-kuo-100k.txt
+ *   # Random valid direction numbers: 300k dimensions in seconds
+ *   ./extend_sobol --local --target=300000 --level=0 \
+ *       --input=new-joe-kuo-6.21201 --output=joe-kuo-300k.txt
  *
- *   # Generate work batches for 32 containers
- *   ./extend_sobol --dispatch --target=100000 --level=1 --batches=32 \
- *       --input=new-joe-kuo-6.21201 --outdir=./work/
- *
- *   # Worker mode (inside container)
- *   ./extend_sobol --worker < batch_007.txt > results_007.txt
- *
- *   # Random mode — instant, good enough for high dimensions
- *   ./extend_sobol --local --target=100000 --level=0 --input=new-joe-kuo-6.21201
+ *   # Weighted 2D search with a 128-dimension window
+ *   ./extend_sobol --local --target=150000 --level=1 --threads=16 --window=128 \
+ *       --input=new-joe-kuo-6.21201 --output=joe-kuo-150k.txt
  */
+#include "quantape/math/Random/Sobol/CBCSearch.h"
+#include "quantape/math/Random/Sobol/DirectionNumbers.h"
+#include "quantape/math/Random/Sobol/GF2.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
-#include "../Math/Random/Sobol/CBCSearch.h"
-#include "../Math/Random/Sobol/DirectionNumbers.h"
-#include "../Math/Random/Sobol/GF2.h"
+using namespace quantape::math::mc;
 
-using namespace mc;
+namespace {
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Polynomial collection: gather enough primitive polys to reach target dims
-// ═══════════════════════════════════════════════════════════════════════════
+struct Options {
+    int target = 100000;
+    sobol::SearchLevel level = sobol::SearchLevel::WINDOWED;
+    int threads = 0;
+    int window = 128;
+    int candidates = 0; ///< <= 0: max(64, 2000000 / dim) as in Joe-Kuo
+    int mMin = 1;
+    int mMax = 31;
+    double exponent = 6.0;
+    double weightBase = 0.9999;
+};
 
 struct PolyInfo {
     uint64_t poly;
     int degree;
 };
 
-std::vector<PolyInfo> collect_polynomials(int start_dim, int target_dim, int start_degree) {
-    std::vector<PolyInfo> polys;
-    int needed = target_dim - start_dim;
-    int deg = start_degree;
-
-    fprintf(stderr, "  Collecting %d primitive polynomials (degrees %d+)...\n", needed, deg);
-
-    while ((int)polys.size() < needed) {
-        auto t0 = std::chrono::steady_clock::now();
-        uint64_t expected = gf2::count_primitive(deg);
-        fprintf(stderr, "    degree %d: expecting ~%llu polys... ", deg,
-                (unsigned long long)expected);
-
-        auto found = gf2::enumerate_primitive(deg);
-
-        auto t1 = std::chrono::steady_clock::now();
-        double secs = std::chrono::duration<double>(t1 - t0).count();
-        fprintf(stderr, "found %zu in %.1fs\n", found.size(), secs);
-
-        for (auto p : found) {
-            if ((int)polys.size() >= needed)
-                break;
-            polys.push_back({p, deg});
-        }
-        ++deg;
-    }
-
-    fprintf(stderr, "  Collected %zu polynomials (degrees %d-%d)\n", polys.size(), start_degree,
-            deg - 1);
-    return polys;
-}
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Mode: --local
 // ═══════════════════════════════════════════════════════════════════════════
 
-void run_local(const std::string& input_file, const std::string& output_file, int target_dim,
-               sobol::SearchLevel level, int num_threads, int n_proj_check) {
+void run_local(const std::string& input_file, const std::string& output_file,
+               const Options& options) {
     // 1. Load existing Joe-Kuo file
     fprintf(stderr, "Loading existing direction numbers from: %s\n", input_file.c_str());
     auto existing = sobol::load_joe_kuo(input_file);
     int start_dim = (int)existing.size() + 2; // +2 because dim 1 has no entry
     fprintf(stderr, "  Loaded %zu entries (dims 2-%d)\n", existing.size(), start_dim - 1);
 
-    if (start_dim > target_dim) {
+    if (start_dim > options.target) {
         fprintf(stderr, "  Already have %d dims, target is %d. Nothing to do.\n", start_dim - 1,
-                target_dim);
+                options.target);
         return;
     }
 
-    // 2. Precompute direction numbers for existing dims (for 2D projection quality)
-    std::vector<std::vector<uint64_t>> existing_v;
-    if (level == sobol::SearchLevel::PROJ_2D) {
-        fprintf(stderr, "  Precomputing existing direction numbers for 2D checks...\n");
-        existing_v.reserve(existing.size());
-        for (auto& e : existing)
-            existing_v.push_back(sobol::entry_to_v(e));
-    }
-
-    // 3. Find the starting polynomial degree
+    // 2. Find the starting polynomial degree and the already used polynomials
     int max_existing_degree = 0;
-    for (auto& e : existing)
+    std::vector<uint64_t> used_polys;
+    used_polys.reserve(existing.size());
+    for (auto& e : existing) {
         if ((int)e.s > max_existing_degree)
             max_existing_degree = e.s;
-    // New polynomials start at the next degree after the last one used
-    // (or same degree if not all polys of that degree are used)
-
-    // Actually: we need to find polys NOT already used. The simplest approach:
-    // enumerate from degree max_existing_degree upward, skip polys already in the file.
-    // For Joe-Kuo, dims are ordered by degree, so all polys of degree ≤ max_existing_degree
-    // through the last entry's polynomial are used. We can just start enumerating from
-    // the next polynomial of that degree.
-    //
-    // Simpler: enumerate all primitive polys of each degree from max_existing_degree up,
-    // skip those already in the existing set.
-
-    // Build set of used polynomials
-    std::vector<uint64_t> used_polys;
-    for (auto& e : existing)
-        used_polys.push_back(gf2::decode_poly(e.s, e.a));
+        used_polys.push_back(gf2::decode_poly((int)e.s, e.a));
+    }
+    const std::unordered_set<uint64_t> used(used_polys.begin(), used_polys.end());
 
     fprintf(stderr, "\nEnumerating new primitive polynomials...\n");
-
     std::vector<PolyInfo> new_polys;
-    int needed = target_dim - start_dim + 1;
+    const int needed = options.target - start_dim + 1;
     for (int deg = max_existing_degree; (int)new_polys.size() < needed; ++deg) {
         auto t0 = std::chrono::steady_clock::now();
         auto candidates = gf2::enumerate_primitive(deg);
         auto t1 = std::chrono::steady_clock::now();
-        double secs = std::chrono::duration<double>(t1 - t0).count();
+        const double secs = std::chrono::duration<double>(t1 - t0).count();
 
         int added = 0;
-        for (auto p : candidates) {
+        for (uint64_t p : candidates) {
             if ((int)new_polys.size() >= needed)
                 break;
-            // Skip if already used
-            bool used = false;
-            for (auto u : used_polys) {
-                if (u == p) {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used) {
+            if (used.count(p) == 0) {
                 new_polys.push_back({p, deg});
                 ++added;
             }
@@ -166,70 +127,138 @@ void run_local(const std::string& input_file, const std::string& output_file, in
                 added, secs);
     }
 
-    // 4. Build work items
-    fprintf(stderr, "\nBuilding %d work items (level=%d)...\n", (int)new_polys.size(), (int)level);
+    // 3. Build work items
+    fprintf(stderr, "\nBuilding %d work items (level=%d)...\n", (int)new_polys.size(),
+            (int)options.level);
 
     std::vector<sobol::WorkItem> work(new_polys.size());
     for (size_t i = 0; i < new_polys.size(); ++i) {
         work[i].dim = start_dim + (uint32_t)i;
         work[i].polynomial = new_polys[i].poly;
         work[i].degree = new_polys[i].degree;
-        work[i].level = level;
+        work[i].level = options.level;
         work[i].seed = 0xcafe0000ULL + i; // reproducible seed per dim
     }
 
-    // 5. Run search
-    fprintf(stderr, "\nSearching for direction numbers (%d threads)...\n", num_threads);
-    auto t0 = std::chrono::steady_clock::now();
-
-    auto results = sobol::process_batch(
-        work, existing_v, n_proj_check, num_threads, [](uint32_t done, uint32_t total) {
-            fprintf(stderr, "\r  %u / %u (%.1f%%)", done, total, 100.0 * done / total);
-        });
-
-    auto t1 = std::chrono::steady_clock::now();
-    double secs = std::chrono::duration<double>(t1 - t0).count();
-    fprintf(stderr, "\n  Done in %.1fs (%.1f dims/sec)\n", secs, results.size() / secs);
-
-    // 6. Quality summary
-    int t0_count = 0, max_t = 0;
-    for (auto& r : results) {
-        if (r.t_val == 0)
-            ++t0_count;
-        if (r.t_val > max_t)
-            max_t = r.t_val;
-    }
-    fprintf(stderr, "\n  Quality: %d/%zu with t=0 (Property A), max t=%d\n", t0_count,
-            results.size(), max_t);
-
-    // 7. Write output
-    std::vector<sobol::Entry> new_entries(results.size());
-    for (size_t i = 0; i < results.size(); ++i) {
-        new_entries[i].dim = results[i].dim;
-        new_entries[i].s = results[i].degree;
-        new_entries[i].a = results[i].a_encoded;
-        new_entries[i].m = results[i].m;
+    // 4. Search context: dimensions 1..start_dim-1 (index i = dimension i+1)
+    sobol::SearchContext context;
+    context.criterion.window = (options.level == sobol::SearchLevel::FULL) ? 0 : options.window;
+    context.criterion.mMin = options.mMin;
+    context.criterion.mMax = options.mMax;
+    context.criterion.exponent = options.exponent;
+    context.criterion.weightBase = options.weightBase;
+    context.candidates = options.candidates;
+    if (options.level != sobol::SearchLevel::RANDOM) {
+        context.previous.reserve(existing.size() + 1);
+        context.previous.push_back(sobol::identityMatrix());
+        for (auto& e : existing)
+            context.previous.push_back(sobol::directionMatrix(e));
+        if (start_dim <= 1111) {
+            context.enforcePropertyA = true;
+            context.propertyA = sobol::PropertyAChecker(1111);
+            for (auto& e : existing)
+                context.propertyA.add(e);
+        }
     }
 
-    std::string out = output_file.empty() ? "joe-kuo-extended.txt" : output_file;
-    fprintf(stderr, "\n  Writing %zu new entries to: %s\n", new_entries.size(), out.c_str());
-
-    // Copy existing file and append new entries
+    // 5. Prepare output and run search (CBC results are checkpointed to the
+    // output file every 100 dimensions, so an interrupted run can resume with
+    // the partial file as --input).
+    const std::string out = output_file.empty() ? "joe-kuo-extended.txt" : output_file;
     if (!input_file.empty() && input_file != out) {
         std::filesystem::copy_file(input_file, out,
                                    std::filesystem::copy_options::overwrite_existing);
     }
-    sobol::save_joe_kuo(out, new_entries, true);
+    fprintf(stderr, "\nSearching for direction numbers (threads=%d, level=%d)\n", options.threads,
+            (int)options.level);
+    if (options.level != sobol::SearchLevel::RANDOM) {
+        fprintf(stderr, "  criterion D(%.0f): window=%d m=[%d,%d] weight=%.4g candidates=%s\n",
+                options.exponent, options.window, options.mMin, options.mMax, options.weightBase,
+                options.candidates > 0 ? "fixed" : "auto");
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    size_t flushed = 0;
+    std::vector<sobol::Entry> pending;
+    const auto onResult = [&](std::size_t, const sobol::SearchResult& r) {
+        sobol::Entry e{r.dim, r.degree, r.a_encoded, r.m};
+        pending.push_back(std::move(e));
+        if (pending.size() >= 100) {
+            sobol::save_joe_kuo(out, pending, true);
+            flushed += pending.size();
+            pending.clear();
+        }
+    };
 
-    fprintf(stderr, "  Total dimensions: %d\n\n", (int)(existing.size() + 1 + new_entries.size()));
+    auto results = sobol::process_batch(
+        work, context, options.threads,
+        [&](uint32_t done, uint32_t total) {
+            if (done % 100 != 0 && done != total)
+                return;
+            const auto now = std::chrono::steady_clock::now();
+            const double elapsed = std::chrono::duration<double>(now - t0).count();
+            const double rate = done / std::max(elapsed, 1e-9);
+            const double eta = (total - done) / std::max(rate, 1e-9);
+            fprintf(stderr, "  %u / %u (%.1f%%)  %.1f dims/s  ETA %.0fs\n", done, total,
+                    100.0 * done / total, rate, eta);
+        },
+        options.level != sobol::SearchLevel::RANDOM ? onResult : sobol::ResultCallback{});
+    if (!pending.empty()) {
+        sobol::save_joe_kuo(out, pending, true);
+        flushed += pending.size();
+        pending.clear();
+    }
+
+    const auto t1 = std::chrono::steady_clock::now();
+    const double secs = std::chrono::duration<double>(t1 - t0).count();
+    fprintf(stderr, "\n  Done in %.1fs (%.1f dims/sec)\n", secs, results.size() / secs);
+
+    // 6. Quality summary
+    if (options.level != sobol::SearchLevel::RANDOM) {
+        double minScore = sobol::kNoScore;
+        double maxScore = 0.0;
+        double sum = 0.0;
+        int scored = 0;
+        int saturated = 0;
+        for (auto& r : results) {
+            if (r.score >= sobol::kNoScore) {
+                ++saturated;
+                continue;
+            }
+            minScore = std::min(minScore, r.score);
+            maxScore = std::max(maxScore, r.score);
+            sum += r.score;
+            ++scored;
+        }
+        fprintf(stderr, "  Quality D(%.0f) score: min=%.4g mean=%.4g max=%.4g\n", options.exponent,
+                minScore, scored > 0 ? sum / scored : 0.0, maxScore);
+        if (saturated > 0)
+            fprintf(stderr, "  WARNING: %d dimensions found no Property-A candidate\n", saturated);
+    }
+
+    // 7. Write output (RANDOM level only; CBC entries are already checkpointed)
+    if (options.level == sobol::SearchLevel::RANDOM) {
+        std::vector<sobol::Entry> new_entries(results.size());
+        for (size_t i = 0; i < results.size(); ++i) {
+            new_entries[i].dim = results[i].dim;
+            new_entries[i].s = results[i].degree;
+            new_entries[i].a = results[i].a_encoded;
+            new_entries[i].m = results[i].m;
+        }
+        fprintf(stderr, "\n  Writing %zu new entries to: %s\n", new_entries.size(), out.c_str());
+        sobol::save_joe_kuo(out, new_entries, true);
+    } else {
+        fprintf(stderr, "\n  Checkpointed %zu new entries to: %s\n", flushed, out.c_str());
+    }
+
+    fprintf(stderr, "  Total dimensions: %d\n\n", (int)(existing.size() + 1 + results.size()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Mode: --dispatch  (generate work batches for container execution)
 // ═══════════════════════════════════════════════════════════════════════════
 
-void run_dispatch(const std::string& input_file, const std::string& outdir, int target_dim,
-                  sobol::SearchLevel level, int n_batches) {
+void run_dispatch(const std::string& input_file, const std::string& outdir, const Options& options,
+                  int n_batches) {
     auto existing = sobol::load_joe_kuo(input_file);
     int start_dim = (int)existing.size() + 2;
 
@@ -238,35 +267,27 @@ void run_dispatch(const std::string& input_file, const std::string& outdir, int 
     for (auto& e : existing) {
         if ((int)e.s > max_deg)
             max_deg = e.s;
-        used.push_back(gf2::decode_poly(e.s, e.a));
+        used.push_back(gf2::decode_poly((int)e.s, e.a));
     }
+    const std::unordered_set<uint64_t> used_set(used.begin(), used.end());
 
-    // Collect polynomials
     std::vector<PolyInfo> polys;
-    int needed = target_dim - start_dim + 1;
+    const int needed = options.target - start_dim + 1;
     for (int deg = max_deg; (int)polys.size() < needed; ++deg) {
-        for (auto p : gf2::enumerate_primitive(deg)) {
+        for (uint64_t p : gf2::enumerate_primitive(deg)) {
             if ((int)polys.size() >= needed)
                 break;
-            bool skip = false;
-            for (auto u : used)
-                if (u == p) {
-                    skip = true;
-                    break;
-                }
-            if (!skip)
+            if (used_set.count(p) == 0)
                 polys.push_back({p, deg});
         }
     }
 
-    // Create output directory
     std::filesystem::create_directories(outdir);
 
-    // Split into batches
-    int per_batch = ((int)polys.size() + n_batches - 1) / n_batches;
+    const int per_batch = ((int)polys.size() + n_batches - 1) / n_batches;
     for (int b = 0; b < n_batches; ++b) {
-        int lo = b * per_batch;
-        int hi = std::min(lo + per_batch, (int)polys.size());
+        const int lo = b * per_batch;
+        const int hi = std::min(lo + per_batch, (int)polys.size());
         if (lo >= hi)
             break;
 
@@ -276,7 +297,7 @@ void run_dispatch(const std::string& input_file, const std::string& outdir, int 
             wi.dim = start_dim + i;
             wi.polynomial = polys[i].poly;
             wi.degree = polys[i].degree;
-            wi.level = level;
+            wi.level = sobol::SearchLevel::RANDOM;
             wi.seed = 0xcafe0000ULL + i;
             batch.push_back(wi);
         }
@@ -289,7 +310,7 @@ void run_dispatch(const std::string& input_file, const std::string& outdir, int 
                 batch.front().dim, batch.back().dim);
     }
 
-    fprintf(stderr, "\nTo process each batch in a container:\n");
+    fprintf(stderr, "\nTo process each batch (RANDOM level) in a container:\n");
     fprintf(stderr, "  docker run sobol-worker < batch_XXXX.txt > results_XXXX.txt\n\n");
 }
 
@@ -298,19 +319,18 @@ void run_dispatch(const std::string& input_file, const std::string& outdir, int 
 // ═══════════════════════════════════════════════════════════════════════════
 
 void run_worker(int num_threads) {
-    // Read all of stdin
     std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
 
     auto items = sobol::deserialize_work(input);
     fprintf(stderr, "  Worker: received %zu items\n", items.size());
 
+    sobol::SearchContext context; // empty: worker supports RANDOM level
     auto results =
-        sobol::process_batch(items, {}, 0, num_threads, [](uint32_t done, uint32_t total) {
+        sobol::process_batch(items, context, num_threads, [](uint32_t done, uint32_t total) {
             fprintf(stderr, "\r  Worker: %u / %u", done, total);
         });
     fprintf(stderr, "\n");
 
-    // Write results as Joe-Kuo format to stdout
     for (auto& r : results) {
         std::cout << r.dim << "\t" << r.degree << "\t" << r.a_encoded;
         for (auto mi : r.m)
@@ -326,27 +346,32 @@ void run_worker(int num_threads) {
 void usage(const char* prog) {
     fprintf(stderr,
             "Usage:\n"
-            "  %s --local    [options]   Run search locally with thread pool\n"
+            "  %s --local    [options]   Run search locally with a thread pool\n"
             "  %s --dispatch [options]   Generate work batches for containers\n"
             "  %s --worker   [options]   Process work from stdin (container mode)\n"
             "\n"
             "Options:\n"
-            "  --input=FILE     Joe-Kuo input file (21201 dims)\n"
-            "  --output=FILE    Output file (--local mode)\n"
-            "  --outdir=DIR     Output directory for batches (--dispatch mode)\n"
-            "  --target=N       Target number of dimensions (default: 100000)\n"
-            "  --level=L        Search level: 0=random, 1=property_a, 2=proj_2d (default: 1)\n"
-            "  --threads=N      Thread count (default: hardware concurrency)\n"
-            "  --batches=N      Number of batches (--dispatch mode, default: 32)\n"
-            "  --proj-check=N   Existing dims to check for 2D quality (default: 100)\n"
-            "\n",
+            "  --input=FILE      Joe-Kuo input file (21201 dims)\n"
+            "  --output=FILE     Output file (--local mode)\n"
+            "  --outdir=DIR      Output directory for batches (--dispatch mode)\n"
+            "  --target=N        Target number of dimensions (default: 100000)\n"
+            "  --level=L         0=random, 1=windowed D(6) search, 2=full D(6) search\n"
+            "  --threads=N       Thread count (default: hardware concurrency)\n"
+            "  --window=N        Previous dimensions in the level-1 criterion (default: 128)\n"
+            "  --candidates=N    Candidate sets per dimension (default: max(64, 2e6/dim))\n"
+            "  --mmin=N          First m in the criterion range (default: 1)\n"
+            "  --mmax=N          Last m in the criterion range (default: 31)\n"
+            "  --exponent=X      q in the criterion D(q) (default: 6)\n"
+            "  --weight=X        Weight base 0.9999^{j-1} (default: 0.9999)\n"
+            "  --batches=N       Number of batches (--dispatch mode, default: 32)\n",
             prog, prog, prog);
 }
 
 int main(int argc, char** argv) {
     enum Mode { NONE, LOCAL, DISPATCH, WORKER } mode = NONE;
     std::string input_file, output_file, outdir = "./sobol_work";
-    int target = 100000, level = 1, threads = 0, batches = 32, proj_check = 100;
+    Options options;
+    int batches = 32;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -366,22 +391,30 @@ int main(int argc, char** argv) {
         else if (arg.rfind("--outdir=", 0) == 0)
             outdir = arg.substr(9);
         else if (arg.rfind("--target=", 0) == 0)
-            target = std::stoi(arg.substr(9));
+            options.target = std::stoi(arg.substr(9));
         else if (arg.rfind("--level=", 0) == 0)
-            level = std::stoi(arg.substr(8));
+            options.level = static_cast<sobol::SearchLevel>(std::stoi(arg.substr(8)));
         else if (arg.rfind("--threads=", 0) == 0)
-            threads = std::stoi(arg.substr(10));
+            options.threads = std::stoi(arg.substr(10));
+        else if (arg.rfind("--window=", 0) == 0)
+            options.window = std::stoi(arg.substr(9));
+        else if (arg.rfind("--candidates=", 0) == 0)
+            options.candidates = std::stoi(arg.substr(13));
+        else if (arg.rfind("--mmin=", 0) == 0)
+            options.mMin = std::stoi(arg.substr(7));
+        else if (arg.rfind("--mmax=", 0) == 0)
+            options.mMax = std::stoi(arg.substr(7));
+        else if (arg.rfind("--exponent=", 0) == 0)
+            options.exponent = std::stod(arg.substr(11));
+        else if (arg.rfind("--weight=", 0) == 0)
+            options.weightBase = std::stod(arg.substr(9));
         else if (arg.rfind("--batches=", 0) == 0)
             batches = std::stoi(arg.substr(10));
-        else if (arg.rfind("--proj-check=", 0) == 0)
-            proj_check = std::stoi(arg.substr(13));
         else {
             fprintf(stderr, "Unknown option: %s\n", arg.c_str());
             return 1;
         }
     }
-
-    auto slevel = static_cast<sobol::SearchLevel>(level);
 
     switch (mode) {
         case LOCAL:
@@ -389,17 +422,17 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "Error: --input required\n");
                 return 1;
             }
-            run_local(input_file, output_file, target, slevel, threads, proj_check);
+            run_local(input_file, output_file, options);
             break;
         case DISPATCH:
             if (input_file.empty()) {
                 fprintf(stderr, "Error: --input required\n");
                 return 1;
             }
-            run_dispatch(input_file, outdir, target, slevel, batches);
+            run_dispatch(input_file, outdir, options, batches);
             break;
         case WORKER:
-            run_worker(threads);
+            run_worker(options.threads);
             break;
         default:
             usage(argv[0]);
