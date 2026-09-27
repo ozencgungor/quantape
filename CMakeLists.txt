@@ -179,6 +179,38 @@ target_include_directories(quantape PUBLIC
 add_executable(example_usage examples/example_usage.cpp)
 target_link_libraries(example_usage quantape)
 
+# Create executable for Sobol direction-number extension tool
+# (headers-only, standard library only: no quantape/TBB dependency)
+find_package(Threads REQUIRED)
+add_executable(extend_sobol tools/extend_sobol.cpp)
+target_include_directories(extend_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(extend_sobol PRIVATE Threads::Threads)
+
+# Sobol quality criterion tests (Joe-Kuo 2D t-values, Property A, search)
+add_executable(test_sobol_quality tests/test_sobol_quality.cpp)
+target_include_directories(test_sobol_quality PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(test_sobol_quality PRIVATE Threads::Threads)
+
+# Sobol table verifier (structure, criterion, net exactness, reference cross-check)
+add_executable(verify_sobol tools/verify_sobol.cpp)
+target_include_directories(verify_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(verify_sobol PRIVATE Threads::Threads)
+
+# Sobol direction-number refinement (two-sided coordinate descent)
+add_executable(refine_sobol tools/refine_sobol.cpp)
+target_include_directories(refine_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(refine_sobol PRIVATE Threads::Threads)
+
+# Integration tests for the Sobol tools (extend / refine / verify)
+add_executable(test_sobol_tools tests/test_sobol_tools.cpp)
+target_include_directories(test_sobol_tools PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(test_sobol_tools PRIVATE Threads::Threads)
+target_compile_definitions(test_sobol_tools PRIVATE
+    EXTEND_BIN="$<TARGET_FILE:extend_sobol>"
+    REFINE_BIN="$<TARGET_FILE:refine_sobol>"
+    VERIFY_BIN="$<TARGET_FILE:verify_sobol>")
+add_dependencies(test_sobol_tools extend_sobol refine_sobol verify_sobol)
+
 # Create executable for Math library tests
 add_executable(test_math tests/test_math.cpp)
 target_link_libraries(test_math quantape)
@@ -579,6 +611,11 @@ target_compile_definitions(test_ift PRIVATE
 
 target_compile_options(test_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
 
+# SDE AD policy: Stan-backed implementations are the defaults/reference
+# (mc/Gradients.h reverse, mc/ForwardStan.h forward, mc/StateDerivatives.h
+# state derivatives). Accelerated self-contained scalar types live under
+# mc/mcfwdrev/ (fixed-size dual, lean reverse tape) and are opt-in, gated
+# in test_sde_gradients against the Stan-backed modes.
 # SDE simulation engine core (Stan-free: Eigen only)
 add_executable(test_sde_simulator tests/test_sde_simulator.cpp)
 
@@ -628,12 +665,54 @@ target_link_libraries(test_sde_processes PUBLIC
 
 target_compile_options(test_sde_processes PRIVATE -Wall -Wextra -Wpedantic -O2)
 
+# SDE pathwise gradients (Stan rev-mode nested tapes, S5)
+add_executable(test_sde_gradients tests/test_sde_gradients.cpp)
+
+target_link_libraries(test_sde_gradients PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_sde_gradients PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_sde_gradients PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Market-risk propagation through calibrations (IFT/KKT tie-in, S5d)
+add_executable(test_market_risk_ift tests/test_market_risk_ift.cpp)
+
+target_link_libraries(test_market_risk_ift PUBLIC
+        TBB::tbb
+        SUNDIALS::nvecserial
+        SUNDIALS::cvodes
+)
+
+target_compile_definitions(test_market_risk_ift PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_market_risk_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
+
 # SDE engine benchmarking harness (sampling profiler target)
 add_executable(bench_sde benchmarks/bench_sde.cpp)
 
 target_link_libraries(bench_sde PUBLIC
         quantape
         TBB::tbb
+)
+
+target_compile_definitions(bench_sde PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
 )
 
 target_compile_options(bench_sde PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)

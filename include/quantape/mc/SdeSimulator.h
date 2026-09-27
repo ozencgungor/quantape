@@ -127,6 +127,58 @@ public:
         return simulateBlock(x0, drift, diffusion, source, pathIndex, 1);
     }
 
+    /// One path with an explicit scalar type and a shared (per-step
+    /// identical) theta — the stepping contract used by the AD layers,
+    /// which build fresh `var` leaves per path and thread them through
+    /// every step. Stan-free: no AD types appear here; `PathScalar`
+    /// instantiates on demand (e.g. `stan::math::var` in `Gradients.h`).
+    template <typename PathScalar, typename DriftF, typename DiffusionF, typename Source>
+        requires Drift<DriftF, PathScalar> && Diffusion<DiffusionF, PathScalar> &&
+                 RandomSource<Source> &&
+                 (Scheme::uniformStreams == 0 || UniformRandomSource<Source>)
+    PathBlock<PathScalar>
+    simulatePathSharedTheta(const Eigen::Matrix<PathScalar, Eigen::Dynamic, 1>& x0,
+                            const DriftF& drift, const DiffusionF& diffusion, const Source& source,
+                            std::size_t pathIndex, const std::vector<PathScalar>& theta) const {
+        const std::size_t nSteps = timeGrid_.nSteps();
+        const std::size_t nDims = static_cast<std::size_t>(x0.size());
+
+        PathBlock<PathScalar> path;
+        path.resize(nDims, nSteps, 1);
+        path.states[0].col(0) = x0;
+
+        typename Scheme::template Scratch<PathScalar> scratch(static_cast<Eigen::Index>(nDims), 1);
+        Eigen::MatrixXd z;
+        Eigen::MatrixXd uniforms;
+        for (std::size_t k = 0; k < nSteps; ++k) {
+            stepPath(path.states[k], path.states[k + 1], k, pathIndex, source, drift, diffusion,
+                     theta, z, uniforms, scratch);
+        }
+        return path;
+    }
+
+    /// One scheme step with explicit scalar type and caller-owned buffers —
+    /// the stepping primitive shared by the block loop and the AD layers.
+    /// When the caller reuses `z`, `uniforms` and the scheme scratch, a
+    /// whole path costs zero allocations (see `mc/Gradients.h` workspaces).
+    template <typename PathScalar, typename DriftF, typename DiffusionF, typename Source>
+        requires Drift<DriftF, PathScalar> && Diffusion<DiffusionF, PathScalar> &&
+                 RandomSource<Source> &&
+                 (Scheme::uniformStreams == 0 || UniformRandomSource<Source>)
+    void stepPath(StateMatrix<PathScalar>& x, StateMatrix<PathScalar>& xNext, std::size_t step,
+                  std::size_t pathIndex, const Source& source, const DriftF& drift,
+                  const DiffusionF& diffusion, const std::vector<PathScalar>& theta,
+                  Eigen::MatrixXd& z, Eigen::MatrixXd& uniforms,
+                  typename Scheme::template Scratch<PathScalar>& scratch) const {
+        const std::size_t nPaths = static_cast<std::size_t>(x.cols());
+        source.fill(step, pathIndex, nPaths, z);
+        if constexpr (Scheme::uniformStreams > 0) {
+            source.fillUniform(step, pathIndex, nPaths, 0, Scheme::uniformStreams, uniforms);
+        }
+        scheme_.step(x, xNext, timeGrid_.time(step), timeGrid_.dt(step), z, uniforms, drift,
+                     diffusion, theta, scratch);
+    }
+
 private:
     template <typename DriftF, typename DiffusionF, typename Source>
     PathBlock<Scalar> simulateBlock(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& x0,
@@ -150,12 +202,8 @@ private:
         Eigen::MatrixXd uniforms;
 
         for (std::size_t k = 0; k < nSteps; ++k) {
-            source.fill(k, pathBegin, blockPaths, z);
-            if constexpr (Scheme::uniformStreams > 0) {
-                source.fillUniform(k, pathBegin, blockPaths, 0, Scheme::uniformStreams, uniforms);
-            }
-            scheme_.step(block.states[k], block.states[k + 1], timeGrid_.time(k), timeGrid_.dt(k),
-                         z, uniforms, drift, diffusion, theta_[k], scratch);
+            stepPath(block.states[k], block.states[k + 1], k, pathBegin, source, drift, diffusion,
+                     theta_[k], z, uniforms, scratch);
         }
         return block;
     }

@@ -122,8 +122,8 @@ struct MomentMatching1D {
         moments.mean(x, t, dt, theta, scratch.meanBuf);
         moments.variance(x, t, dt, theta, scratch.varianceBuf);
         for (Eigen::Index p = 0; p < x.cols(); ++p) {
-            xNext(0, p) =
-                qeSample(scratch.meanBuf(0, p), scratch.varianceBuf(0, p), z(0, p), uniforms(0, p));
+            xNext(0, p) = qeSample(scratch.meanBuf(0, p), scratch.varianceBuf(0, p),
+                                   Scalar(z(0, p)), Scalar(uniforms(0, p)));
         }
     }
 };

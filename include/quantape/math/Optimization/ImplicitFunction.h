@@ -492,8 +492,11 @@ minimizeDifferential(const F2& f2, const G2& g2, const H2& h2, const Bounds& bou
         SLSQP<stan::math::var> solver(criteria);
         result = solver.minimize(fx, NoConstraint{}, hx, bounds, x, state);
     }
+    // RoundoffLimited is a valid optimum: the solver cannot improve the
+    // objective further in floating point, and the IFT is exact to roundoff.
     if (result != OptimizeResult::Success && result != OptimizeResult::GradientTolReached &&
-        result != OptimizeResult::FtolReached && result != OptimizeResult::XtolReached) {
+        result != OptimizeResult::FtolReached && result != OptimizeResult::XtolReached &&
+        result != OptimizeResult::RoundoffLimited) {
         return result;
     }
 
@@ -556,8 +559,11 @@ minimizeDifferentialVar(const F2& f2, const G2& g2, const H2& h2, const Bounds& 
     std::vector<double> dp_dm;
     const OptimizeResult result = minimizeDifferential(f2, g2, h2, bounds, m, x, state, ift, &dp_dm,
                                                        nullptr, nullptr, criteria, options);
+    // RoundoffLimited is a valid optimum: the solver cannot improve the
+    // objective further in floating point, and the IFT is exact to roundoff.
     if (result != OptimizeResult::Success && result != OptimizeResult::GradientTolReached &&
-        result != OptimizeResult::FtolReached && result != OptimizeResult::XtolReached) {
+        result != OptimizeResult::FtolReached && result != OptimizeResult::XtolReached &&
+        result != OptimizeResult::RoundoffLimited) {
         return result;
     }
 
