@@ -162,51 +162,93 @@ struct HestonProcess {
     double eta = 0.3;    ///< vol-of-vol
     double rho = -0.7;   ///< correlation of the two Brownians
 
+    /// theta layout for the engine's per-interval parameter vector:
+    /// `{mu, kappa, level, eta, rho}`. Empty theta falls back to the members
+    /// (backward compatible); the initial variance v0 is carried by the state
+    /// so gradients w.r.t. v0 flow through the initial condition.
     template <typename Scalar>
-    void drift(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>&,
+    void coefficients(const std::vector<Scalar>& theta, Scalar& muOut, Scalar& kappaOut,
+                      Scalar& levelOut, Scalar& etaOut, Scalar& rhoOut) const {
+        if (theta.empty()) {
+            muOut = Scalar(mu);
+            kappaOut = Scalar(kappa);
+            levelOut = Scalar(level);
+            etaOut = Scalar(eta);
+            rhoOut = Scalar(rho);
+            return;
+        }
+        if (theta.size() < 5) {
+            throw std::invalid_argument(
+                "HestonProcess: theta must be {mu, kappa, level, eta, rho}");
+        }
+        muOut = theta[0];
+        kappaOut = theta[1];
+        levelOut = theta[2];
+        etaOut = theta[3];
+        rhoOut = theta[4];
+    }
+
+    template <typename Scalar>
+    void drift(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& theta,
                mc::StateMatrix<Scalar>& out) const {
         if (x.rows() != 2) {
             throw std::invalid_argument("HestonProcess: state must be (lnS, V)");
         }
+        Scalar mu, kappa, level, eta, rho;
+        coefficients(theta, mu, kappa, level, eta, rho);
         out.resize(2, x.cols());
-        out.row(0).array() = Scalar(mu) - Scalar(0.5) * x.row(1).array();
-        out.row(1).array() = Scalar(kappa) * (Scalar(level) - x.row(1).array());
+        out.row(0).array() = mu - Scalar(0.5) * x.row(1).array();
+        out.row(1).array() = kappa * (level - x.row(1).array());
     }
 
     /// Factor fields: j = 0 -> V-Brownian (rho sqrt(V), eta sqrt(V));
     /// j = 1 -> orthogonal (sqrt(1-rho^2) sqrt(V), 0).
     template <typename Scalar>
-    void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>&,
+    void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& theta,
                    std::size_t factor, mc::StateMatrix<Scalar>& out) const {
         if (x.rows() != 2) {
             throw std::invalid_argument("HestonProcess: state must be (lnS, V)");
         }
+        using std::sqrt;
+        Scalar mu, kappa, level, eta, rho;
+        coefficients(theta, mu, kappa, level, eta, rho);
         const auto sqrtV = x.row(1).array().cwiseMax(Scalar(0.0)).sqrt();
         out.resize(2, x.cols());
         if (factor == 0) {
-            out.row(0).array() = Scalar(rho) * sqrtV;
-            out.row(1).array() = Scalar(eta) * sqrtV;
+            out.row(0).array() = rho * sqrtV;
+            out.row(1).array() = eta * sqrtV;
         } else if (factor == 1) {
-            out.row(0).array() = Scalar(std::sqrt(1.0 - rho * rho)) * sqrtV;
+            out.row(0).array() = sqrt(Scalar(1.0) - rho * rho) * sqrtV;
             out.row(1).setZero();
         } else {
             throw std::invalid_argument("HestonProcess: two factors only");
         }
     }
 
-    /// Exact CIR conditional moments of the variance (row 1), for QE
+    /// Exact CIR conditional moments of the variance (row 1), for QE.
+    ///
+    /// Scalar loop with per-step coefficients hoisted: Eigen expression
+    /// templates on AD scalars build a temporary per element, which the
+    /// pathwise-gradient path measured as a hot spot.
     template <typename Scalar>
     void varianceMoments(const mc::StateMatrix<Scalar>& x, double, double dt,
-                         const std::vector<Scalar>&, mc::StateMatrix<Scalar>& meanOut,
+                         const std::vector<Scalar>& theta, mc::StateMatrix<Scalar>& meanOut,
                          mc::StateMatrix<Scalar>& varOut) const {
         using std::exp;
-        const Scalar decay = exp(Scalar(-kappa * dt));
-        const Scalar oneMinus = Scalar(1.0) - decay;
+        Scalar mu, kappa, level, eta, rho;
+        coefficients(theta, mu, kappa, level, eta, rho);
+        const Scalar decay = exp(Scalar(-1.0) * kappa * Scalar(dt));
+        const Scalar meanAdd = level * (Scalar(1.0) - decay);
+        const Scalar varSlope = eta * eta * decay * (Scalar(1.0) - decay) / kappa;
+        const Scalar varAdd = level * (eta * eta * (Scalar(1.0) - decay) *
+                                       (Scalar(1.0) - decay) / (Scalar(2.0) * kappa));
         meanOut.resize(1, x.cols());
         varOut.resize(1, x.cols());
-        meanOut.row(0).array() = x.row(1).array() * decay + Scalar(level) * oneMinus;
-        varOut.row(0).array() = x.row(1).array() * Scalar(eta * eta * decay * oneMinus / kappa) +
-                                Scalar(level * eta * eta * oneMinus * oneMinus / (2.0 * kappa));
+        for (Eigen::Index p = 0; p < x.cols(); ++p) {
+            const Scalar v = x(1, p);
+            meanOut(0, p) = v * decay + meanAdd;
+            varOut(0, p) = v * varSlope + varAdd;
+        }
     }
 };
 

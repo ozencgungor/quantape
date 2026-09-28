@@ -54,8 +54,10 @@ struct HestonQeProcess {
     static constexpr std::size_t uniformStreams = 1;
 
     Process process;
+    bool martingaleCorrection = true; ///< Andersen log-price drift correction
 
-    explicit HestonQeProcess(Process p = Process{}) : process(std::move(p)) {}
+    explicit HestonQeProcess(Process p = Process{}, bool martingaleCorrectionIn = true)
+        : process(std::move(p)), martingaleCorrection(martingaleCorrectionIn) {}
 
     template <typename Scalar>
     struct Scratch {
@@ -77,14 +79,12 @@ struct HestonQeProcess {
         }
         process.varianceMoments(x, t, dt, theta, scratch.vMean, scratch.vVar);
 
-        const double mu = process.mu;
-        const double rho = process.rho;
-        const double eta = process.eta;
-        const double kappa = process.kappa;
-        const double level = process.level;
-        const double rhoOverEta = rho / eta;
-        const double kappaRhoOverEta = kappa * rhoOverEta;
-        const double oneMinusRho2 = 1.0 - rho * rho;
+        Scalar mu, kappa, level, eta, rho;
+        process.coefficients(theta, mu, kappa, level, eta, rho);
+        const Scalar rhoOverEta = rho / eta;
+        const Scalar kappaRhoOverEta = kappa * rhoOverEta;
+        const Scalar oneMinusRho2 = Scalar(1.0) - rho * rho;
+        const Scalar dtScalar(dt);
 
         for (Eigen::Index p = 0; p < x.cols(); ++p) {
             const Scalar v = x(1, p);
@@ -92,11 +92,26 @@ struct HestonQeProcess {
                                               Scalar(z(0, p)), Scalar(uniforms(0, p)));
             const Scalar vBar = Scalar(0.5) * (v + vNext);
             const Scalar vBarPos = vBar > Scalar(0.0) ? vBar : Scalar(0.0);
-            const Scalar diffusionScale = sqrt(Scalar(oneMinusRho2 * dt) * vBarPos);
-            xNext(0, p) = x(0, p) + Scalar(mu * dt) +
-                          Scalar(rhoOverEta) * (vNext - v - Scalar(kappa * level * dt)) +
-                          Scalar(kappaRhoOverEta - 0.5) * vBar * Scalar(dt) +
-                          diffusionScale * Scalar(z(1, p));
+            const Scalar diffusionScale = sqrt(oneMinusRho2 * dtScalar * vBarPos);
+            Scalar correction = Scalar(0.0);
+            if (martingaleCorrection) {
+                // Choose the drift so that E[S'|S,V] = e^{mu dt} S exactly
+                // under the QE sampler: subtract the deterministic part of
+                // E[exp(lnS'-lnS)|V] and the sampler's MGF at the exponent
+                // beta = rho/eta + (a + (1-rho^2)/2) dt/2,
+                // a = kappa rho/eta - 1/2.
+                const Scalar aCoef = kappaRhoOverEta - Scalar(0.5);
+                const Scalar bCoef = aCoef + Scalar(0.5) * oneMinusRho2;
+                const Scalar beta = rhoOverEta + Scalar(0.5) * dtScalar * bCoef;
+                const Scalar mgf = mc::qeVarianceMGF(beta, scratch.vMean(0, p), scratch.vVar(0, p));
+                using std::log;
+                correction = rhoOverEta * (v + kappa * level * dtScalar) -
+                             Scalar(0.5) * dtScalar * bCoef * v - log(mgf);
+            }
+            xNext(0, p) = x(0, p) + mu * dtScalar +
+                          rhoOverEta * (vNext - v - kappa * level * dtScalar) +
+                          (kappaRhoOverEta - Scalar(0.5)) * vBar * dtScalar +
+                          diffusionScale * Scalar(z(1, p)) + correction;
             xNext(1, p) = vNext;
         }
     }

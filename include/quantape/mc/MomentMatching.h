@@ -86,6 +86,31 @@ Scalar qeSample(const Scalar& m, const Scalar& s2, const Scalar& z, const Scalar
     return -log((Scalar(1.0) - u) / (Scalar(1.0) - p)) / beta;
 }
 
+/// Moment generating function `E[exp(u V')|V]` of the QE variance sampler
+/// (Andersen): noncentral chi-square MGF on the quadratic branch, mixture
+/// MGF on the exponential branch. Used for the Heston log-price martingale
+/// correction; scalar-generic (double/var/fvar/Tangent/RevScalar).
+template <typename Scalar>
+Scalar qeVarianceMGF(const Scalar& u, const Scalar& m, const Scalar& s2, double psiC = 1.5) {
+    using std::exp;
+    using std::sqrt;
+    if (!(m > Scalar(0.0))) {
+        return Scalar(1.0); // absorbing at zero: V' = 0
+    }
+    const Scalar psi = s2 / (m * m);
+    if (psi <= Scalar(psiC)) {
+        const Scalar twoOverPsi = Scalar(2.0) / psi;
+        const Scalar b2 =
+            twoOverPsi - Scalar(1.0) + sqrt(twoOverPsi) * sqrt(twoOverPsi - Scalar(1.0));
+        const Scalar a = m / (Scalar(1.0) + b2);
+        const Scalar denom = Scalar(1.0) - Scalar(2.0) * u * a;
+        return exp(u * a * b2 / denom) / sqrt(denom);
+    }
+    const Scalar p = (psi - Scalar(1.0)) / (psi + Scalar(1.0));
+    const Scalar beta = (Scalar(1.0) - p) / m;
+    return p + (Scalar(1.0) - p) * beta / (beta - u);
+}
+
 /**
  * @brief Generic 1-D moment-matching scheme (QE rule, positivity preserving)
  *
