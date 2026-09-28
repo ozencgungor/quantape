@@ -14,6 +14,7 @@
 #include "quantape/math/Random/Sobol/SobolGenerator.h"
 #include "quantape/math/Random/Sobol/SobolQuality.h"
 #include "quantape/mc/Estimator.h"
+#include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/SobolSource.h"
 #include "quantape/mc/TimeGrid.h"
