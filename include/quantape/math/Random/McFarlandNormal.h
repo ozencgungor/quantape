@@ -780,11 +780,11 @@ struct NormTables {
 template <typename RNG>
 class McFarlandExponential {
 public:
-    explicit McFarlandExponential(RNG& rng) : rng_(rng) {}
+    explicit McFarlandExponential(RNG& rng) : m_rng(rng) {}
 
     double operator()() {
         using ET = detail::ExpTables;
-        uint64_t u = rng_();
+        uint64_t u = m_rng();
         auto i = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
         if (i < ET::N_BINS)
@@ -799,13 +799,13 @@ public:
     }
 
 private:
-    RNG& rng_;
+    RNG& m_rng;
 
-    int64_t randInt63() { return static_cast<int64_t>(rng_() & 0x7FFFFFFFFFFFFFFFULL); }
+    int64_t randInt63() { return static_cast<int64_t>(m_rng() & 0x7FFFFFFFFFFFFFFFULL); }
 
     uint8_t sampleAlias() {
         using ET = detail::ExpTables;
-        uint64_t u = rng_();
+        uint64_t u = m_rng();
         auto j = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
         return s >= ET::ipmf[j] ? ET::map[j] : j;
@@ -842,12 +842,12 @@ private:
 template <typename RNG>
 class McFarlandNormal {
 public:
-    explicit McFarlandNormal(RNG& rng) : rng_(rng), exp_(rng) {}
+    explicit McFarlandNormal(RNG& rng) : m_rng(rng), m_exp(rng) {}
 
     double operator()() {
         using NT = detail::NormTables;
 
-        uint64_t u = rng_();
+        uint64_t u = m_rng();
         auto i = static_cast<uint8_t>(u & 0xFF);
 
         // Early exit: ~98.8% of the time (253/256)
@@ -859,14 +859,14 @@ public:
     }
 
 private:
-    RNG& rng_;
-    McFarlandExponential<RNG> exp_;
+    RNG& m_rng;
+    McFarlandExponential<RNG> m_exp;
 
-    int64_t randInt63() { return static_cast<int64_t>(rng_() & 0x7FFFFFFFFFFFFFFFULL); }
+    int64_t randInt63() { return static_cast<int64_t>(m_rng() & 0x7FFFFFFFFFFFFFFFULL); }
 
     uint8_t sampleAlias() {
         using NT = detail::NormTables;
-        uint64_t u = rng_();
+        uint64_t u = m_rng();
         auto j = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
         return s >= NT::ipmf[j] ? NT::map[j] : j;
@@ -902,8 +902,8 @@ private:
         } else if (j == 0) {
             // Tail sampling via exponential variates
             do {
-                x = (1.0 / NT::X_0) * exp_();
-            } while (exp_() < 0.5 * x * x);
+                x = (1.0 / NT::X_0) * m_exp();
+            } while (m_exp() < 0.5 * x * x);
             x += NT::X_0;
         } else if (j < NT::j_inflection) {
             // Concave overhang (near tail)

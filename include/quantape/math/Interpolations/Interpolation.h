@@ -161,10 +161,10 @@ protected:
      * varis as m_y, so adjoint accumulation is unchanged. The vector itself
      * is never resized after caching; element adjoints are the only writes.
      */
-    std::shared_ptr<std::vector<DoubleT>> m_y_shared;
+    std::shared_ptr<std::vector<DoubleT>> m_yShared;
 
     /// Snapshot m_y for the Fixed-path callbacks (call after m_y is final)
-    void cacheSharedValues() { m_y_shared = std::make_shared<std::vector<DoubleT>>(m_y); }
+    void cacheSharedValues() { m_yShared = std::make_shared<std::vector<DoubleT>>(m_y); }
 
     // ── Grid operations (all in double, never on tape) ──
 

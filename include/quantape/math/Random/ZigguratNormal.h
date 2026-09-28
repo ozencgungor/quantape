@@ -289,20 +289,20 @@ struct Xoshiro256ss {
 
 class ZigguratNormal {
 public:
-    explicit ZigguratNormal(uint64_t seed = 42) : tab_(generateZigguratTables()), rng_(seed) {}
+    explicit ZigguratNormal(uint64_t seed = 42) : m_tab(generateZigguratTables()), m_rng(seed) {}
 
     /// Generate one standard normal variate
     double operator()() {
         while (true) {
-            uint64_t u = rng_();
+            uint64_t u = m_rng();
             int i = static_cast<int>(u & 0xFF);
             auto s = static_cast<int64_t>(u);
 
-            double x = s * tab_.wtab[i];
+            double x = s * m_tab.wtab[i];
 
             // Fast path: |s| < ktab[i]
             auto abs_s = static_cast<uint64_t>(s < 0 ? -s : s);
-            if (abs_s < tab_.ktab[i])
+            if (abs_s < m_tab.ktab[i])
                 return x;
 
             // ── Slow path ──
@@ -311,7 +311,7 @@ public:
                 // Fast accept already checked |x| < r.
                 // If |x| >= r: sample from exponential tail beyond r.
                 double abs_x = std::abs(x);
-                if (abs_x < tab_.r)
+                if (abs_x < m_tab.r)
                     return x; // under the curve in base rectangle
                 double tail_x = sampleTail();
                 return (s < 0) ? -tail_x : tail_x;
@@ -320,30 +320,30 @@ public:
             // Interior / top layer rejection
             // Layer i has strip from y[i-1] to y[i] (or y[N-2] to 1.0 for top)
             double abs_x = std::abs(x);
-            double y_lo = tab_.y[i - 1];
+            double y_lo = m_tab.y[i - 1];
             double y_hi;
             if (i < ZigguratTables::N - 1)
-                y_hi = tab_.y[i];
+                y_hi = m_tab.y[i];
             else
                 y_hi = 1.0; // top layer
-            double y_test = y_lo + rng_.uniform01() * (y_hi - y_lo);
+            double y_test = y_lo + m_rng.uniform01() * (y_hi - y_lo);
             if (y_test < std::exp(-0.5 * abs_x * abs_x))
                 return x;
         }
     }
 
-    const ZigguratTables& tables() const { return tab_; }
+    const ZigguratTables& tables() const { return m_tab; }
 
 private:
-    ZigguratTables tab_;
-    Xoshiro256ss rng_;
+    ZigguratTables m_tab;
+    Xoshiro256ss m_rng;
 
     /// Sample from the tail: P(X > r) using Marsaglia's method
     double sampleTail() {
-        double r = tab_.r;
+        double r = m_tab.r;
         while (true) {
-            double u1 = rng_.uniform01();
-            double u2 = rng_.uniform01();
+            double u1 = m_rng.uniform01();
+            double u2 = m_rng.uniform01();
             double tail_x = -std::log(u1) / r + r;
             if (-2.0 * std::log(u2) >= (tail_x - r) * (tail_x - r))
                 return tail_x;

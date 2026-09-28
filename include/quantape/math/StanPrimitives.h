@@ -20,10 +20,11 @@
  * include for AD users.
  */
 
+#include "quantape/calibration/ImplicitFunction.h"
+
 #include "Autodiff/Hvp.h"
 #include "Integrals/IntegratorStanPrimitives.h"
 #include "Interpolations/InterpolationStanPrimitives.h"
-#include "quantape/calibration/ImplicitFunction.h"
 #include "Optimization/OptimizerStanPrimitives.h"
 #include "Solvers/SolverStanPrimitives.h"
 

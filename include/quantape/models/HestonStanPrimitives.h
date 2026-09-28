@@ -206,7 +206,7 @@ inline stan::math::fvar<stan::math::var> hestonCall(const HestonModel& model,
 
 class HestonSourceCache {
 public:
-    explicit HestonSourceCache(const HestonModel& model) : model_(&model) {}
+    explicit HestonSourceCache(const HestonModel& model) : m_model(&model) {}
 
     /// Nine-parameter price (`[v0, kappa, theta, sigma, rho, S, K, r, q]`).
     stan::math::var price(const HestonStanVector& x, double tMax) {
@@ -215,7 +215,7 @@ public:
         for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
             leaves[static_cast<std::size_t>(i)] = x(i).vi_;
         }
-        return stan::math::make_callback_var(value_, [leaves, g1 = g1_](auto& vi) {
+        return stan::math::make_callback_var(m_value, [leaves, g1 = m_g1](auto& vi) {
             const double a = vi.adj();
             for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
                 leaves[static_cast<std::size_t>(i)]->adj_ += a * g1(i);
@@ -231,16 +231,17 @@ public:
         for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
             leaves[static_cast<std::size_t>(i)] = x(i).val_.vi_;
             w[static_cast<std::size_t>(i)] = x(i).d_.val();
-            tval += g1_(i) * w[static_cast<std::size_t>(i)];
+            tval += m_g1(i) * w[static_cast<std::size_t>(i)];
         }
-        stan::math::var value = stan::math::make_callback_var(value_, [leaves, g1 = g1_](auto& vi) {
-            const double a = vi.adj();
-            for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
-                leaves[static_cast<std::size_t>(i)]->adj_ += a * g1(i);
-            }
-        });
+        stan::math::var value =
+            stan::math::make_callback_var(m_value, [leaves, g1 = m_g1](auto& vi) {
+                const double a = vi.adj();
+                for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
+                    leaves[static_cast<std::size_t>(i)]->adj_ += a * g1(i);
+                }
+            });
         stan::math::var tangent =
-            stan::math::make_callback_var(tval, [leaves, g2 = g2_, w](auto& vi) {
+            stan::math::make_callback_var(tval, [leaves, g2 = m_g2, w](auto& vi) {
                 const double a = vi.adj();
                 for (int i = 0; i < HESTON_PARAM_COUNT; ++i) {
                     double row = 0.0;
@@ -260,7 +261,7 @@ public:
         for (int i = 0; i < 5; ++i) {
             leaves[static_cast<std::size_t>(i)] = x(i).vi_;
         }
-        return stan::math::make_callback_var(valueModel_, [leaves, g1 = g1Model_](auto& vi) {
+        return stan::math::make_callback_var(m_valueModel, [leaves, g1 = m_g1Model](auto& vi) {
             const double a = vi.adj();
             for (int i = 0; i < 5; ++i) {
                 leaves[static_cast<std::size_t>(i)]->adj_ += a * g1(i);
@@ -277,17 +278,17 @@ public:
         for (int i = 0; i < 5; ++i) {
             leaves[static_cast<std::size_t>(i)] = x(i).val_.vi_;
             w[static_cast<std::size_t>(i)] = x(i).d_.val();
-            tval += g1Model_(i) * w[static_cast<std::size_t>(i)];
+            tval += m_g1Model(i) * w[static_cast<std::size_t>(i)];
         }
         stan::math::var value =
-            stan::math::make_callback_var(valueModel_, [leaves, g1 = g1Model_](auto& vi) {
+            stan::math::make_callback_var(m_valueModel, [leaves, g1 = m_g1Model](auto& vi) {
                 const double a = vi.adj();
                 for (int i = 0; i < 5; ++i) {
                     leaves[static_cast<std::size_t>(i)]->adj_ += a * g1(i);
                 }
             });
         stan::math::var tangent =
-            stan::math::make_callback_var(tval, [leaves, g2 = g2Model_, w](auto& vi) {
+            stan::math::make_callback_var(tval, [leaves, g2 = m_g2Model, w](auto& vi) {
                 const double a = vi.adj();
                 for (int i = 0; i < 5; ++i) {
                     double row = 0.0;
@@ -300,7 +301,7 @@ public:
         return stan::math::fvar<stan::math::var>(value, tangent);
     }
 
-    std::size_t rebuilds() const { return rebuilds_; }
+    std::size_t rebuilds() const { return m_rebuilds; }
 
 private:
     static HestonFullPoint buildPoint(const HestonStanVector& x) {
@@ -340,64 +341,64 @@ private:
     }
 
     void ensure(const HestonFullPoint& point, double tMax) {
-        if (validFull_ && tMax == lastFullTMax_ && samePoint(point)) {
+        if (m_validFull && tMax == m_lastFullTMax && samePoint(point)) {
             return;
         }
-        value_ = model_->callFull(point, tMax);
-        g1_ = model_->fullGradient(point, tMax);
-        g2_ = model_->fullHessian(point, tMax);
-        lastFull_ = point;
-        lastFullTMax_ = tMax;
-        validFull_ = true;
-        ++rebuilds_;
+        m_value = m_model->callFull(point, tMax);
+        m_g1 = m_model->fullGradient(point, tMax);
+        m_g2 = m_model->fullHessian(point, tMax);
+        m_lastFull = point;
+        m_lastFullTMax = tMax;
+        m_validFull = true;
+        ++m_rebuilds;
     }
 
     void ensure(const HestonFullPoint& point, const HestonMarket& market) {
         const HestonParams params{point[0], point[1], point[2], point[3], point[4]};
         const bool sameMarket =
-            validModel_ && sameParams(params) && market.spot == lastMarket_.spot &&
-            market.strike == lastMarket_.strike && market.rate == lastMarket_.rate &&
-            market.dividend == lastMarket_.dividend && market.tMax == lastMarket_.tMax;
+            m_validModel && sameParams(params) && market.spot == m_lastMarket.spot &&
+            market.strike == m_lastMarket.strike && market.rate == m_lastMarket.rate &&
+            market.dividend == m_lastMarket.dividend && market.tMax == m_lastMarket.tMax;
         if (sameMarket) {
             return;
         }
-        valueModel_ = model_->call(params, market);
-        g1Model_ = model_->callGradient(params, market);
-        g2Model_ = model_->callHessian(params, market);
-        lastParams_ = params;
-        lastMarket_ = market;
-        validModel_ = true;
-        ++rebuilds_;
+        m_valueModel = m_model->call(params, market);
+        m_g1Model = m_model->callGradient(params, market);
+        m_g2Model = m_model->callHessian(params, market);
+        m_lastParams = params;
+        m_lastMarket = market;
+        m_validModel = true;
+        ++m_rebuilds;
     }
 
     bool samePoint(const HestonFullPoint& point) const {
         for (std::size_t i = 0; i < HESTON_PARAM_COUNT; ++i) {
-            if (point[i] != lastFull_[i]) {
+            if (point[i] != m_lastFull[i]) {
                 return false;
             }
         }
         return true;
     }
     bool sameParams(const HestonParams& params) const {
-        return params.v0 == lastParams_.v0 && params.kappa == lastParams_.kappa &&
-               params.theta == lastParams_.theta && params.sigma == lastParams_.sigma &&
-               params.rho == lastParams_.rho;
+        return params.v0 == m_lastParams.v0 && params.kappa == m_lastParams.kappa &&
+               params.theta == m_lastParams.theta && params.sigma == m_lastParams.sigma &&
+               params.rho == m_lastParams.rho;
     }
 
-    const HestonModel* model_;
-    bool validFull_ = false;
-    HestonFullPoint lastFull_{};
-    double lastFullTMax_ = 0.0;
-    double value_ = 0.0;
-    Eigen::Matrix<double, 1, HESTON_PARAM_COUNT> g1_;
-    Eigen::Matrix<double, HESTON_PARAM_COUNT, HESTON_PARAM_COUNT> g2_;
-    bool validModel_ = false;
-    HestonParams lastParams_{};
-    HestonMarket lastMarket_{};
-    double valueModel_ = 0.0;
-    Eigen::Matrix<double, 1, 5> g1Model_;
-    Eigen::Matrix<double, 5, 5> g2Model_;
-    std::size_t rebuilds_ = 0;
+    const HestonModel* m_model;
+    bool m_validFull = false;
+    HestonFullPoint m_lastFull{};
+    double m_lastFullTMax = 0.0;
+    double m_value = 0.0;
+    Eigen::Matrix<double, 1, HESTON_PARAM_COUNT> m_g1;
+    Eigen::Matrix<double, HESTON_PARAM_COUNT, HESTON_PARAM_COUNT> m_g2;
+    bool m_validModel = false;
+    HestonParams m_lastParams{};
+    HestonMarket m_lastMarket{};
+    double m_valueModel = 0.0;
+    Eigen::Matrix<double, 1, 5> m_g1Model;
+    Eigen::Matrix<double, 5, 5> m_g2Model;
+    std::size_t m_rebuilds = 0;
 };
 
 } // namespace quantape::models

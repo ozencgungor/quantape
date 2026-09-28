@@ -122,8 +122,9 @@ struct GbmModel {
         out = (th[0] * x.array()).matrix();
     }
     template <typename Scalar>
-    void diffusion(const quantape::mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& th,
-                   std::size_t, quantape::mc::StateMatrix<Scalar>& out) const {
+    void diffusion(const quantape::mc::StateMatrix<Scalar>& x, double,
+                   const std::vector<Scalar>& th, std::size_t,
+                   quantape::mc::StateMatrix<Scalar>& out) const {
         out = (th[1] * x.array()).matrix();
     }
 };
@@ -144,8 +145,9 @@ struct CirModel {
         out = (th[0] * (th[1] - x.array())).matrix();
     }
     template <typename Scalar>
-    void diffusion(const quantape::mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& th,
-                   std::size_t, quantape::mc::StateMatrix<Scalar>& out) const {
+    void diffusion(const quantape::mc::StateMatrix<Scalar>& x, double,
+                   const std::vector<Scalar>& th, std::size_t,
+                   quantape::mc::StateMatrix<Scalar>& out) const {
         out = (th[2] * x.array().cwiseMax(Scalar(0.0)).sqrt()).matrix();
     }
 };
@@ -194,7 +196,8 @@ void testSourceContract() {
     Eigen::MatrixXd u;
     source.fillUniform(2, 5, 7, 0, 1, u);
     for (std::size_t p = 0; p < 7; ++p) {
-        CHECK(u(0, static_cast<Eigen::Index>(p)) == generator->uniform(5 + p, source.uniformDim(2, 0)));
+        CHECK(u(0, static_cast<Eigen::Index>(p)) ==
+              generator->uniform(5 + p, source.uniformDim(2, 0)));
     }
 
     // replicas: same layout, different digital shift
@@ -230,13 +233,14 @@ void testEngineWithSobol() {
     }
 
     for (std::size_t i : {std::size_t(0), std::size_t(37), std::size_t(511)}) {
-        const PathBlock<double> path = simulator.simulatePath(
-            x0, quantape::mc::driftOf(GbmModel{}), quantape::mc::diffusionOf(GbmModel{}), source,
-            i);
+        const PathBlock<double> path =
+            simulator.simulatePath(x0, quantape::mc::driftOf(GbmModel{}),
+                                   quantape::mc::diffusionOf(GbmModel{}), source, i);
         const std::size_t block = i / 64;
         const std::size_t column = i % 64;
         for (std::size_t k = 0; k <= nSteps; ++k) {
-            CHECK(path.states[k](0, 0) == blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
+            CHECK(path.states[k](0, 0) ==
+                  blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
         }
     }
     std::printf("  [ok] Sobol engine invariants (path/block/schedule bitwise)\n");
@@ -269,11 +273,11 @@ void testQmcVarianceReduction() {
     double qmcSq = 0.0;
     for (std::size_t r = 0; r < replicas; ++r) {
         const IidGaussianSource<> mcSource(1, r + 1);
-        const auto mcBlocks = simulator.simulate(x0, quantape::mc::driftOf(GbmModel{}),
-                                                 quantape::mc::diffusionOf(GbmModel{}), mcSource,
-                                                 nPaths, nPaths);
-        const auto mcEstimate = quantape::mc::estimate(
-            mcBlocks, [&](const PathBlock<double>& b, Eigen::VectorXd& out) {
+        const auto mcBlocks =
+            simulator.simulate(x0, quantape::mc::driftOf(GbmModel{}),
+                               quantape::mc::diffusionOf(GbmModel{}), mcSource, nPaths, nPaths);
+        const auto mcEstimate =
+            quantape::mc::estimate(mcBlocks, [&](const PathBlock<double>& b, Eigen::VectorXd& out) {
                 out.resize(static_cast<Eigen::Index>(b.nPaths));
                 for (std::size_t p = 0; p < b.nPaths; ++p) {
                     const double s = b.states.back()(0, static_cast<Eigen::Index>(p));
@@ -283,9 +287,9 @@ void testQmcVarianceReduction() {
         mcSq += (mcEstimate.mean - truth) * (mcEstimate.mean - truth);
 
         const SobolSource qmcSource(makeGenerator(7919 * (r + 1)), 1, nSteps, 0);
-        const auto qmcBlocks = simulator.simulate(x0, quantape::mc::driftOf(GbmModel{}),
-                                                  quantape::mc::diffusionOf(GbmModel{}), qmcSource,
-                                                  nPaths, nPaths);
+        const auto qmcBlocks =
+            simulator.simulate(x0, quantape::mc::driftOf(GbmModel{}),
+                               quantape::mc::diffusionOf(GbmModel{}), qmcSource, nPaths, nPaths);
         const auto qmcEstimate = quantape::mc::estimate(
             qmcBlocks, [&](const PathBlock<double>& b, Eigen::VectorXd& out) {
                 out.resize(static_cast<Eigen::Index>(b.nPaths));
@@ -312,9 +316,9 @@ void testQmcVarianceReduction() {
         const SdeSimulator<double> sim(g, th);
         const double dt = 1.0 / static_cast<double>(steps);
         const SobolSource src(makeGenerator(5150, 16), 1, steps, 0);
-        const auto blocks = sim.simulate(Eigen::VectorXd::Constant(1, s0),
-                                         quantape::mc::driftOf(GbmModel{}),
-                                         quantape::mc::diffusionOf(GbmModel{}), src, paths, 1024);
+        const auto blocks =
+            sim.simulate(Eigen::VectorXd::Constant(1, s0), quantape::mc::driftOf(GbmModel{}),
+                         quantape::mc::diffusionOf(GbmModel{}), src, paths, 1024);
         double sum = 0.0;
         double sumSq = 0.0;
         for (const auto& b : blocks) {
@@ -329,9 +333,9 @@ void testQmcVarianceReduction() {
         const double var = sumSq / n - mean * mean;
         const double a = 1.0 + mu * dt;
         const double exactMean = s0 * std::pow(a, static_cast<double>(steps));
-        const double exactVar =
-            s0 * s0 * (std::pow(a * a + sigma * sigma * dt, static_cast<double>(steps)) -
-                       std::pow(a, 2.0 * static_cast<double>(steps)));
+        const double exactVar = s0 * s0 *
+                                (std::pow(a * a + sigma * sigma * dt, static_cast<double>(steps)) -
+                                 std::pow(a, 2.0 * static_cast<double>(steps)));
         // QMC with the fixture directions: mean is martingale-exact to well
         // below MC error; the quadratic variance functional keeps ~0.1%
         // (i.i.d. MC at this N would be ~1.1%).
@@ -372,10 +376,9 @@ void testQeUniformsWithSobol() {
         }
     }
     const double exactMean = v0 * std::exp(-kappa) + level * (1.0 - std::exp(-kappa));
-    const double exactVar = v0 * sigma * sigma * (std::exp(-kappa) - std::exp(-2.0 * kappa)) /
-                                kappa +
-                            level * sigma * sigma * (1.0 - std::exp(-kappa)) *
-                                (1.0 - std::exp(-kappa)) / (2.0 * kappa);
+    const double exactVar =
+        v0 * sigma * sigma * (std::exp(-kappa) - std::exp(-2.0 * kappa)) / kappa +
+        level * sigma * sigma * (1.0 - std::exp(-kappa)) * (1.0 - std::exp(-kappa)) / (2.0 * kappa);
     const double mean = sum / static_cast<double>(n);
     const double var = sumSq / static_cast<double>(n) - mean * mean;
     CHECK(negatives == 0);
@@ -396,10 +399,10 @@ void testQmcGradients() {
     const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 100.0);
     const SobolSource source(makeGenerator(8888, 32), 1, nSteps, 0);
 
-    const auto reverse = quantape::mc::simulateGradient(
-        simulator, x0, theta, quantape::mc::driftOf(GbmModel{}),
-        quantape::mc::diffusionOf(GbmModel{}), source, TerminalCall{100.0}, nPaths,
-        Schedule::Parallel);
+    const auto reverse =
+        quantape::mc::simulateGradient(simulator, x0, theta, quantape::mc::driftOf(GbmModel{}),
+                                       quantape::mc::diffusionOf(GbmModel{}), source,
+                                       TerminalCall{100.0}, nPaths, Schedule::Parallel);
     const auto forward = quantape::mc::simulateGradientForward<3>(
         simulator, x0, theta, quantape::mc::driftOf(GbmModel{}),
         quantape::mc::diffusionOf(GbmModel{}), source, TerminalCall{100.0}, nPaths,

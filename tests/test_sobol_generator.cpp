@@ -70,7 +70,9 @@ std::vector<Entry> makeFixture(int nDims, std::uint64_t seed) {
     return out;
 }
 
-double normalCdf(double x) { return 0.5 * std::erfc(-x / std::sqrt(2.0)); }
+double normalCdf(double x) {
+    return 0.5 * std::erfc(-x / std::sqrt(2.0));
+}
 
 } // namespace
 
@@ -118,8 +120,10 @@ int main() {
             const int b1 = budget / 2, b2 = budget - b1;
             std::vector<int> counts(std::size_t(1) << budget, 0);
             for (std::uint32_t p = 0; p < N; ++p) {
-                const std::uint32_t x = static_cast<std::uint32_t>(gen.uniformBits(p, d - 1) >> (64 - b1));
-                const std::uint32_t y = static_cast<std::uint32_t>(gen.uniformBits(p, d) >> (64 - b2));
+                const std::uint32_t x =
+                    static_cast<std::uint32_t>(gen.uniformBits(p, d - 1) >> (64 - b1));
+                const std::uint32_t y =
+                    static_cast<std::uint32_t>(gen.uniformBits(p, d) >> (64 - b2));
                 counts[(std::size_t(x) << b2) | y]++;
             }
             for (int c : counts) {
@@ -135,8 +139,8 @@ int main() {
         const SobolGenerator alt(fixture, SobolOptions{0, 0, true});
         const SobolGenerator shifted(fixture, SobolOptions{12345, 1, true});
         CHECK(shifted.uniformBits(7, 5) != alt.uniformBits(7, 5));
-        CHECK(shifted.uniformBits(7, 5) == SobolGenerator(fixture, SobolOptions{12345, 1, true})
-                                              .uniformBits(7, 5));
+        CHECK(shifted.uniformBits(7, 5) ==
+              SobolGenerator(fixture, SobolOptions{12345, 1, true}).uniformBits(7, 5));
         CHECK(plain.uniformBits(0, 3) == alt.uniformBits(1, 3)); // point offset
 
         // Unbiased normal integration with shift replicas: E[exp(sigma Z)].
@@ -146,7 +150,8 @@ int main() {
         double sum = 0.0;
         const int reps = 16;
         for (int r = 1; r <= reps; ++r) {
-            const SobolGenerator g(fixture, SobolOptions{static_cast<std::uint64_t>(r) * 7919, 0, true});
+            const SobolGenerator g(fixture,
+                                   SobolOptions{static_cast<std::uint64_t>(r) * 7919, 0, true});
             double est = 0.0;
             for (std::uint32_t p = 0; p < N; ++p) {
                 est += std::exp(sigma * g.normal(p, 1));
@@ -170,27 +175,29 @@ int main() {
 
         const std::size_t nPaths = 4096;
         const auto makeSource = [&fixture, steps](std::uint64_t seed) {
-            return SobolGaussianSource(
-                SobolGenerator(fixture, SobolOptions{seed, 1, true}), 1, steps, 1, 0);
+            return SobolGaussianSource(SobolGenerator(fixture, SobolOptions{seed, 1, true}), 1,
+                                       steps, 1, 0);
         };
         const auto seqSource = makeSource(0);
         const auto parSource = makeSource(0);
 
-        const auto blocksSeq = simulator.simulate(
-            x0, driftOf(model), diffusionOf(model), seqSource, nPaths, 1024, Schedule::Sequential);
-        const auto blocksPar = simulator.simulate(
-            x0, driftOf(model), diffusionOf(model), parSource, nPaths, 1024, Schedule::Parallel);
+        const auto blocksSeq = simulator.simulate(x0, driftOf(model), diffusionOf(model), seqSource,
+                                                  nPaths, 1024, Schedule::Sequential);
+        const auto blocksPar = simulator.simulate(x0, driftOf(model), diffusionOf(model), parSource,
+                                                  nPaths, 1024, Schedule::Parallel);
 
         double maxDiff = 0.0;
         for (std::size_t b = 0; b < blocksSeq.size(); ++b) {
-            maxDiff = std::max(maxDiff,
-                               (blocksSeq[b].states.back() - blocksPar[b].states.back()).cwiseAbs().maxCoeff());
+            maxDiff = std::max(
+                maxDiff,
+                (blocksSeq[b].states.back() - blocksPar[b].states.back()).cwiseAbs().maxCoeff());
         }
         CHECK(maxDiff == 0.0);
 
         // Block-size invariance (same total paths, different blocking).
-        const auto blocksTight = simulator.simulate(x0, driftOf(model), diffusionOf(model),
-                                                    makeSource(0), nPaths, 512, Schedule::Sequential);
+        const auto blocksTight =
+            simulator.simulate(x0, driftOf(model), diffusionOf(model), makeSource(0), nPaths, 512,
+                               Schedule::Sequential);
         maxDiff = 0.0;
         for (std::size_t b = 0; b < blocksSeq.size(); ++b) {
             const std::size_t lo = b * 1024, hi = std::min<std::size_t>(lo + 1024, nPaths);
@@ -201,9 +208,10 @@ int main() {
             // compare path-wise through flat indexing of the tight blocking
             for (std::size_t p = lo; p < hi; ++p, ++k) {
                 const std::size_t tb = p / 512, tp = p % 512;
-                maxDiff = std::max(maxDiff, std::fabs(blocksSeq[b].states.back()(0,
-                                     static_cast<Eigen::Index>(p - lo)) -
-                                     blocksTight[tb].states.back()(0, static_cast<Eigen::Index>(tp))));
+                maxDiff = std::max(
+                    maxDiff,
+                    std::fabs(blocksSeq[b].states.back()(0, static_cast<Eigen::Index>(p - lo)) -
+                              blocksTight[tb].states.back()(0, static_cast<Eigen::Index>(tp))));
             }
         }
         CHECK(maxDiff == 0.0);
@@ -216,9 +224,10 @@ int main() {
         const int reps = 8;
         double sum = 0.0, sumSq = 0.0;
         for (int rep = 1; rep <= reps; ++rep) {
-            const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model),
-                                                   makeSource(static_cast<std::uint64_t>(rep) * 7919),
-                                                   nPaths, 1024, Schedule::Sequential);
+            const auto blocks =
+                simulator.simulate(x0, driftOf(model), diffusionOf(model),
+                                   makeSource(static_cast<std::uint64_t>(rep) * 7919), nPaths, 1024,
+                                   Schedule::Sequential);
             const auto est = quantape::mc::estimate(blocks, payoff, Schedule::Sequential);
             sum += est.mean;
             sumSq += est.mean * est.mean;
@@ -377,8 +386,8 @@ int main() {
         }
 
         // Thread-safety: parallel fills are bitwise identical to sequential.
-        const auto shared = std::make_shared<const SobolGenerator>(
-            fixture, SobolOptions{31415, 1, true});
+        const auto shared =
+            std::make_shared<const SobolGenerator>(fixture, SobolOptions{31415, 1, true});
         const SobolGaussianSource src(shared, 2, 8, 1, 0, 999);
         const std::size_t nPaths = 4096, threads = 4;
         Eigen::MatrixXd seqOut(2, static_cast<Eigen::Index>(nPaths));

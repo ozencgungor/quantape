@@ -27,17 +27,17 @@ namespace quantape::math {
  */
 class GaussLegendre {
 public:
-    explicit GaussLegendre(std::size_t order) : order_(order) {
+    explicit GaussLegendre(std::size_t order) : m_order(order) {
         if (order < 1) {
             throw std::invalid_argument("GaussLegendre: order must be positive");
         }
         build();
     }
 
-    std::size_t order() const { return order_; }
+    std::size_t order() const { return m_order; }
     /// Nodes on [-1, 1], ascending.
-    const std::vector<double>& nodes() const { return nodes_; }
-    const std::vector<double>& weights() const { return weights_; }
+    const std::vector<double>& nodes() const { return m_nodes; }
+    const std::vector<double>& weights() const { return m_weights; }
 
     /// Fixed-rule integral over [a, b] with a scalar-generic integrand.
     template <typename Scalar, typename F>
@@ -45,15 +45,15 @@ public:
         const Scalar scale = (b - a) / Scalar(2.0);
         const Scalar shift = (b + a) / Scalar(2.0);
         Scalar sum = Scalar(0.0);
-        for (std::size_t i = 0; i < nodes_.size(); ++i) {
-            sum += Scalar(weights_[i]) * f(scale * Scalar(nodes_[i]) + shift);
+        for (std::size_t i = 0; i < m_nodes.size(); ++i) {
+            sum += Scalar(m_weights[i]) * f(scale * Scalar(m_nodes[i]) + shift);
         }
         return scale * sum;
     }
 
 private:
     void build() {
-        const Eigen::Index n = static_cast<Eigen::Index>(order_);
+        const Eigen::Index n = static_cast<Eigen::Index>(m_order);
         Eigen::MatrixXd jacobi = Eigen::MatrixXd::Zero(n, n);
         for (Eigen::Index i = 1; i < n; ++i) {
             const double b =
@@ -62,18 +62,18 @@ private:
             jacobi(i, i - 1) = b;
         }
         const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(jacobi);
-        nodes_.resize(order_);
-        weights_.resize(order_);
+        m_nodes.resize(m_order);
+        m_weights.resize(m_order);
         for (Eigen::Index i = 0; i < n; ++i) {
-            nodes_[static_cast<std::size_t>(i)] = solver.eigenvalues()(i);
+            m_nodes[static_cast<std::size_t>(i)] = solver.eigenvalues()(i);
             const double first = solver.eigenvectors()(0, i);
-            weights_[static_cast<std::size_t>(i)] = 2.0 * first * first;
+            m_weights[static_cast<std::size_t>(i)] = 2.0 * first * first;
         }
     }
 
-    std::size_t order_;
-    std::vector<double> nodes_;
-    std::vector<double> weights_;
+    std::size_t m_order;
+    std::vector<double> m_nodes;
+    std::vector<double> m_weights;
 };
 
 } // namespace quantape::math

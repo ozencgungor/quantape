@@ -61,16 +61,16 @@ public:
         }
 
         // Precompute x-row cubic interpolations (tape-free for AD types).
-        m_x_interps.reserve(m_y.size());
+        m_xInterps.reserve(m_y.size());
         for (size_t j = 0; j < m_y.size(); ++j) {
-            m_x_interps.emplace_back(m_x, m_z[j], m_method, m_smooth);
+            m_xInterps.emplace_back(m_x, m_z[j], m_method, m_smooth);
         }
 
         // Cache the y-direction grid weights ONCE (linear methods only).
         // The weights depend only on m_y, so every per-query
         // y-interpolation reuses them instead of re-probing.
         if constexpr (!std::is_same_v<DoubleT, double>) {
-            m_y_weights = CubicInterpolation<DoubleT>::probeWeights(m_y, m_method);
+            m_yWeights = CubicInterpolation<DoubleT>::probeWeights(m_y, m_method);
         }
     }
 
@@ -78,14 +78,14 @@ public:
         // Step 1: evaluate the precomputed x-row cubics
         std::vector<DoubleT> y_values(m_y.size());
         for (size_t j = 0; j < m_y.size(); ++j) {
-            y_values[j] = m_x_interps[j](x, true);
+            y_values[j] = m_xInterps[j](x, true);
         }
 
         // Step 2: y-direction cubic on the intermediate results
         if constexpr (!std::is_same_v<DoubleT, double>) {
-            if (!m_y_weights.empty()) {
+            if (!m_yWeights.empty()) {
                 const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth,
-                                                           m_y_weights);
+                                                           m_yWeights);
                 return y_interp(y, true);
             }
         }
@@ -97,13 +97,13 @@ public:
     DoubleT valueFixedImpl(DoubleT x, DoubleT y) const {
         std::vector<DoubleT> y_values(m_y.size());
         for (size_t j = 0; j < m_y.size(); ++j) {
-            y_values[j] = m_x_interps[j].evaluateFixed(x, true);
+            y_values[j] = m_xInterps[j].evaluateFixed(x, true);
         }
 
         if constexpr (!std::is_same_v<DoubleT, double>) {
-            if (!m_y_weights.empty()) {
+            if (!m_yWeights.empty()) {
                 const CubicInterpolation<DoubleT> y_interp(m_y, y_values, m_method, m_smooth,
-                                                           m_y_weights);
+                                                           m_yWeights);
                 return y_interp.evaluateFixed(y, true);
             }
         }
@@ -121,15 +121,15 @@ public:
 
     /// Whether the cached y-direction weight matrix is in use
     /// (Spline/Parabolic with an AD DoubleT).
-    bool usesWeightMatrix() const { return !m_y_weights.empty(); }
+    bool usesWeightMatrix() const { return !m_yWeights.empty(); }
 
 private:
     DerivativeApprox m_method;
     bool m_smooth = false;
-    std::vector<double> m_x, m_y;                         ///< Grid coordinates (double)
-    std::vector<std::vector<DoubleT>> m_z;                ///< Node values (DoubleT, AD-active)
-    std::vector<CubicInterpolation<DoubleT>> m_x_interps; ///< Precomputed x-row cubics
-    CubicWeightMatrix m_y_weights;                        ///< Cached y-grid weights (AD, linear)
+    std::vector<double> m_x, m_y;                        ///< Grid coordinates (double)
+    std::vector<std::vector<DoubleT>> m_z;               ///< Node values (DoubleT, AD-active)
+    std::vector<CubicInterpolation<DoubleT>> m_xInterps; ///< Precomputed x-row cubics
+    CubicWeightMatrix m_yWeights;                        ///< Cached y-grid weights (AD, linear)
 };
 
 } // namespace quantape::math

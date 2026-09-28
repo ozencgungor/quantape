@@ -54,9 +54,9 @@ double inverseNormal(double p) {
                                 -1.328068155288572e+01};
     static const double c[6] = {-7.784894002430293e-03, -3.223964580411365e-01,
                                 -2.400758277161838e+00, -2.549732539343734e+00,
-                                4.374664141464968e+00, 2.938163982698783e+00};
-    static const double d[4] = {7.784695709041462e-03, 3.224671290700398e-01,
-                                2.445134137142996e+00, 3.754408661907416e+00};
+                                4.374664141464968e+00,  2.938163982698783e+00};
+    static const double d[4] = {7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+                                3.754408661907416e+00};
     const double pl = 0.02425;
     if (p <= 0.0)
         return -1e10;
@@ -64,17 +64,17 @@ double inverseNormal(double p) {
         return 1e10;
     if (p < pl) {
         const double q = std::sqrt(-2.0 * std::log(p));
-        return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
-               ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1.0);
+        return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
     }
     if (p > 1.0 - pl) {
         const double q = std::sqrt(-2.0 * std::log(1.0 - p));
-        return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) /
-               ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1.0);
+        return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+               ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0);
     }
     const double q = p - 0.5, r = q * q;
-    return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
-           (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1.0);
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+           (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0);
 }
 
 /// Uniform (0,1) from a 64-bit engine.
@@ -87,7 +87,8 @@ std::vector<std::uint32_t> directionWords(const Entry& e, int L) {
     const auto m = integerDirectionNumbers(e, L);
     std::vector<std::uint32_t> V(static_cast<std::size_t>(L) + 1, 0);
     for (int i = 1; i <= L; ++i) {
-        V[static_cast<std::size_t>(i)] = static_cast<std::uint32_t>(m[static_cast<std::size_t>(i)] << (32 - i));
+        V[static_cast<std::size_t>(i)] =
+            static_cast<std::uint32_t>(m[static_cast<std::size_t>(i)] << (32 - i));
     }
     return V;
 }
@@ -291,8 +292,7 @@ double oscillatoryRef(const std::vector<double>& a) {
     // Re[ e^{i pi} prod (e^{i a_j} - 1)/(i a_j) ]
     std::complex<double> product(1.0, 0.0);
     for (double aj : a) {
-        product *= (std::exp(std::complex<double>(0.0, aj)) - 1.0) /
-                   std::complex<double>(0.0, aj);
+        product *= (std::exp(std::complex<double>(0.0, aj)) - 1.0) / std::complex<double>(0.0, aj);
     }
     return std::real(-product); // cos(pi) = -1
 }
@@ -344,8 +344,8 @@ double qmcError(const Integrand& f, const std::vector<std::vector<std::uint32_t>
     return std::sqrt(sumSq / count);
 }
 
-double mcError(const Integrand& f, int s, int m, int replications,
-               const std::vector<double>& a, std::mt19937_64& rng) {
+double mcError(const Integrand& f, int s, int m, int replications, const std::vector<double>& a,
+               std::mt19937_64& rng) {
     const std::size_t N = std::size_t(1) << m;
     double sumSq = 0.0;
     for (int r = 0; r < replications; ++r) {
@@ -353,8 +353,7 @@ double mcError(const Integrand& f, int s, int m, int replications,
         std::vector<double> x(static_cast<std::size_t>(s));
         for (std::size_t i = 0; i < N; ++i) {
             for (int j = 0; j < s; ++j) {
-                x[static_cast<std::size_t>(j)] =
-                    uniform01(rng);
+                x[static_cast<std::size_t>(j)] = uniform01(rng);
             }
             ssum += f.value(x, a);
         }
@@ -415,8 +414,8 @@ int main(int argc, char** argv) {
         prefix.empty() ? 2 : static_cast<std::uint32_t>(prefix.size() + 2);
     const std::uint32_t lastDim = entries.back().dim;
     const std::uint32_t nNew = lastDim >= firstNew ? lastDim - firstNew + 1 : 0;
-    std::printf("analyze: %zu entries (dims 2..%u), extension dims %u, %u new%s\n",
-                entries.size(), lastDim, firstNew, nNew, base.empty() ? "" : " (base given)");
+    std::printf("analyze: %zu entries (dims 2..%u), extension dims %u, %u new%s\n", entries.size(),
+                lastDim, firstNew, nNew, base.empty() ? "" : " (base given)");
 
     // Direction matrices.
     std::vector<DirectionMatrix> mats(entries.size() + 2);
@@ -431,7 +430,8 @@ int main(int argc, char** argv) {
     std::vector<std::size_t> dims;
     for (int s = 0; s < sample; ++s) {
         const std::size_t idx =
-            firstNew - 1 + static_cast<std::size_t>((static_cast<std::uint64_t>(s) * nNew) / sample);
+            firstNew - 1 +
+            static_cast<std::size_t>((static_cast<std::uint64_t>(s) * nNew) / sample);
         dims.push_back(std::min<std::size_t>(idx, mats.size() - 2));
     }
     if (!dims.empty()) {
@@ -472,7 +472,8 @@ int main(int argc, char** argv) {
                 }
                 std::vector<std::vector<std::uint32_t>> X;
                 for (std::size_t i : idxs) {
-                    X.push_back(generate(i == 0 ? dimensionOneWords(L) : directionWords(entries[i - 1], L), L, 0));
+                    X.push_back(generate(
+                        i == 0 ? dimensionOneWords(L) : directionWords(entries[i - 1], L), L, 0));
                 }
                 std::uint32_t worst = 0;
                 ++tested;
@@ -494,7 +495,8 @@ int main(int argc, char** argv) {
             const std::size_t d1 = dims.front(), d2 = mats.size() - 2;
             const int t2 = tValue2D(mats[d1], mats[d2], mLevel);
             const int ts = tValueS({mats[d1], mats[d2]}, mLevel);
-            std::printf("self-test tValueS(2D)==tValue2D: %s (t=%d)\n", t2 == ts ? "ok" : "FAIL", t2);
+            std::printf("self-test tValueS(2D)==tValue2D: %s (t=%d)\n", t2 == ts ? "ok" : "FAIL",
+                        t2);
             std::vector<DirectionMatrix> m3 = {mats[0], mats[1], mats[2]};
             const int t3 = tValueS(m3, 10);
             std::vector<int> b3(3, (10 - t3) / 3);
@@ -519,8 +521,10 @@ int main(int argc, char** argv) {
         int count = 0;
         for (std::size_t di = 0; di + 1 < dims.size() && di < 6; ++di) {
             const std::size_t d1 = dims[di], d2 = dims[di + 1];
-            auto x1 = generate(d1 == 0 ? dimensionOneWords(mD) : directionWords(entries[d1 - 1], mD), mD, 0);
-            auto x2 = generate(d2 == 0 ? dimensionOneWords(mD) : directionWords(entries[d2 - 1], mD), mD, 0);
+            auto x1 = generate(
+                d1 == 0 ? dimensionOneWords(mD) : directionWords(entries[d1 - 1], mD), mD, 0);
+            auto x2 = generate(
+                d2 == 0 ? dimensionOneWords(mD) : directionWords(entries[d2 - 1], mD), mD, 0);
             std::vector<double> dx(ND), dy(ND);
             for (std::uint32_t i = 0; i < ND; ++i) {
                 dx[i] = x1[i] / 4294967296.0;
@@ -536,8 +540,9 @@ int main(int argc, char** argv) {
             ++count;
         }
         if (count > 0) {
-            std::printf("L2 star discrepancy (2D, N=2^%d): QMC mean %.4g vs random %.4g (ratio %.3g)\n",
-                        mD, qmcMean / count, rndMean / count, qmcMean / rndMean);
+            std::printf(
+                "L2 star discrepancy (2D, N=2^%d): QMC mean %.4g vs random %.4g (ratio %.3g)\n", mD,
+                qmcMean / count, rndMean / count, qmcMean / rndMean);
         }
     }
 
@@ -547,8 +552,10 @@ int main(int argc, char** argv) {
         int count = 0;
         for (std::size_t di = 0; di + 1 < dims.size(); ++di) {
             const std::size_t d1 = dims[di], d2 = dims[di + 1];
-            auto x1 = generate(d1 == 0 ? dimensionOneWords(L) : directionWords(entries[d1 - 1], L), L, 0);
-            auto x2 = generate(d2 == 0 ? dimensionOneWords(L) : directionWords(entries[d2 - 1], L), L, 0);
+            auto x1 =
+                generate(d1 == 0 ? dimensionOneWords(L) : directionWords(entries[d1 - 1], L), L, 0);
+            auto x2 =
+                generate(d2 == 0 ? dimensionOneWords(L) : directionWords(entries[d2 - 1], L), L, 0);
             const double r = pearson(x1, x2);
             maxAbs = std::max(maxAbs, std::fabs(r));
             sumAbs += std::fabs(r);
@@ -567,8 +574,8 @@ int main(int argc, char** argv) {
             {"exponential", exponentialValue, exponentialRef},
             {"kink", kinkValue, kinkRef},
         };
-        std::printf("QMC/MC RMSE ratios (N=2^%d, %d shifts/replications, prefix dims 1..s)\n", mLevel,
-                    shifts);
+        std::printf("QMC/MC RMSE ratios (N=2^%d, %d shifts/replications, prefix dims 1..s)\n",
+                    mLevel, shifts);
         for (int s = 1; s <= 8; s += 3) {
             std::vector<double> a(static_cast<std::size_t>(s));
             for (int j = 0; j < s; ++j) {
@@ -612,7 +619,8 @@ int main(int argc, char** argv) {
             const double avg = sum / steps;
             return std::max(avg - K, 0.0);
         };
-        // Reference: plain MC with many paths (using Box-Muller-free normal via sum of 12 uniforms).
+        // Reference: plain MC with many paths (using Box-Muller-free normal via sum of 12
+        // uniforms).
         const auto normalFrom = [&](std::mt19937_64& g) { return inverseNormal(uniform01(g)); };
         const std::size_t nRef = std::size_t(1) << 20;
         double refSum = 0;
@@ -640,10 +648,10 @@ int main(int argc, char** argv) {
             double ssum = 0;
             for (std::uint32_t i = 0; i < N; ++i) {
                 for (int j = 0; j < steps; ++j) {
-                    const double u = (static_cast<double>(baseDims[static_cast<std::size_t>(j)][i] ^
-                                                           sv[j]) +
-                                       0.5) /
-                                      4294967296.0;
+                    const double u =
+                        (static_cast<double>(baseDims[static_cast<std::size_t>(j)][i] ^ sv[j]) +
+                         0.5) /
+                        4294967296.0;
                     z[static_cast<std::size_t>(j)] = inverseNormal(u);
                 }
                 ssum += payoff(z);
@@ -694,7 +702,8 @@ int main(int argc, char** argv) {
                 for (std::uint32_t i = 0; i < N; ++i) {
                     for (int j = 0; j < steps; ++j) {
                         const double u =
-                            (static_cast<double>(pre[static_cast<std::size_t>(j)][i] ^ sv[j]) + 0.5) /
+                            (static_cast<double>(pre[static_cast<std::size_t>(j)][i] ^ sv[j]) +
+                             0.5) /
                             4294967296.0;
                         z[static_cast<std::size_t>(j)] = inverseNormal(u);
                     }
@@ -725,9 +734,10 @@ int main(int argc, char** argv) {
         }
         const double mMean = mSum / shifts;
         const double mSe = std::sqrt(std::max(mSumSq / shifts - mMean * mMean, 0.0) / (shifts - 1));
-        std::printf("GBM Asian call (64 steps from extended dims %u..%u): reference %.4f | QMC %.4f "
-                    "(+-%.2g) | MC %.4f (+-%.2g) | SE ratio %.1fx\n",
-                    firstNew, firstNew + steps - 1, ref, qMean, qSe, mMean, mSe, mSe / qSe);
+        std::printf(
+            "GBM Asian call (64 steps from extended dims %u..%u): reference %.4f | QMC %.4f "
+            "(+-%.2g) | MC %.4f (+-%.2g) | SE ratio %.1fx\n",
+            firstNew, firstNew + steps - 1, ref, qMean, qSe, mMean, mSe, mSe / qSe);
 
         // Brownian-bridge ordering: endpoint first, then dyadic midpoints.
         {
@@ -787,9 +797,10 @@ int main(int argc, char** argv) {
                 for (std::uint32_t i = 0; i < N; ++i) {
                     std::vector<double> zz(steps);
                     for (int j = 0; j < steps; ++j) {
-                        const double u =
-                            (static_cast<double>(baseDims[static_cast<std::size_t>(j)][i] ^ sv2[j]) + 0.5) /
-                            4294967296.0;
+                        const double u = (static_cast<double>(
+                                              baseDims[static_cast<std::size_t>(j)][i] ^ sv2[j]) +
+                                          0.5) /
+                                         4294967296.0;
                         zz[static_cast<std::size_t>(j)] = inverseNormal(u);
                     }
                     ssum += bridgePayoff(zz);
@@ -816,14 +827,16 @@ int main(int argc, char** argv) {
             }
             const double mm = msum / shifts;
             const double ms = std::sqrt(std::max(msq / shifts - mm * mm, 0.0) / (shifts - 1));
-            std::printf("GBM Asian call, Brownian bridge (extended dims): QMC %.4f (+-%.2g) | MC %.4f "
-                        "(+-%.2g) | SE ratio %.1fx\n",
-                        bm, bs, mm, ms, ms / bs);
+            std::printf(
+                "GBM Asian call, Brownian bridge (extended dims): QMC %.4f (+-%.2g) | MC %.4f "
+                "(+-%.2g) | SE ratio %.1fx\n",
+                bm, bs, mm, ms, ms / bs);
         }
 
         // Terminal GBM (1 step) sanity: E[exp(mu + sigma*Z)] = exp(sigma^2/2).
         for (std::size_t dim : {dims.front(), static_cast<std::size_t>(mats.size() - 2)}) {
-            const auto base = generate(dim == 0 ? dimensionOneWords(L) : directionWords(entries[dim - 1], L), L, 0);
+            const auto base = generate(
+                dim == 0 ? dimensionOneWords(L) : directionWords(entries[dim - 1], L), L, 0);
             double ssum = 0;
             for (std::uint32_t i = 0; i < N; ++i) {
                 const double u = (static_cast<double>(base[i]) + 0.5) / 4294967296.0;

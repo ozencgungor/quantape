@@ -74,8 +74,7 @@ int main(int argc, char** argv) {
         }
         if (wordBytes == 4) {
             for (int k = 1; k <= bits; ++k) {
-                w32[static_cast<std::size_t>(k - 1)] =
-                    static_cast<std::uint32_t>(m[k]) << (32 - k);
+                w32[static_cast<std::size_t>(k - 1)] = static_cast<std::uint32_t>(m[k]) << (32 - k);
             }
             std::fwrite(w32.data(), sizeof(std::uint32_t), static_cast<std::size_t>(bits), out);
         } else {

@@ -88,37 +88,37 @@ public:
         return *tape;
     }
 
-    RevTape() { nodes_.resize(1024); }
+    RevTape() { m_nodes.resize(1024); }
 
-    void clear() { size_ = 1; } // keep the sink at index 0
+    void clear() { m_size = 1; } // keep the sink at index 0
     void reserve(std::size_t n) {
-        if (nodes_.size() < n + 1) {
-            nodes_.resize(n + 1);
+        if (m_nodes.size() < n + 1) {
+            m_nodes.resize(n + 1);
         }
     }
-    std::size_t size() const { return size_ - 1; } // excluding sink
+    std::size_t size() const { return m_size - 1; } // excluding sink
 
     std::uint32_t push(RevOp op, std::uint32_t lhs, std::uint32_t rhs, double value,
                        double lhsValue = 0.0, double rhsValue = 0.0) {
-        if (size_ == nodes_.size()) {
-            nodes_.resize(nodes_.size() * 2 + 256);
+        if (m_size == m_nodes.size()) {
+            m_nodes.resize(m_nodes.size() * 2 + 256);
         }
-        nodes_[size_] = RevNode{value, 0.0, lhsValue, rhsValue, lhs, rhs, op};
-        return static_cast<std::uint32_t>(size_++);
+        m_nodes[m_size] = RevNode{value, 0.0, lhsValue, rhsValue, lhs, rhs, op};
+        return static_cast<std::uint32_t>(m_size++);
     }
 
     /// Independent variable (what gradients are read from).
     std::uint32_t input(double value) { return push(RevOp::Input, kNone, kNone, value); }
 
-    double value(std::uint32_t node) const { return nodes_[node].value; }
-    double adjoint(std::uint32_t node) const { return nodes_[node].adjoint; }
+    double value(std::uint32_t node) const { return m_nodes[node].value; }
+    double adjoint(std::uint32_t node) const { return m_nodes[node].adjoint; }
 
     /// Reverse sweep seeded at `root` (adjoints start zero at push); walks
     /// real nodes only (index >= 1), node 0 absorbs constant parents.
     void reverse(std::uint32_t root, double seed = 1.0) {
-        nodes_[root].adjoint = seed;
-        for (std::size_t i = size_; i-- > 1;) {
-            RevNode& n = nodes_[i];
+        m_nodes[root].adjoint = seed;
+        for (std::size_t i = m_size; i-- > 1;) {
+            RevNode& n = m_nodes[i];
             const double a = n.adjoint;
             if (a == 0.0 || n.op == RevOp::Input) {
                 continue;
@@ -127,53 +127,53 @@ public:
                 case RevOp::Input:
                     break;
                 case RevOp::Add:
-                    nodes_[n.lhs].adjoint += a;
-                    nodes_[n.rhs].adjoint += a;
+                    m_nodes[n.lhs].adjoint += a;
+                    m_nodes[n.rhs].adjoint += a;
                     break;
                 case RevOp::Sub:
-                    nodes_[n.lhs].adjoint += a;
-                    nodes_[n.rhs].adjoint -= a;
+                    m_nodes[n.lhs].adjoint += a;
+                    m_nodes[n.rhs].adjoint -= a;
                     break;
                 case RevOp::Mul:
-                    nodes_[n.lhs].adjoint += a * n.rhsValue;
-                    nodes_[n.rhs].adjoint += a * n.lhsValue;
+                    m_nodes[n.lhs].adjoint += a * n.rhsValue;
+                    m_nodes[n.rhs].adjoint += a * n.lhsValue;
                     break;
                 case RevOp::Div: {
                     const double rv = n.rhsValue;
-                    nodes_[n.lhs].adjoint += a / rv;
-                    nodes_[n.rhs].adjoint -= a * n.value / rv;
+                    m_nodes[n.lhs].adjoint += a / rv;
+                    m_nodes[n.rhs].adjoint -= a * n.value / rv;
                     break;
                 }
                 case RevOp::Neg:
-                    nodes_[n.lhs].adjoint -= a;
+                    m_nodes[n.lhs].adjoint -= a;
                     break;
                 case RevOp::Sqrt:
-                    nodes_[n.lhs].adjoint += a * 0.5 / n.value;
+                    m_nodes[n.lhs].adjoint += a * 0.5 / n.value;
                     break;
                 case RevOp::Exp:
-                    nodes_[n.lhs].adjoint += a * n.value;
+                    m_nodes[n.lhs].adjoint += a * n.value;
                     break;
                 case RevOp::Log:
-                    nodes_[n.lhs].adjoint += a / n.lhsValue;
+                    m_nodes[n.lhs].adjoint += a / n.lhsValue;
                     break;
                 case RevOp::Abs:
-                    nodes_[n.lhs].adjoint += a * (n.lhsValue >= 0.0 ? 1.0 : -1.0);
+                    m_nodes[n.lhs].adjoint += a * (n.lhsValue >= 0.0 ? 1.0 : -1.0);
                     break;
                 case RevOp::MinL:
                 case RevOp::MaxL:
-                    nodes_[n.lhs].adjoint += a;
+                    m_nodes[n.lhs].adjoint += a;
                     break;
                 case RevOp::MinR:
                 case RevOp::MaxR:
-                    nodes_[n.rhs].adjoint += a;
+                    m_nodes[n.rhs].adjoint += a;
                     break;
             }
         }
     }
 
 private:
-    std::vector<RevNode> nodes_;
-    std::size_t size_ = 1; // sink lives at index 0
+    std::vector<RevNode> m_nodes;
+    std::size_t m_size = 1; // sink lives at index 0
 };
 
 /// Value + tape node index; `kNone` = plain constant (no node).

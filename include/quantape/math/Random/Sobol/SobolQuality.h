@@ -278,18 +278,18 @@ inline std::vector<int> firstBitSequence(const Entry& e, int count) {
 class PropertyAChecker {
 public:
     explicit PropertyAChecker(int maxDimension)
-        : maxDimension_(maxDimension), words_((maxDimension + 63) / 64),
-          rows_(static_cast<std::size_t>(maxDimension) * words_, 0),
-          pivots_(static_cast<std::size_t>(maxDimension), -1) {}
+        : m_maxDimension(maxDimension), m_words((maxDimension + 63) / 64),
+          m_rows(static_cast<std::size_t>(maxDimension) * m_words, 0),
+          m_pivots(static_cast<std::size_t>(maxDimension), -1) {}
 
     /// Add the next dimension; returns false if det(V_d) == 0 (Property A lost).
     bool add(const Entry& e) {
-        std::vector<std::uint64_t> row(words_, 0);
-        if (nextDimension_ == 1) {
+        std::vector<std::uint64_t> row(m_words, 0);
+        if (m_nextDimension == 1) {
             row[0] = 1;
         } else {
-            const auto f = firstBitSequence(e, maxDimension_);
-            for (int k = 1; k <= maxDimension_; ++k) {
+            const auto f = firstBitSequence(e, m_maxDimension);
+            for (int k = 1; k <= m_maxDimension; ++k) {
                 if (f[static_cast<std::size_t>(k)] != 0) {
                     row[static_cast<std::size_t>((k - 1) / 64)] |= (1ULL << ((k - 1) % 64));
                 }
@@ -299,11 +299,11 @@ public:
         if (pivot < 0) {
             return false;
         }
-        for (std::size_t w = 0; w < words_; ++w) {
-            rows_[static_cast<std::size_t>(pivot) * words_ + w] = row[w];
+        for (std::size_t w = 0; w < m_words; ++w) {
+            m_rows[static_cast<std::size_t>(pivot) * m_words + w] = row[w];
         }
-        pivots_[static_cast<std::size_t>(pivot)] = static_cast<int>(nextDimension_);
-        ++nextDimension_;
+        m_pivots[static_cast<std::size_t>(pivot)] = static_cast<int>(m_nextDimension);
+        ++m_nextDimension;
         return true;
     }
 
@@ -313,30 +313,30 @@ public:
         return copy.add(e);
     }
 
-    int nextDimension() const { return nextDimension_; }
+    int nextDimension() const { return m_nextDimension; }
 
 private:
     /// Row reduction over GF(2); returns the new pivot position or -1 if dependent.
     int reduce(std::vector<std::uint64_t>& row) const {
-        for (int b = maxDimension_ - 1; b >= 0; --b) {
+        for (int b = m_maxDimension - 1; b >= 0; --b) {
             if ((row[static_cast<std::size_t>(b / 64)] >> (b % 64)) & 1) {
-                if (pivots_[static_cast<std::size_t>(b)] < 0) {
+                if (m_pivots[static_cast<std::size_t>(b)] < 0) {
                     return b;
                 }
-                const std::size_t base = static_cast<std::size_t>(b) * words_;
-                for (std::size_t w = 0; w < words_; ++w) {
-                    row[w] ^= rows_[base + w];
+                const std::size_t base = static_cast<std::size_t>(b) * m_words;
+                for (std::size_t w = 0; w < m_words; ++w) {
+                    row[w] ^= m_rows[base + w];
                 }
             }
         }
         return -1;
     }
 
-    int maxDimension_;
-    std::size_t words_;
-    std::vector<std::uint64_t> rows_;
-    std::vector<int> pivots_;
-    int nextDimension_ = 1;
+    int m_maxDimension;
+    std::size_t m_words;
+    std::vector<std::uint64_t> m_rows;
+    std::vector<int> m_pivots;
+    int m_nextDimension = 1;
 };
 
 } // namespace sobol

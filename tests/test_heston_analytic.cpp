@@ -13,6 +13,7 @@
 //     analytic price within the documented QE discretization bias
 //     (high vol-of-vol; ~0.7% at 252 steps, converging as dt -> 0)
 //   - Complex-step parameter gradients vs central finite differences
+#include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Integrals/GaussLaguerre.h"
 #include "quantape/math/Integrals/GaussLegendre.h"
 #include "quantape/math/SpecialFunctions/TrigIntegrals.h"
@@ -21,7 +22,6 @@
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/processes/HestonQeProcess.h"
 #include "quantape/mc/processes/SdeProcesses.h"
-#include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/models/HestonModel.h"
 #include "quantape/pricing/BlackScholes.h"
 
@@ -424,8 +424,12 @@ void testOscillatoryValidator() {
     const std::complex<double> phiHalf =
         HestonModel::characteristic(std::complex<double>(0.0, -0.5), p, t);
     const double sigmaBs = std::sqrt(-8.0 / t * std::log(phiHalf.real()));
-    const double base = quantape::pricing::GBS<double>{market.spot, market.strike, market.rate,
-                                                       market.rate - market.dividend, sigmaBs, t,
+    const double base = quantape::pricing::GBS<double>{market.spot,
+                                                       market.strike,
+                                                       market.rate,
+                                                       market.rate - market.dividend,
+                                                       sigmaBs,
+                                                       t,
                                                        quantape::pricing::OptionType::Call}
                             .price();
 

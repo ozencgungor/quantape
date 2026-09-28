@@ -30,12 +30,12 @@ namespace quantape::mc {
  */
 class TimeGrid {
 public:
-    explicit TimeGrid(std::vector<double> times) : times_(std::move(times)) {
-        if (times_.size() < 2) {
+    explicit TimeGrid(std::vector<double> times) : m_times(std::move(times)) {
+        if (m_times.size() < 2) {
             throw std::invalid_argument("TimeGrid: need at least two dates");
         }
-        for (std::size_t k = 1; k < times_.size(); ++k) {
-            if (!(times_[k] > times_[k - 1])) {
+        for (std::size_t k = 1; k < m_times.size(); ++k) {
+            if (!(m_times[k] > m_times[k - 1])) {
                 throw std::invalid_argument("TimeGrid: times must be strictly increasing");
             }
         }
@@ -45,20 +45,20 @@ public:
         if (!(tMax > 0.0) || nSteps < 1) {
             throw std::invalid_argument("TimeGrid: need tMax > 0 and nSteps >= 1");
         }
-        times_.resize(nSteps + 1);
+        m_times.resize(nSteps + 1);
         for (std::size_t k = 0; k <= nSteps; ++k) {
-            times_[k] = tMax * static_cast<double>(k) / static_cast<double>(nSteps);
+            m_times[k] = tMax * static_cast<double>(k) / static_cast<double>(nSteps);
         }
     }
 
-    std::size_t nSteps() const { return times_.size() - 1; }
-    const std::vector<double>& times() const { return times_; }
-    double time(std::size_t k) const { return times_[k]; }
-    double dt(std::size_t k) const { return times_[k + 1] - times_[k]; }
-    double tMax() const { return times_.back(); }
+    std::size_t nSteps() const { return m_times.size() - 1; }
+    const std::vector<double>& times() const { return m_times; }
+    double time(std::size_t k) const { return m_times[k]; }
+    double dt(std::size_t k) const { return m_times[k + 1] - m_times[k]; }
+    double tMax() const { return m_times.back(); }
 
 private:
-    std::vector<double> times_;
+    std::vector<double> m_times;
 };
 
 } // namespace quantape::mc

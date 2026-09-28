@@ -67,7 +67,7 @@ namespace sobol {
  *    across threads and processes.
  */
 struct SobolOptions {
-    std::uint64_t shiftSeed = 0;    ///< 0 = unshifted (use with pointOffset > 0)
+    std::uint64_t shiftSeed = 0; ///< 0 = unshifted (use with pointOffset > 0)
     std::uint64_t pointOffset = 1;
     bool validate = true;
     std::uint32_t maxBits = 32;     ///< direction words per dimension (1..64)
@@ -107,15 +107,15 @@ public:
         std::fclose(file);
         buffer.resize(got);
         MappedFile* raw = new MappedFile(nullptr, buffer.size());
-        raw->heap_ = std::move(buffer);
+        raw->m_heap = std::move(buffer);
         return std::shared_ptr<const MappedFile>(raw);
 #endif
     }
 
     ~MappedFile() {
 #if QUANTAPE_SOBOL_HAS_MMAP
-        if (base_ != nullptr) {
-            munmap(base_, size_);
+        if (m_base != nullptr) {
+            munmap(m_base, m_size);
         }
 #endif
     }
@@ -125,19 +125,19 @@ public:
 
     const std::uint8_t* data() const {
 #if QUANTAPE_SOBOL_HAS_MMAP
-        return static_cast<const std::uint8_t*>(base_);
+        return static_cast<const std::uint8_t*>(m_base);
 #else
-        return heap_.data();
+        return m_heap.data();
 #endif
     }
-    std::size_t size() const { return size_; }
+    std::size_t size() const { return m_size; }
 
 private:
-    MappedFile(void* base, std::size_t size) : base_(base), size_(size) {}
-    void* base_ = nullptr;
-    std::size_t size_ = 0;
+    MappedFile(void* base, std::size_t size) : m_base(base), m_size(size) {}
+    void* m_base = nullptr;
+    std::size_t m_size = 0;
 #if !QUANTAPE_SOBOL_HAS_MMAP
-    std::vector<std::uint8_t> heap_;
+    std::vector<std::uint8_t> m_heap;
 #endif
 };
 
@@ -151,29 +151,29 @@ inline constexpr char kBinaryMagic[5] = "QSB1";
 class SobolGenerator {
 public:
     explicit SobolGenerator(std::vector<Entry> entries, SobolOptions options = {})
-        : options_(options), entries_(std::move(entries)) {
-        if (entries_.empty()) {
+        : m_options(options), m_entries(std::move(entries)) {
+        if (m_entries.empty()) {
             throw std::invalid_argument("SobolGenerator: empty direction-number table");
         }
-        if (options_.maxBits < 1 || options_.maxBits > 64) {
+        if (m_options.maxBits < 1 || m_options.maxBits > 64) {
             throw std::invalid_argument("SobolGenerator: maxBits must be in 1..64");
         }
-        dimensionCount_ = entries_.back().dim;
-        if (options_.validate) {
+        m_dimensionCount = m_entries.back().dim;
+        if (m_options.validate) {
             validate();
         }
-        preparedDimension_ = dimensionCount_;
-        if (options_.maxDimension != 0) {
-            preparedDimension_ = std::min(dimensionCount_, options_.maxDimension);
+        m_preparedDimension = m_dimensionCount;
+        if (m_options.maxDimension != 0) {
+            m_preparedDimension = std::min(m_dimensionCount, m_options.maxDimension);
         }
-        if (preparedDimension_ < 1) {
+        if (m_preparedDimension < 1) {
             throw std::invalid_argument("SobolGenerator: nothing prepared");
         }
-        use32_ = (options_.maxBits <= 32);
+        m_use32 = (m_options.maxBits <= 32);
         build();
-        if (!options_.keepEntries) {
-            entries_.clear();
-            entries_.shrink_to_fit();
+        if (!m_options.keepEntries) {
+            m_entries.clear();
+            m_entries.shrink_to_fit();
         }
     }
 
@@ -192,9 +192,8 @@ public:
     static SobolGenerator fromDefaultTable(SobolOptions options = {}) {
         const std::string path = defaultTablePath();
         if (path.empty()) {
-            throw std::runtime_error(
-                "SobolGenerator: no compile-time table configured "
-                "(set -DQUANTAPE_SOBOL_TABLE=<file> when configuring CMake)");
+            throw std::runtime_error("SobolGenerator: no compile-time table configured "
+                                     "(set -DQUANTAPE_SOBOL_TABLE=<file> when configuring CMake)");
         }
         if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".qsb") == 0) {
             return fromBinary(path, options);
@@ -227,35 +226,35 @@ public:
 
     static std::string defaultTablePath() { return QUANTAPE_SOBOL_DEFAULT_TABLE_PATH; }
 
-    std::uint32_t dimensionCount() const { return dimensionCount_; }
-    std::uint32_t preparedDimension() const { return preparedDimension_; }
-    std::uint32_t maxBits() const { return options_.maxBits; }
-    std::uint64_t shiftSeed() const { return options_.shiftSeed; }
-    std::uint64_t pointOffset() const { return options_.pointOffset; }
+    std::uint32_t dimensionCount() const { return m_dimensionCount; }
+    std::uint32_t preparedDimension() const { return m_preparedDimension; }
+    std::uint32_t maxBits() const { return m_options.maxBits; }
+    std::uint64_t shiftSeed() const { return m_options.shiftSeed; }
+    std::uint64_t pointOffset() const { return m_options.pointOffset; }
     std::uint32_t firstDimension() const { return 2; }
-    bool mapped() const { return mapping_ != nullptr; }
-    const std::vector<Entry>& entries() const { return entries_; }
+    bool mapped() const { return m_mapping != nullptr; }
+    const std::vector<Entry>& entries() const { return m_entries; }
 
     /// 64-bit uniform bits with the configured shift.
     std::uint64_t uniformBits(std::uint64_t point, std::uint32_t dim) const {
-        return uniformBits(point, dim, options_.shiftSeed);
+        return uniformBits(point, dim, m_options.shiftSeed);
     }
 
     /// 64-bit uniform bits with an explicit (replica) shift seed.
     std::uint64_t uniformBits(std::uint64_t point, std::uint32_t dim,
                               std::uint64_t shiftSeed) const {
-        const std::uint64_t absolute = point + options_.pointOffset;
-        if (dim < 1 || dim > preparedDimension_) {
+        const std::uint64_t absolute = point + m_options.pointOffset;
+        if (dim < 1 || dim > m_preparedDimension) {
             throw std::out_of_range("SobolGenerator: dimension out of range");
         }
-        if (options_.maxBits < 64 && absolute >= (1ULL << options_.maxBits)) {
+        if (m_options.maxBits < 64 && absolute >= (1ULL << m_options.maxBits)) {
             throw std::out_of_range("SobolGenerator: point exceeds maxBits");
         }
         return bitsImpl(absolute, dim, shiftSeed);
     }
 
     double uniform(std::uint64_t point, std::uint32_t dim) const {
-        return uniform(point, dim, options_.shiftSeed);
+        return uniform(point, dim, m_options.shiftSeed);
     }
 
     double uniform(std::uint64_t point, std::uint32_t dim, std::uint64_t shiftSeed) const {
@@ -263,7 +262,7 @@ public:
     }
 
     double normal(std::uint64_t point, std::uint32_t dim) const {
-        return normal(point, dim, options_.shiftSeed);
+        return normal(point, dim, m_options.shiftSeed);
     }
 
     double normal(std::uint64_t point, std::uint32_t dim, std::uint64_t shiftSeed) const {
@@ -283,42 +282,42 @@ public:
 
     /// Shift used by the configured seed (precomputed; explicit seeds hash).
     std::uint64_t configuredShift(std::uint32_t dim) const {
-        return options_.shiftSeed ? shifts_[dim] : 0;
+        return m_options.shiftSeed ? m_shifts[dim] : 0;
     }
 
 private:
     SobolGenerator(std::shared_ptr<const detail::MappedFile> mapping, SobolOptions options)
-        : options_(options), mapping_(std::move(mapping)) {
-        const std::uint8_t* data = mapping_->data();
-        if (mapping_->size() < detail::kBinaryHeader ||
+        : m_options(options), m_mapping(std::move(mapping)) {
+        const std::uint8_t* data = m_mapping->data();
+        if (m_mapping->size() < detail::kBinaryHeader ||
             std::memcmp(data, detail::kBinaryMagic, 4) != 0) {
             throw std::invalid_argument("SobolGenerator: not a QSB1 binary asset");
         }
         std::uint32_t dims = 0, wordBytes = 0;
         std::memcpy(&dims, data + 4, 4);
-        std::memcpy(&assetBits_, data + 8, 4);
+        std::memcpy(&m_assetBits, data + 8, 4);
         std::memcpy(&wordBytes, data + 12, 4);
-        dimensionCount_ = dims;
-        preparedDimension_ = dims;
-        if (options_.maxDimension != 0) {
-            preparedDimension_ = std::min(dims, options_.maxDimension);
+        m_dimensionCount = dims;
+        m_preparedDimension = dims;
+        if (m_options.maxDimension != 0) {
+            m_preparedDimension = std::min(dims, m_options.maxDimension);
         }
-        if (options_.maxBits == 0) {
-            options_.maxBits = assetBits_;
+        if (m_options.maxBits == 0) {
+            m_options.maxBits = m_assetBits;
         }
-        if (assetBits_ < 1 || assetBits_ > 64 || options_.maxBits > assetBits_ ||
+        if (m_assetBits < 1 || m_assetBits > 64 || m_options.maxBits > m_assetBits ||
             (wordBytes != 4 && wordBytes != 8)) {
             throw std::invalid_argument("SobolGenerator: bad binary asset header");
         }
         const std::size_t needed =
-            detail::kBinaryHeader + static_cast<std::size_t>(dims - 1) * assetBits_ * wordBytes;
-        if (mapping_->size() < needed) {
+            detail::kBinaryHeader + static_cast<std::size_t>(dims - 1) * m_assetBits * wordBytes;
+        if (m_mapping->size() < needed) {
             throw std::invalid_argument("SobolGenerator: truncated binary asset");
         }
-        use32_ = (wordBytes == 4);
+        m_use32 = (wordBytes == 4);
         const std::uint8_t* words = data + detail::kBinaryHeader;
-        ext32_ = use32_ ? reinterpret_cast<const std::uint32_t*>(words) : nullptr;
-        ext64_ = use32_ ? nullptr : reinterpret_cast<const std::uint64_t*>(words);
+        m_ext32 = m_use32 ? reinterpret_cast<const std::uint32_t*>(words) : nullptr;
+        m_ext64 = m_use32 ? nullptr : reinterpret_cast<const std::uint64_t*>(words);
         buildFirstWords();
         buildShifts();
     }
@@ -328,11 +327,10 @@ private:
                  const std::function<SobolGenerator()>& create) {
         static std::mutex mutex;
         static std::map<std::string, std::weak_ptr<const SobolGenerator>> cache;
-        std::string full = key + "|" + std::to_string(options.shiftSeed) + "|" +
-                           std::to_string(options.pointOffset) + "|" +
-                           std::to_string(options.maxBits) + "|" +
-                           std::to_string(options.maxDimension) + "|" +
-                           std::to_string(options.keepEntries);
+        std::string full =
+            key + "|" + std::to_string(options.shiftSeed) + "|" +
+            std::to_string(options.pointOffset) + "|" + std::to_string(options.maxBits) + "|" +
+            std::to_string(options.maxDimension) + "|" + std::to_string(options.keepEntries);
         const std::lock_guard<std::mutex> lock(mutex);
         auto it = cache.find(full);
         if (it != cache.end()) {
@@ -346,8 +344,8 @@ private:
     }
 
     void validate() const {
-        for (std::size_t i = 0; i < entries_.size(); ++i) {
-            const Entry& e = entries_[i];
+        for (std::size_t i = 0; i < m_entries.size(); ++i) {
+            const Entry& e = m_entries[i];
             if (e.dim != i + 2) {
                 throw std::invalid_argument("SobolGenerator: dimensions must be contiguous from 2");
             }
@@ -365,41 +363,41 @@ private:
     }
 
     void buildFirstWords() {
-        const std::size_t bits = options_.maxBits;
-        if (use32_) {
-            first32_.assign(bits, 0);
+        const std::size_t bits = m_options.maxBits;
+        if (m_use32) {
+            m_first32.assign(bits, 0);
             for (std::size_t k = 1; k <= bits; ++k) {
-                first32_[k - 1] = 1u << (32 - k);
+                m_first32[k - 1] = 1u << (32 - k);
             }
         } else {
-            first64_.assign(bits, 0);
+            m_first64.assign(bits, 0);
             for (std::size_t k = 1; k <= bits; ++k) {
-                first64_[k - 1] = 1ULL << (64 - k);
+                m_first64[k - 1] = 1ULL << (64 - k);
             }
         }
     }
 
     void buildShifts() {
-        if (options_.shiftSeed == 0) {
+        if (m_options.shiftSeed == 0) {
             return;
         }
-        shifts_.assign(static_cast<std::size_t>(preparedDimension_) + 1, 0);
-        for (std::uint32_t d = 1; d <= preparedDimension_; ++d) {
-            shifts_[d] = shiftFor(d, options_.shiftSeed);
+        m_shifts.assign(static_cast<std::size_t>(m_preparedDimension) + 1, 0);
+        for (std::uint32_t d = 1; d <= m_preparedDimension; ++d) {
+            m_shifts[d] = shiftFor(d, m_options.shiftSeed);
         }
     }
 
     void build() {
         buildFirstWords();
-        const std::size_t dims = preparedDimension_;
-        const std::size_t bits = options_.maxBits;
-        if (use32_) {
-            words32_.assign((dims - 1) * bits, 0);
+        const std::size_t dims = m_preparedDimension;
+        const std::size_t bits = m_options.maxBits;
+        if (m_use32) {
+            m_words32.assign((dims - 1) * bits, 0);
         } else {
-            words64_.assign((dims - 1) * bits, 0);
+            m_words64.assign((dims - 1) * bits, 0);
         }
         for (std::size_t i = 0; i + 2 <= dims; ++i) {
-            const Entry& e = entries_[i];
+            const Entry& e = m_entries[i];
             const std::uint64_t poly = gf2::decode_poly(static_cast<int>(e.s), e.a);
             std::uint64_t m[65] = {0};
             for (std::uint32_t k = 1; k <= e.s && k <= bits; ++k) {
@@ -414,13 +412,13 @@ private:
                 }
                 m[k] = value;
             }
-            if (use32_) {
-                std::uint32_t* w = words32_.data() + i * bits;
+            if (m_use32) {
+                std::uint32_t* w = m_words32.data() + i * bits;
                 for (std::size_t k = 1; k <= bits; ++k) {
                     w[k - 1] = static_cast<std::uint32_t>(m[k]) << (32 - static_cast<int>(k));
                 }
             } else {
-                std::uint64_t* w = words64_.data() + i * bits;
+                std::uint64_t* w = m_words64.data() + i * bits;
                 for (std::size_t k = 1; k <= bits; ++k) {
                     w[k - 1] = m[k] << (64 - static_cast<int>(k));
                 }
@@ -431,30 +429,29 @@ private:
 
     /// Hot path: XOR the direction words selected by the bits of `p`.
     /// `p` is the absolute point index (pointOffset already applied).
-    std::uint64_t bitsImpl(std::uint64_t p, std::uint32_t dim,
-                           std::uint64_t shiftSeed) const {
+    std::uint64_t bitsImpl(std::uint64_t p, std::uint32_t dim, std::uint64_t shiftSeed) const {
         std::uint64_t x = 0;
-        const std::uint32_t bits = options_.maxBits;
+        const std::uint32_t bits = m_options.maxBits;
         if (dim == 1) {
-            if (use32_) {
-                const std::uint32_t* w = first32_.data();
+            if (m_use32) {
+                const std::uint32_t* w = m_first32.data();
                 while (p != 0) {
                     const int bit = __builtin_ctzll(p);
                     x ^= static_cast<std::uint64_t>(w[bit]) << 32;
                     p &= p - 1;
                 }
             } else {
-                const std::uint64_t* w = first64_.data();
+                const std::uint64_t* w = m_first64.data();
                 while (p != 0) {
                     const int bit = __builtin_ctzll(p);
                     x ^= w[bit];
                     p &= p - 1;
                 }
             }
-        } else if (use32_) {
+        } else if (m_use32) {
             const std::uint32_t* w =
-                ext32_ ? ext32_ + static_cast<std::size_t>(dim - 2) * bits
-                       : words32_.data() + static_cast<std::size_t>(dim - 2) * bits;
+                m_ext32 ? m_ext32 + static_cast<std::size_t>(dim - 2) * bits
+                        : m_words32.data() + static_cast<std::size_t>(dim - 2) * bits;
             while (p != 0) {
                 const int bit = __builtin_ctzll(p);
                 x ^= static_cast<std::uint64_t>(w[bit]) << 32;
@@ -462,8 +459,8 @@ private:
             }
         } else {
             const std::uint64_t* w =
-                ext64_ ? ext64_ + static_cast<std::size_t>(dim - 2) * bits
-                       : words64_.data() + static_cast<std::size_t>(dim - 2) * bits;
+                m_ext64 ? m_ext64 + static_cast<std::size_t>(dim - 2) * bits
+                        : m_words64.data() + static_cast<std::size_t>(dim - 2) * bits;
             while (p != 0) {
                 const int bit = __builtin_ctzll(p);
                 x ^= w[bit];
@@ -471,7 +468,7 @@ private:
             }
         }
         if (shiftSeed != 0) {
-            x ^= (shiftSeed == options_.shiftSeed) ? shifts_[dim] : shiftFor(dim, shiftSeed);
+            x ^= (shiftSeed == m_options.shiftSeed) ? m_shifts[dim] : shiftFor(dim, shiftSeed);
         }
         return x;
     }
@@ -483,20 +480,20 @@ private:
         return x ^ (x >> 31);
     }
 
-    SobolOptions options_;
-    std::vector<Entry> entries_;
-    std::shared_ptr<const detail::MappedFile> mapping_;
-    std::uint32_t dimensionCount_ = 1;
-    std::uint32_t preparedDimension_ = 1;
-    std::uint32_t assetBits_ = 0;
-    bool use32_ = true;
-    const std::uint32_t* ext32_ = nullptr;
-    const std::uint64_t* ext64_ = nullptr;
-    std::vector<std::uint32_t> words32_;
-    std::vector<std::uint64_t> words64_;
-    std::vector<std::uint32_t> first32_;
-    std::vector<std::uint64_t> first64_;
-    std::vector<std::uint64_t> shifts_;
+    SobolOptions m_options;
+    std::vector<Entry> m_entries;
+    std::shared_ptr<const detail::MappedFile> m_mapping;
+    std::uint32_t m_dimensionCount = 1;
+    std::uint32_t m_preparedDimension = 1;
+    std::uint32_t m_assetBits = 0;
+    bool m_use32 = true;
+    const std::uint32_t* m_ext32 = nullptr;
+    const std::uint64_t* m_ext64 = nullptr;
+    std::vector<std::uint32_t> m_words32;
+    std::vector<std::uint64_t> m_words64;
+    std::vector<std::uint32_t> m_first32;
+    std::vector<std::uint64_t> m_first64;
+    std::vector<std::uint64_t> m_shifts;
 };
 
 } // namespace sobol

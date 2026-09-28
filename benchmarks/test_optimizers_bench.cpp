@@ -9,8 +9,8 @@
 // Run: ./test_optimizers_bench 200
 #include "quantape/math/StanMath.h"
 
-#include "quantape/math/Optimization/AugLag.h"
 #include "quantape/calibration/ImplicitFunction.h"
+#include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"

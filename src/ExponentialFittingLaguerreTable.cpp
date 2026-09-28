@@ -167,8 +167,14 @@ const double kEfglTable[][129] = {
 };
 // clang-format on
 
-const double* efglTable() { return &kEfglTable[0][0]; }
-std::size_t efglRowCount() { return 147; }
-std::size_t efglColumnCount() { return 129; }
+const double* efglTable() {
+    return &kEfglTable[0][0];
+}
+std::size_t efglRowCount() {
+    return 147;
+}
+std::size_t efglColumnCount() {
+    return 129;
+}
 
 } // namespace quantape::math::detail

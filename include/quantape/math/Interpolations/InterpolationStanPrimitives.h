@@ -532,7 +532,7 @@ CubicInterpolation<stan::math::var>::weightMatrixValue(stan::math::var x) const 
         result += w[j] * this->m_y[j].val();
     }
 
-    return make_callback_var(result, [y = this->m_y_shared, i, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_yShared, i, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         (*y)[i].adj() += adj; // delta(i, j)
         for (size_t j = 0; j < w.size(); ++j)
@@ -563,7 +563,7 @@ CubicInterpolation<stan::math::var>::weightMatrixDerivative(stan::math::var x) c
         result += w[j] * this->m_y[j].val();
     }
 
-    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].adj() += adj * w[j];
@@ -601,7 +601,7 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixValue(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y_shared, i, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_yShared, i, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         (*y)[i].val_.adj() += adj;
         for (size_t j = 0; j < w.size(); ++j)
@@ -639,7 +639,7 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].val_.adj() += adj * w[j];
@@ -660,7 +660,7 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::weightMatrixDerivative(
 //
 // Note: the template parameter Smooth only sets the runtime default; pass
 // smooth=true to the constructor — these specializations respect m_smooth.
-// Callbacks are self-contained (y captured as the shared m_y_shared
+// Callbacks are self-contained (y captured as the shared m_yShared
 // snapshot — one shared_ptr copy per evaluation instead of a full vector
 // copy; weights by move) for the same lifetime reason as the weight-matrix
 // specializations above.
@@ -701,7 +701,7 @@ CubicInterpolation<stan::math::var>::localWeightsValue(stan::math::var x) const 
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) * dx + dGet(b[i], j) * dx2 + dGet(c[i], j) * dx3;
 
-    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].adj() += adj * w[j];
@@ -741,7 +741,7 @@ CubicInterpolation<stan::math::var>::localWeightsDerivative(stan::math::var x) c
     for (size_t j = 0; j < n; ++j)
         w[j] += dGet(a[i], j) + 2.0 * dGet(b[i], j) * dx + 3.0 * dGet(c[i], j) * dx2;
 
-    return make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    return make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].adj() += adj * w[j];
@@ -789,7 +789,7 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsValue(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].val_.adj() += adj * w[j];
@@ -837,7 +837,7 @@ CubicInterpolation<stan::math::fvar<stan::math::var>>::localWeightsDerivative(
     for (size_t j = 0; j < n; ++j)
         tangent += w[j] * this->m_y[j].d_;
 
-    var val = make_callback_var(result, [y = this->m_y_shared, w = std::move(w)](auto& vi) {
+    var val = make_callback_var(result, [y = this->m_yShared, w = std::move(w)](auto& vi) {
         const double adj = vi.adj();
         for (size_t j = 0; j < w.size(); ++j)
             (*y)[j].val_.adj() += adj * w[j];

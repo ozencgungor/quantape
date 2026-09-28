@@ -50,7 +50,8 @@ double bench_ns(const char* name, double per_unit, int reps, const std::function
 
 void report_memory(const char* label, std::uint32_t prepared, std::uint32_t maxBits) {
     const double bytes_per_word = (maxBits <= 32) ? 4.0 : 8.0;
-    const double mib = (static_cast<double>(prepared - 1) * maxBits * bytes_per_word) / (1024 * 1024);
+    const double mib =
+        (static_cast<double>(prepared - 1) * maxBits * bytes_per_word) / (1024 * 1024);
     std::printf("  %-34s prepared=%6u dims  maxBits=%2u  words ~ %.1f MiB\n", label, prepared,
                 maxBits, mib);
 }
@@ -92,8 +93,7 @@ int main(int argc, char** argv) {
                         "shared=%s, heap words = 0 MiB\n",
                         std::chrono::duration<double, std::milli>(t1 - t0).count(),
                         std::chrono::duration<double, std::micro>(t2 - t1).count(),
-                        first->mapped() ? "yes" : "no",
-                        first.get() == second.get() ? "yes" : "NO");
+                        first->mapped() ? "yes" : "no", first.get() == second.get() ? "yes" : "NO");
         } else {
             std::printf("compile-time table: not configured\n");
         }
@@ -121,7 +121,8 @@ int main(int argc, char** argv) {
     std::shared_ptr<const SobolGenerator> shared;
     if (!SobolGenerator::defaultTablePath().empty() &&
         std::filesystem::exists(SobolGenerator::defaultTablePath())) {
-        shared = SobolGenerator::sharedFromDefaultTable(SobolOptions{12345, 1, false, 32, 0, false});
+        shared =
+            SobolGenerator::sharedFromDefaultTable(SobolOptions{12345, 1, false, 32, 0, false});
     } else {
         shared = std::make_shared<const SobolGenerator>(
             SobolGenerator::fromFile(table, SobolOptions{12345, 1, false, 32, 0, false}));
@@ -165,14 +166,15 @@ int main(int argc, char** argv) {
         const std::size_t steps = 252, paths = 4096;
         SobolGaussianSource source(shared, 4, steps, 1, 0, 777);
         Eigen::MatrixXd out;
-        bench_ns("source fill 252 steps x 4096 paths", static_cast<double>(steps * paths), reps, [&] {
-            double sink = 0.0;
-            for (std::size_t k = 0; k < steps; ++k) {
-                source.fill(k, 0, paths, out);
-                sink += out(0, 0);
-            }
-            return sink;
-        });
+        bench_ns("source fill 252 steps x 4096 paths", static_cast<double>(steps * paths), reps,
+                 [&] {
+                     double sink = 0.0;
+                     for (std::size_t k = 0; k < steps; ++k) {
+                         source.fill(k, 0, paths, out);
+                         sink += out(0, 0);
+                     }
+                     return sink;
+                 });
     }
 
     // ── 4. Engine path costs ──
@@ -187,20 +189,22 @@ int main(int argc, char** argv) {
         SdeSimulator<double> simulator(grid, theta);
 
         const SobolGaussianSource qmc(shared, 1, steps, 1, 0, 4242);
-        bench_ns("engine GBM seq (sobol, 65k x 252)", static_cast<double>(nPaths * steps), reps, [&] {
-            const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model), qmc,
-                                                    nPaths, blockSize, Schedule::Sequential);
-            return blocks.back().states.back()(0, 0);
-        });
-        bench_ns("engine GBM par (sobol, 65k x 252)", static_cast<double>(nPaths * steps), reps, [&] {
-            const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model), qmc,
-                                                    nPaths, blockSize, Schedule::Parallel);
-            return blocks.back().states.back()(0, 0);
-        });
+        bench_ns(
+            "engine GBM seq (sobol, 65k x 252)", static_cast<double>(nPaths * steps), reps, [&] {
+                const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model), qmc,
+                                                       nPaths, blockSize, Schedule::Sequential);
+                return blocks.back().states.back()(0, 0);
+            });
+        bench_ns(
+            "engine GBM par (sobol, 65k x 252)", static_cast<double>(nPaths * steps), reps, [&] {
+                const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model), qmc,
+                                                       nPaths, blockSize, Schedule::Parallel);
+                return blocks.back().states.back()(0, 0);
+            });
         const IidGaussianSource<> iid(1, 4242);
         bench_ns("engine GBM par (iid, 65k x 252)", static_cast<double>(nPaths * steps), reps, [&] {
             const auto blocks = simulator.simulate(x0, driftOf(model), diffusionOf(model), iid,
-                                                    nPaths, blockSize, Schedule::Parallel);
+                                                   nPaths, blockSize, Schedule::Parallel);
             return blocks.back().states.back()(0, 0);
         });
 
@@ -209,15 +213,15 @@ int main(int argc, char** argv) {
         const auto x04 = Eigen::VectorXd::Constant(4, 100.0);
         const FourFactorGbm model4;
         const SobolGaussianSource qmc4(shared, 4, steps, 1, 0, 4242);
-        bench_ns("engine 4-factor seq (sobol, 16k x 252)",
-                 static_cast<double>(nPaths4 * steps), reps, [&] {
+        bench_ns("engine 4-factor seq (sobol, 16k x 252)", static_cast<double>(nPaths4 * steps),
+                 reps, [&] {
                      const auto blocks =
                          simulator.simulate(x04, driftOf(model4), diffusionOf(model4), qmc4,
                                             nPaths4, 2048, Schedule::Sequential);
                      return blocks.back().states.back()(0, 0);
                  });
-        bench_ns("engine 4-factor par (sobol, 16k x 252)",
-                 static_cast<double>(nPaths4 * steps), reps, [&] {
+        bench_ns("engine 4-factor par (sobol, 16k x 252)", static_cast<double>(nPaths4 * steps),
+                 reps, [&] {
                      const auto blocks =
                          simulator.simulate(x04, driftOf(model4), diffusionOf(model4), qmc4,
                                             nPaths4, 2048, Schedule::Parallel);

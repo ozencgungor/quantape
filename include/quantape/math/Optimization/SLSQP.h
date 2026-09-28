@@ -44,10 +44,10 @@ public:
     using Base = Optimizer<DoubleT, SLSQP<DoubleT>>;
 
     explicit SLSQP(StopCriteria criteria = {}, double feasibility_tol = 1e-10)
-        : Base(std::move(criteria)), m_feasibility_tol(feasibility_tol) {}
+        : Base(std::move(criteria)), m_feasibilityTol(feasibility_tol) {}
 
-    double feasibilityTolerance() const { return m_feasibility_tol; }
-    void setFeasibilityTolerance(double tol) { m_feasibility_tol = tol; }
+    double feasibilityTolerance() const { return m_feasibilityTol; }
+    void setFeasibilityTolerance(double tol) { m_feasibilityTol = tol; }
 
     // ── Constrained entry points ──
 
@@ -291,14 +291,14 @@ private:
             const QpResult qp_result = solveActiveSetQp(qp);
             if (!qp_result.success) {
                 state.message = "QP subproblem failed";
-                return violation() > m_feasibility_tol ? OptimizeResult::Infeasible
-                                                       : OptimizeResult::Failure;
+                return violation() > m_feasibilityTol ? OptimizeResult::Infeasible
+                                                      : OptimizeResult::Failure;
             }
             const std::vector<double>& d = qp_result.d;
             const double d_norm = max_abs(d);
 
             if (d_norm <= step_tol) {
-                if (violation() <= m_feasibility_tol) {
+                if (violation() <= m_feasibilityTol) {
                     state.message = "KKT conditions satisfied";
                     // Export the final multipliers for the IFT layer
                     // (ImplicitFunction.h): QP rows are [ineq][eq][bounds].
@@ -441,7 +441,7 @@ private:
         return OptimizeResult::Failure;
     }
 
-    double m_feasibility_tol;
+    double m_feasibilityTol;
 };
 
 } // namespace quantape::math

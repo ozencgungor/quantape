@@ -59,20 +59,19 @@ public:
     /// prepared dimensions. Its configured `shiftSeed` selects the replica.
     SobolSource(std::shared_ptr<const math::mc::sobol::SobolGenerator> generator,
                 std::size_t factorCount, std::size_t nSteps, std::size_t uniformStreams = 0)
-        : generator_(std::move(generator)), factorCount_(factorCount), nSteps_(nSteps),
-          uniformStreams_(uniformStreams) {
-        if (!generator_) {
+        : m_generator(std::move(generator)), m_factorCount(factorCount), m_nSteps(nSteps),
+          m_uniformStreams(uniformStreams) {
+        if (!m_generator) {
             throw std::invalid_argument("SobolSource: generator must not be null");
         }
-        if (factorCount_ == 0) {
+        if (m_factorCount == 0) {
             throw std::invalid_argument("SobolSource: factorCount must be positive");
         }
-        const std::size_t required =
-            nSteps_ * factorCount_ + nSteps_ * uniformStreams_;
-        if (required > generator_->preparedDimension()) {
-            throw std::invalid_argument(
-                "SobolSource: table too small for layout (need " + std::to_string(required) +
-                " dimensions, have " + std::to_string(generator_->preparedDimension()) + ")");
+        const std::size_t required = m_nSteps * m_factorCount + m_nSteps * m_uniformStreams;
+        if (required > m_generator->preparedDimension()) {
+            throw std::invalid_argument("SobolSource: table too small for layout (need " +
+                                        std::to_string(required) + " dimensions, have " +
+                                        std::to_string(m_generator->preparedDimension()) + ")");
         }
     }
 
@@ -90,8 +89,8 @@ public:
 
     /// Convenience: shared generator from the compile-time table (if configured).
     static SobolSource fromDefaultTable(std::size_t factorCount, std::size_t nSteps,
-                                        std::size_t uniformStreams = 0,
-                                        std::uint64_t shiftSeed = 0, std::uint32_t maxBits = 32) {
+                                        std::size_t uniformStreams = 0, std::uint64_t shiftSeed = 0,
+                                        std::uint32_t maxBits = 32) {
         math::mc::sobol::SobolOptions options;
         options.shiftSeed = shiftSeed;
         options.maxBits = maxBits;
@@ -100,21 +99,21 @@ public:
                            factorCount, nSteps, uniformStreams);
     }
 
-    std::size_t factorCount() const { return factorCount_; }
-    std::size_t nSteps() const { return nSteps_; }
-    std::size_t uniformStreams() const { return uniformStreams_; }
-    std::uint64_t shiftSeed() const { return generator_->shiftSeed(); }
+    std::size_t factorCount() const { return m_factorCount; }
+    std::size_t nSteps() const { return m_nSteps; }
+    std::size_t uniformStreams() const { return m_uniformStreams; }
+    std::uint64_t shiftSeed() const { return m_generator->shiftSeed(); }
 
     /// Standardized Gaussian draws: `out(j, p)` = Phi^{-1}(Sobol value) at
     /// dimension `k*q + j + 1` of point `pointOffset + pathBegin + p`.
     void fill(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
               Eigen::MatrixXd& out) const {
-        out.resize(static_cast<Eigen::Index>(factorCount_), static_cast<Eigen::Index>(nPaths));
+        out.resize(static_cast<Eigen::Index>(m_factorCount), static_cast<Eigen::Index>(nPaths));
         for (std::size_t p = 0; p < nPaths; ++p) {
             const std::uint64_t point = pathBegin + p;
-            for (std::size_t j = 0; j < factorCount_; ++j) {
+            for (std::size_t j = 0; j < m_factorCount; ++j) {
                 out(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)) =
-                    generator_->normal(point, normalDim(step, j));
+                    m_generator->normal(point, normalDim(step, j));
             }
         }
     }
@@ -124,7 +123,7 @@ public:
     void fillUniform(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
                      std::size_t streamBegin, std::size_t uniformStreamCount,
                      Eigen::MatrixXd& out) const {
-        if (streamBegin + uniformStreamCount > uniformStreams_) {
+        if (streamBegin + uniformStreamCount > m_uniformStreams) {
             throw std::out_of_range("SobolSource: uniform stream out of range");
         }
         out.resize(static_cast<Eigen::Index>(uniformStreamCount),
@@ -133,7 +132,7 @@ public:
             const std::uint64_t point = pathBegin + p;
             for (std::size_t s = 0; s < uniformStreamCount; ++s) {
                 out(static_cast<Eigen::Index>(s), static_cast<Eigen::Index>(p)) =
-                    generator_->uniform(point, uniformDim(step, streamBegin + s));
+                    m_generator->uniform(point, uniformDim(step, streamBegin + s));
             }
         }
     }
@@ -141,18 +140,18 @@ public:
 public:
     /// First usable dimension is 1 (the generator's `firstDimension()`).
     std::uint32_t normalDim(std::size_t step, std::size_t factor) const {
-        return static_cast<std::uint32_t>(step * factorCount_ + factor + 1);
+        return static_cast<std::uint32_t>(step * m_factorCount + factor + 1);
     }
     std::uint32_t uniformDim(std::size_t step, std::size_t stream) const {
-        return static_cast<std::uint32_t>(nSteps_ * factorCount_ + step * uniformStreams_ +
+        return static_cast<std::uint32_t>(m_nSteps * m_factorCount + step * m_uniformStreams +
                                           stream + 1);
     }
 
 private:
-    std::shared_ptr<const math::mc::sobol::SobolGenerator> generator_;
-    std::size_t factorCount_;
-    std::size_t nSteps_;
-    std::size_t uniformStreams_;
+    std::shared_ptr<const math::mc::sobol::SobolGenerator> m_generator;
+    std::size_t m_factorCount;
+    std::size_t m_nSteps;
+    std::size_t m_uniformStreams;
 };
 
 /**
@@ -185,9 +184,9 @@ public:
     SobolGaussianSource(GeneratorPtr generator, std::size_t factorCount, std::size_t nSteps,
                         std::size_t firstDimension = 1, std::size_t uniformStreams = 0,
                         std::optional<std::uint64_t> shiftSeed = std::nullopt)
-        : generator_(std::move(generator)), factorCount_(factorCount), nSteps_(nSteps),
-          firstDimension_(firstDimension), uniformStreams_(uniformStreams),
-          shiftSeed_(shiftSeed.value_or(generator_ != nullptr ? generator_->shiftSeed() : 0)) {
+        : m_generator(std::move(generator)), m_factorCount(factorCount), m_nSteps(nSteps),
+          m_firstDimension(firstDimension), m_uniformStreams(uniformStreams),
+          m_shiftSeed(shiftSeed.value_or(m_generator != nullptr ? m_generator->shiftSeed() : 0)) {
         validate();
     }
 
@@ -196,33 +195,34 @@ public:
                         std::size_t nSteps, std::size_t firstDimension = 1,
                         std::size_t uniformStreams = 0,
                         std::optional<std::uint64_t> shiftSeed = std::nullopt)
-        : generator_(std::make_shared<const math::mc::sobol::SobolGenerator>(std::move(generator))),
-          factorCount_(factorCount), nSteps_(nSteps), firstDimension_(firstDimension),
-          uniformStreams_(uniformStreams),
-          shiftSeed_(shiftSeed.value_or(generator_->shiftSeed())) {
+        : m_generator(
+              std::make_shared<const math::mc::sobol::SobolGenerator>(std::move(generator))),
+          m_factorCount(factorCount), m_nSteps(nSteps), m_firstDimension(firstDimension),
+          m_uniformStreams(uniformStreams),
+          m_shiftSeed(shiftSeed.value_or(m_generator->shiftSeed())) {
         validate();
     }
 
-    std::size_t factorCount() const { return factorCount_; }
-    std::size_t nSteps() const { return nSteps_; }
-    std::size_t uniformStreams() const { return uniformStreams_; }
-    std::uint64_t shiftSeed() const { return shiftSeed_; }
+    std::size_t factorCount() const { return m_factorCount; }
+    std::size_t nSteps() const { return m_nSteps; }
+    std::size_t uniformStreams() const { return m_uniformStreams; }
+    std::uint64_t shiftSeed() const { return m_shiftSeed; }
 
     std::uint32_t normalDimension(std::size_t step, std::size_t factor) const {
-        return static_cast<std::uint32_t>(firstDimension_ + step * factorCount_ + factor);
+        return static_cast<std::uint32_t>(m_firstDimension + step * m_factorCount + factor);
     }
     std::uint32_t uniformDimension(std::size_t step, std::size_t stream) const {
-        return static_cast<std::uint32_t>(firstDimension_ + nSteps_ * factorCount_ +
-                                          step * uniformStreams_ + stream);
+        return static_cast<std::uint32_t>(m_firstDimension + m_nSteps * m_factorCount +
+                                          step * m_uniformStreams + stream);
     }
 
     /// Writes the `factorCount()` standardized normals of one (path, step)
     /// into column `col`; `out` must have at least `factorCount()` rows.
     void fillPath(std::size_t pathIndex, std::size_t step, Eigen::MatrixXd& out,
                   std::size_t col) const {
-        for (std::size_t j = 0; j < factorCount_; ++j) {
+        for (std::size_t j = 0; j < m_factorCount; ++j) {
             out(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(col)) =
-                generator_->normal(pathIndex, normalDimension(step, j), shiftSeed_);
+                m_generator->normal(pathIndex, normalDimension(step, j), m_shiftSeed);
         }
     }
 
@@ -230,7 +230,7 @@ public:
     void fillUniform(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
                      std::size_t streamBegin, std::size_t uniformStreamCount,
                      Eigen::MatrixXd& out) const {
-        if (streamBegin + uniformStreamCount > uniformStreams_) {
+        if (streamBegin + uniformStreamCount > m_uniformStreams) {
             throw std::out_of_range("SobolGaussianSource: uniform stream out of range");
         }
         out.resize(static_cast<Eigen::Index>(uniformStreamCount),
@@ -238,49 +238,48 @@ public:
         for (std::size_t p = 0; p < nPaths; ++p) {
             for (std::size_t s = 0; s < uniformStreamCount; ++s) {
                 out(static_cast<Eigen::Index>(s), static_cast<Eigen::Index>(p)) =
-                    generator_->uniform(pathBegin + p, uniformDimension(step, streamBegin + s),
-                                        shiftSeed_);
+                    m_generator->uniform(pathBegin + p, uniformDimension(step, streamBegin + s),
+                                         m_shiftSeed);
             }
         }
     }
 
     /// Same tables and layout, different digital shift (cheap replica).
     SobolGaussianSource replica(std::uint64_t shiftSeed) const {
-        return SobolGaussianSource(generator_, factorCount_, nSteps_, firstDimension_,
-                                   uniformStreams_, shiftSeed);
+        return SobolGaussianSource(m_generator, m_factorCount, m_nSteps, m_firstDimension,
+                                   m_uniformStreams, shiftSeed);
     }
 
-    const GeneratorPtr& generator() const { return generator_; }
+    const GeneratorPtr& generator() const { return m_generator; }
 
 private:
     void validate() const {
-        if (generator_ == nullptr) {
+        if (m_generator == nullptr) {
             throw std::invalid_argument("SobolGaussianSource: generator must not be null");
         }
-        if (factorCount_ == 0 || nSteps_ == 0) {
+        if (m_factorCount == 0 || m_nSteps == 0) {
             throw std::invalid_argument(
                 "SobolGaussianSource: factorCount and nSteps must be positive");
         }
-        if (firstDimension_ == 0) {
+        if (m_firstDimension == 0) {
             throw std::invalid_argument(
                 "SobolGaussianSource: dimensions are 1-based (firstDimension >= 1)");
         }
         const std::size_t required =
-            firstDimension_ + nSteps_ * (factorCount_ + uniformStreams_) - 1;
-        if (required > generator_->preparedDimension()) {
-            throw std::invalid_argument(
-                "SobolGaussianSource: table too small for layout (need " +
-                std::to_string(required) + " dimensions, have " +
-                std::to_string(generator_->preparedDimension()) + ")");
+            m_firstDimension + m_nSteps * (m_factorCount + m_uniformStreams) - 1;
+        if (required > m_generator->preparedDimension()) {
+            throw std::invalid_argument("SobolGaussianSource: table too small for layout (need " +
+                                        std::to_string(required) + " dimensions, have " +
+                                        std::to_string(m_generator->preparedDimension()) + ")");
         }
     }
 
-    GeneratorPtr generator_;
-    std::size_t factorCount_ = 1;
-    std::size_t nSteps_ = 1;
-    std::size_t firstDimension_ = 1;
-    std::size_t uniformStreams_ = 0;
-    std::uint64_t shiftSeed_ = 0;
+    GeneratorPtr m_generator;
+    std::size_t m_factorCount = 1;
+    std::size_t m_nSteps = 1;
+    std::size_t m_firstDimension = 1;
+    std::size_t m_uniformStreams = 0;
+    std::uint64_t m_shiftSeed = 0;
 };
 
 } // namespace quantape::mc

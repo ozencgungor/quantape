@@ -145,7 +145,7 @@ template <typename P>
 class CalibrationObjective {
 public:
     CalibrationObjective(const P& problem, std::vector<double> market)
-        : problem_(&problem), market_(std::move(market)) {}
+        : m_problem(&problem), m_market(std::move(market)) {}
 
     /// ImplicitFunction.h `f2` shape: the model and market scalars are
     /// deduced independently and promoted (`fvar<var>` x with double data,
@@ -155,10 +155,10 @@ public:
         using S = decltype(Sx(0.0) + Sm(0.0));
         std::vector<S> bPromoted(b.begin(), b.end());
         std::vector<S> aPromoted(a.begin(), a.end());
-        const std::size_t nQ = problem_->numQuotes();
+        const std::size_t nQ = m_problem->numQuotes();
         S value = S(0.0);
         for (std::size_t i = 0; i < nQ; ++i) {
-            const S r = problem_->template residual<S>(i, bPromoted, aPromoted);
+            const S r = m_problem->template residual<S>(i, bPromoted, aPromoted);
             value += S(0.5) * r * r;
         }
         return value;
@@ -167,16 +167,16 @@ public:
     /// Optimizer shape: market captured as scalar constants.
     template <typename S>
     S operator()(const std::vector<S>& b) const {
-        std::vector<S> a(market_.size());
-        for (std::size_t j = 0; j < market_.size(); ++j) {
-            a[j] = S(market_[j]);
+        std::vector<S> a(m_market.size());
+        for (std::size_t j = 0; j < m_market.size(); ++j) {
+            a[j] = S(m_market[j]);
         }
         return (*this)(b, a);
     }
 
 private:
-    const P* problem_;
-    std::vector<double> market_;
+    const P* m_problem;
+    std::vector<double> m_market;
 };
 
 /**
@@ -507,12 +507,12 @@ template <CalibrationProblem P>
 class CalibrationValueGrad {
 public:
     CalibrationValueGrad(const P& problem, Eigen::VectorXd market)
-        : problem_(&problem), market_(std::move(market)) {}
+        : m_problem(&problem), m_market(std::move(market)) {}
 
     double operator()(const std::vector<double>& x, std::vector<double>& grad) const {
         const Eigen::Map<const Eigen::VectorXd> b(x.data(), static_cast<Eigen::Index>(x.size()));
         const CalibrationDerivatives d =
-            assembleCalibration(*problem_, b, market_, CalibrationOrder::Gradient);
+            assembleCalibration(*m_problem, b, m_market, CalibrationOrder::Gradient);
         grad.resize(x.size());
         for (Eigen::Index i = 0; i < static_cast<Eigen::Index>(x.size()); ++i) {
             grad[static_cast<std::size_t>(i)] = d.gradientB(i);
@@ -520,11 +520,11 @@ public:
         return d.value;
     }
 
-    const Eigen::VectorXd& market() const { return market_; }
+    const Eigen::VectorXd& market() const { return m_market; }
 
 private:
-    const P* problem_;
-    Eigen::VectorXd market_;
+    const P* m_problem;
+    Eigen::VectorXd m_market;
 };
 
 /// Inequality adapter for AugLag<double>/SLSQP<double> (`c_k = g_k <= 0`,

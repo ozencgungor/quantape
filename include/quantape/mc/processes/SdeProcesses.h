@@ -240,8 +240,8 @@ struct HestonProcess {
         const Scalar decay = exp(Scalar(-1.0) * kappa * Scalar(dt));
         const Scalar meanAdd = level * (Scalar(1.0) - decay);
         const Scalar varSlope = eta * eta * decay * (Scalar(1.0) - decay) / kappa;
-        const Scalar varAdd = level * (eta * eta * (Scalar(1.0) - decay) *
-                                       (Scalar(1.0) - decay) / (Scalar(2.0) * kappa));
+        const Scalar varAdd = level * (eta * eta * (Scalar(1.0) - decay) * (Scalar(1.0) - decay) /
+                                       (Scalar(2.0) * kappa));
         meanOut.resize(1, x.cols());
         varOut.resize(1, x.cols());
         for (Eigen::Index p = 0; p < x.cols(); ++p) {

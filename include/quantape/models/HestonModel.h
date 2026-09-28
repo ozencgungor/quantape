@@ -155,9 +155,9 @@ struct HestonConfig {
 
 class HestonModel {
 public:
-    explicit HestonModel(HestonConfig config = {}) : config_(config) { config_.validate(); }
+    explicit HestonModel(HestonConfig config = {}) : m_config(config) { m_config.validate(); }
 
-    const HestonConfig& config() const { return config_; }
+    const HestonConfig& config() const { return m_config; }
 
     /// Gatheral trap-free normalized characteristic function.
     static std::complex<double> characteristic(const std::complex<double>& z,
@@ -370,8 +370,8 @@ private:
     /// the first-order phase is small; Black-Scholes CF-matched otherwise).
     HestonControlVariate effectiveCv(const std::array<std::complex<double>, 5>& p,
                                      double tMax) const {
-        if (config_.controlVariate != HestonControlVariate::Auto) {
-            return config_.controlVariate;
+        if (m_config.controlVariate != HestonControlVariate::Auto) {
+            return m_config.controlVariate;
         }
         if (tMax > 0.15) {
             const double v0 = p[0].real(), kappa = p[1].real(), theta = p[2].real();
@@ -437,10 +437,10 @@ private:
     /// CF-matched or variance-matched control volatility from the
     /// *real* parts of the parameters (held fixed under differentiation).
     double controlVolatility(const std::array<std::complex<double>, 5>& p, double tMax) const {
-        if (config_.controlVariate == HestonControlVariate::None) {
+        if (m_config.controlVariate == HestonControlVariate::None) {
             return 0.0;
         }
-        if (config_.controlVariate == HestonControlVariate::CfMatched && tMax > 0.0) {
+        if (m_config.controlVariate == HestonControlVariate::CfMatched && tMax > 0.0) {
             const auto phi = characteristic(std::complex<double>(0.0, -0.5), p, tMax);
             const double re = phi.real();
             if (re > 0.0 && re < 1.0) {
@@ -523,7 +523,7 @@ private:
         };
 
         std::complex<double> integral(0.0, 0.0);
-        if (config_.quadrature == HestonQuadrature::ExponentiallyFitted && !asymptotic) {
+        if (m_config.quadrature == HestonQuadrature::ExponentiallyFitted && !asymptotic) {
             // EFGL rule on the (real) Lewis integrand, used with the
             // Black-Scholes control-variate family: the residual decays
             // fast, so the 64-node rule is exact to machine precision.
@@ -544,7 +544,7 @@ private:
             // from real (primal) inputs only, so the whole path is
             // holomorphic in the parameters and complex-step gradients see
             // the integral's response (a real-only lambda would zero them).
-            integral = efgl_.template integrate<std::complex<double>>(
+            integral = m_efgl.template integrate<std::complex<double>>(
                 mu.real(), scaling,
                 [&](const std::complex<double>& u) { return integrand(u.real()); });
         } else {
@@ -553,7 +553,7 @@ private:
             // Adaptive truncation for the asymptotic reference: its integrand
             // decays like e^{-|Re phi| u}, so a fixed uMax under-integrates
             // slowly-decaying corners (|Re phi| ~ 1e-2 needs uMax ~ 1e4).
-            double uMax = config_.uMax;
+            double uMax = m_config.uMax;
             if (asymptotic) {
                 const double decay = std::fabs(cv.phi.real());
                 // Gauss-Legendre's first node sits at ~1.45 uMax/n^2; the
@@ -631,15 +631,15 @@ private:
     /// touches it (the previous eager 512-node eigendecomposition dominated
     /// every model construction).
     const quantape::math::GaussLegendre& legendreRule() const {
-        if (!rule_) {
-            rule_.emplace(config_.quadratureOrder);
+        if (!m_rule) {
+            m_rule.emplace(m_config.quadratureOrder);
         }
-        return *rule_;
+        return *m_rule;
     }
 
-    HestonConfig config_;
-    mutable std::optional<quantape::math::GaussLegendre> rule_;
-    quantape::math::ExponentialFittingLaguerre efgl_;
+    HestonConfig m_config;
+    mutable std::optional<quantape::math::GaussLegendre> m_rule;
+    quantape::math::ExponentialFittingLaguerre m_efgl;
 };
 
 /// Precomputed per-quote surrogate: exact value, gradient and Hessian at a

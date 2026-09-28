@@ -39,11 +39,11 @@ struct HestonCalibrationQuote {
 class HestonCalibrationProblem {
 public:
     HestonCalibrationProblem(const HestonModel& model, std::vector<HestonCalibrationQuote> quotes)
-        : model_(&model), quotes_(std::move(quotes)) {}
+        : m_model(&model), m_quotes(std::move(quotes)) {}
 
     std::size_t numModelParams() const { return 5; }
     std::size_t numMarketParams() const { return 3; } ///< spot, rate, dividend
-    std::size_t numQuotes() const { return quotes_.size(); }
+    std::size_t numQuotes() const { return m_quotes.size(); }
     std::size_t numInequalities() const { return 1; } ///< Feller
 
     /// Full 9-parameter point `[v0..rho, spot, strike, rate, dividend]`.
@@ -53,14 +53,14 @@ public:
             p[k] = b(static_cast<Eigen::Index>(k));
         }
         p[HESTON_SPOT] = a(0);
-        p[HESTON_STRIKE] = quotes_[i].strike;
+        p[HESTON_STRIKE] = m_quotes[i].strike;
         p[HESTON_RATE] = a(1);
         p[HESTON_DIVIDEND] = a(2);
         return p;
     }
 
     double price(std::size_t i, const Eigen::VectorXd& b, const Eigen::VectorXd& a) const {
-        return model_->callFull(point(i, b, a), quotes_[i].tMax);
+        return m_model->callFull(point(i, b, a), m_quotes[i].tMax);
     }
 
     // ── Scalar-generic (AD) view ─────────────────────────────────────────
@@ -78,7 +78,7 @@ public:
     template <typename S>
     S residual(std::size_t i, const std::vector<S>& b, const std::vector<S>& a) const {
         const S priceValue = priceScalar<S>(i, b, a);
-        return S(std::sqrt(quotes_[i].weight)) * (priceValue - S(quotes_[i].target));
+        return S(std::sqrt(m_quotes[i].weight)) * (priceValue - S(m_quotes[i].target));
     }
 
     template <typename S>
@@ -90,12 +90,12 @@ public:
     void fillResidual(std::size_t i, const Eigen::VectorXd& b, const Eigen::VectorXd& a,
                       quantape::math::CalibrationOrder order,
                       quantape::math::CalibrationResidualBlock& out) const {
-        const HestonCalibrationQuote& q = quotes_[i];
+        const HestonCalibrationQuote& q = m_quotes[i];
         const double sw = std::sqrt(q.weight);
         const HestonFullPoint p = point(i, b, a);
-        out.value = sw * (model_->callFull(p, q.tMax) - q.target);
+        out.value = sw * (m_model->callFull(p, q.tMax) - q.target);
         if (order >= quantape::math::CalibrationOrder::Gradient) {
-            const auto g = model_->fullGradient(p, q.tMax);
+            const auto g = m_model->fullGradient(p, q.tMax);
             out.gradientB.resize(5);
             out.gradientA.resize(3);
             for (std::size_t k = 0; k < 5; ++k) {
@@ -106,7 +106,7 @@ public:
             out.gradientA(2) = sw * g(0, HESTON_DIVIDEND);
         }
         if (order >= quantape::math::CalibrationOrder::Hessian) {
-            const auto H = model_->fullHessian(p, q.tMax);
+            const auto H = m_model->fullHessian(p, q.tMax);
             out.hessianBB.resize(5, 5);
             out.hessianBA.resize(5, 3);
             for (std::size_t k = 0; k < 5; ++k) {
@@ -140,8 +140,8 @@ public:
         out.hessianBB(3, 3) = 2.0;
     }
 
-    const HestonModel& model() const { return *model_; }
-    const std::vector<HestonCalibrationQuote>& quotes() const { return quotes_; }
+    const HestonModel& model() const { return *m_model; }
+    const std::vector<HestonCalibrationQuote>& quotes() const { return m_quotes; }
 
 private:
     template <typename S>
@@ -152,10 +152,10 @@ private:
                 p[k] = b[k];
             }
             p[HESTON_SPOT] = a[0];
-            p[HESTON_STRIKE] = quotes_[i].strike;
+            p[HESTON_STRIKE] = m_quotes[i].strike;
             p[HESTON_RATE] = a[1];
             p[HESTON_DIVIDEND] = a[2];
-            return model_->callFull(p, quotes_[i].tMax);
+            return m_model->callFull(p, m_quotes[i].tMax);
         } else if constexpr (std::is_same_v<S, stan::math::var>) {
             // Primal-point cache: repeated evaluations at the same (b, a)
             // (HVPs, mixed passes, line-search restarts) reuse one build.
@@ -164,20 +164,20 @@ private:
                 v(static_cast<Eigen::Index>(k)) = b[k];
             }
             v(HESTON_SPOT) = a[0];
-            v(HESTON_STRIKE) = quotes_[i].strike;
+            v(HESTON_STRIKE) = m_quotes[i].strike;
             v(HESTON_RATE) = a[1];
             v(HESTON_DIVIDEND) = a[2];
-            return cache_.price(v, quotes_[i].tMax);
+            return m_cache.price(v, m_quotes[i].tMax);
         } else if constexpr (std::is_same_v<S, stan::math::fvar<stan::math::var>>) {
             Eigen::Matrix<stan::math::fvar<stan::math::var>, HESTON_PARAM_COUNT, 1> v;
             for (std::size_t k = 0; k < 5; ++k) {
                 v(static_cast<Eigen::Index>(k)) = b[k];
             }
             v(HESTON_SPOT) = a[0];
-            v(HESTON_STRIKE) = quotes_[i].strike;
+            v(HESTON_STRIKE) = m_quotes[i].strike;
             v(HESTON_RATE) = a[1];
             v(HESTON_DIVIDEND) = a[2];
-            return cache_.price(v, quotes_[i].tMax);
+            return m_cache.price(v, m_quotes[i].tMax);
         } else {
             static_assert(std::is_same_v<S, double>,
                           "HestonCalibrationProblem: supported scalars are double, var, fvar<var>");
@@ -185,11 +185,11 @@ private:
         }
     }
 
-    const HestonModel* model_;
-    std::vector<HestonCalibrationQuote> quotes_;
+    const HestonModel* m_model;
+    std::vector<HestonCalibrationQuote> m_quotes;
     /// One cached 9-parameter build per (b, a) primal point (mutable: the
     /// scalar-generic view is logically const). One adapter per thread.
-    mutable quantape::models::HestonSourceCache cache_{*model_};
+    mutable quantape::models::HestonSourceCache m_cache{*m_model};
 };
 
 /**
@@ -207,28 +207,28 @@ public:
     HestonModelCalibrationProblem(const HestonModel& model,
                                   std::vector<HestonCalibrationQuote> quotes, double spot,
                                   double rate, double dividend)
-        : model_(&model), quotes_(std::move(quotes)), spot_(spot), rate_(rate),
-          dividend_(dividend) {}
+        : m_model(&model), m_quotes(std::move(quotes)), m_spot(spot), m_rate(rate),
+          m_dividend(dividend) {}
 
     std::size_t numModelParams() const { return 5; }
     std::size_t numMarketParams() const { return 0; }
-    std::size_t numQuotes() const { return quotes_.size(); }
+    std::size_t numQuotes() const { return m_quotes.size(); }
     std::size_t numInequalities() const { return 1; }
 
     HestonMarket market(std::size_t i) const {
-        return {spot_, quotes_[i].strike, rate_, dividend_, quotes_[i].tMax};
+        return {m_spot, m_quotes[i].strike, m_rate, m_dividend, m_quotes[i].tMax};
     }
 
     void fillResidual(std::size_t i, const Eigen::VectorXd& b, const Eigen::VectorXd&,
                       quantape::math::CalibrationOrder order,
                       quantape::math::CalibrationResidualBlock& out) const {
-        const HestonCalibrationQuote& q = quotes_[i];
+        const HestonCalibrationQuote& q = m_quotes[i];
         const double sw = std::sqrt(q.weight);
         const HestonParams params{b(0), b(1), b(2), b(3), b(4)};
         const HestonMarket m = market(i);
-        out.value = sw * (model_->call(params, m) - q.target);
+        out.value = sw * (m_model->call(params, m) - q.target);
         if (order >= quantape::math::CalibrationOrder::Gradient) {
-            const auto g = model_->callGradient(params, m);
+            const auto g = m_model->callGradient(params, m);
             out.gradientB.resize(5);
             for (Eigen::Index k = 0; k < 5; ++k) {
                 out.gradientB(k) = sw * g(0, k);
@@ -236,7 +236,7 @@ public:
             out.gradientA.resize(0);
         }
         if (order >= quantape::math::CalibrationOrder::Hessian) {
-            const auto H = model_->callHessian(params, m);
+            const auto H = m_model->callHessian(params, m);
             out.hessianBB.resize(5, 5);
             for (Eigen::Index k = 0; k < 5; ++k) {
                 for (Eigen::Index l = 0; l < 5; ++l) {
@@ -263,7 +263,7 @@ public:
 
     template <typename S>
     S residual(std::size_t i, const std::vector<S>& b, const std::vector<S>&) const {
-        const HestonCalibrationQuote& q = quotes_[i];
+        const HestonCalibrationQuote& q = m_quotes[i];
         return S(std::sqrt(q.weight)) * (priceScalar<S>(i, b) - S(q.target));
     }
 
@@ -273,26 +273,26 @@ public:
         out[0] = b[3] * b[3] - S(2.0) * b[1] * b[2];
     }
 
-    const HestonModel& model() const { return *model_; }
+    const HestonModel& model() const { return *m_model; }
 
 private:
     template <typename S>
     S priceScalar(std::size_t i, const std::vector<S>& b) const {
         const HestonMarket m = market(i);
         if constexpr (std::is_same_v<S, double>) {
-            return model_->call(HestonParams{b[0], b[1], b[2], b[3], b[4]}, m);
+            return m_model->call(HestonParams{b[0], b[1], b[2], b[3], b[4]}, m);
         } else if constexpr (std::is_same_v<S, stan::math::var>) {
             Eigen::Matrix<stan::math::var, 5, 1> v;
             for (int k = 0; k < 5; ++k) {
                 v(k) = b[static_cast<std::size_t>(k)];
             }
-            return cache_.price(v, m);
+            return m_cache.price(v, m);
         } else if constexpr (std::is_same_v<S, stan::math::fvar<stan::math::var>>) {
             Eigen::Matrix<stan::math::fvar<stan::math::var>, 5, 1> v;
             for (int k = 0; k < 5; ++k) {
                 v(k) = b[static_cast<std::size_t>(k)];
             }
-            return cache_.price(v, m);
+            return m_cache.price(v, m);
         } else {
             static_assert(std::is_same_v<S, double>,
                           "HestonModelCalibrationProblem: supported scalars are double, var, "
@@ -301,13 +301,13 @@ private:
         }
     }
 
-    const HestonModel* model_;
-    std::vector<HestonCalibrationQuote> quotes_;
-    double spot_ = 1.0;
-    double rate_ = 0.0;
-    double dividend_ = 0.0;
+    const HestonModel* m_model;
+    std::vector<HestonCalibrationQuote> m_quotes;
+    double m_spot = 1.0;
+    double m_rate = 0.0;
+    double m_dividend = 0.0;
     /// Cached model-only builds keyed by (params, market); see above.
-    mutable quantape::models::HestonSourceCache cache_{*model_};
+    mutable quantape::models::HestonSourceCache m_cache{*m_model};
 };
 
 /**
@@ -324,35 +324,35 @@ public:
     HestonQuotePriceCalibrationProblem(const HestonModel& model,
                                        std::vector<HestonCalibrationQuote> quotes, double spot,
                                        double rate, double dividend)
-        : model_(&model), quotes_(std::move(quotes)), spot_(spot), rate_(rate),
-          dividend_(dividend) {}
+        : m_model(&model), m_quotes(std::move(quotes)), m_spot(spot), m_rate(rate),
+          m_dividend(dividend) {}
 
     std::size_t numModelParams() const { return 5; }
-    std::size_t numMarketParams() const { return quotes_.size(); }
-    std::size_t numQuotes() const { return quotes_.size(); }
+    std::size_t numMarketParams() const { return m_quotes.size(); }
+    std::size_t numQuotes() const { return m_quotes.size(); }
     std::size_t numInequalities() const { return 1; }
 
     void fillResidual(std::size_t i, const Eigen::VectorXd& b, const Eigen::VectorXd& a,
                       quantape::math::CalibrationOrder order,
                       quantape::math::CalibrationResidualBlock& out) const {
-        const HestonCalibrationQuote& q = quotes_[i];
+        const HestonCalibrationQuote& q = m_quotes[i];
         const double sw = std::sqrt(q.weight);
         const HestonParams params{b(0), b(1), b(2), b(3), b(4)};
-        const HestonMarket market{spot_, q.strike, rate_, dividend_, q.tMax};
-        out.value = sw * (model_->call(params, market) - a(static_cast<Eigen::Index>(i)));
+        const HestonMarket market{m_spot, q.strike, m_rate, m_dividend, q.tMax};
+        out.value = sw * (m_model->call(params, market) - a(static_cast<Eigen::Index>(i)));
         if (order >= quantape::math::CalibrationOrder::Gradient) {
-            const auto g = model_->callGradient(params, market);
+            const auto g = m_model->callGradient(params, market);
             out.gradientB.resize(5);
             for (Eigen::Index k = 0; k < 5; ++k) {
                 out.gradientB(k) = sw * g(0, k);
             }
-            out.gradientA.setZero(static_cast<Eigen::Index>(quotes_.size()));
+            out.gradientA.setZero(static_cast<Eigen::Index>(m_quotes.size()));
             out.gradientA(static_cast<Eigen::Index>(i)) = -sw;
         }
         if (order >= quantape::math::CalibrationOrder::Hessian) {
-            const auto H = model_->callHessian(params, market);
+            const auto H = m_model->callHessian(params, market);
             out.hessianBB = sw * H;
-            out.hessianBA.setZero(5, static_cast<Eigen::Index>(quotes_.size()));
+            out.hessianBA.setZero(5, static_cast<Eigen::Index>(m_quotes.size()));
         }
     }
 
@@ -371,8 +371,8 @@ public:
     /// Scalar-generic view (quote prices are data; the market is fixed).
     template <typename S>
     S residual(std::size_t i, const std::vector<S>& b, const std::vector<S>& a) const {
-        const HestonCalibrationQuote& q = quotes_[i];
-        const HestonMarket market{spot_, q.strike, rate_, dividend_, q.tMax};
+        const HestonCalibrationQuote& q = m_quotes[i];
+        const HestonMarket market{m_spot, q.strike, m_rate, m_dividend, q.tMax};
         const S price = priceScalar<S>(i, b);
         (void)market;
         return S(std::sqrt(q.weight)) * (price - a[i]);
@@ -387,21 +387,21 @@ public:
 private:
     template <typename S>
     S priceScalar(std::size_t i, const std::vector<S>& b) const {
-        const HestonMarket market{spot_, quotes_[i].strike, rate_, dividend_, quotes_[i].tMax};
+        const HestonMarket market{m_spot, m_quotes[i].strike, m_rate, m_dividend, m_quotes[i].tMax};
         if constexpr (std::is_same_v<S, double>) {
-            return model_->call(HestonParams{b[0], b[1], b[2], b[3], b[4]}, market);
+            return m_model->call(HestonParams{b[0], b[1], b[2], b[3], b[4]}, market);
         } else if constexpr (std::is_same_v<S, stan::math::var>) {
             Eigen::Matrix<stan::math::var, 5, 1> v;
             for (int k = 0; k < 5; ++k) {
                 v(k) = b[static_cast<std::size_t>(k)];
             }
-            return cache_.price(v, market);
+            return m_cache.price(v, market);
         } else if constexpr (std::is_same_v<S, stan::math::fvar<stan::math::var>>) {
             Eigen::Matrix<stan::math::fvar<stan::math::var>, 5, 1> v;
             for (int k = 0; k < 5; ++k) {
                 v(k) = b[static_cast<std::size_t>(k)];
             }
-            return cache_.price(v, market);
+            return m_cache.price(v, market);
         } else {
             static_assert(std::is_same_v<S, double>,
                           "HestonQuotePriceCalibrationProblem: supported scalars are double, var, "
@@ -410,12 +410,12 @@ private:
         }
     }
 
-    const HestonModel* model_;
-    std::vector<HestonCalibrationQuote> quotes_;
-    double spot_ = 1.0;
-    double rate_ = 0.0;
-    double dividend_ = 0.0;
-    mutable quantape::models::HestonSourceCache cache_{*model_};
+    const HestonModel* m_model;
+    std::vector<HestonCalibrationQuote> m_quotes;
+    double m_spot = 1.0;
+    double m_rate = 0.0;
+    double m_dividend = 0.0;
+    mutable quantape::models::HestonSourceCache m_cache{*m_model};
 };
 
 } // namespace quantape::models

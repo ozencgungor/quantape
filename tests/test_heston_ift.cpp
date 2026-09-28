@@ -240,11 +240,11 @@ private:
 class FellerBoundaryProblem {
 public:
     FellerBoundaryProblem(const quantape::models::HestonModelCalibrationProblem& inner)
-        : inner_(&inner) {}
+        : m_inner(&inner) {}
 
     std::size_t numModelParams() const { return 4; }
     std::size_t numMarketParams() const { return 0; }
-    std::size_t numQuotes() const { return inner_->numQuotes(); }
+    std::size_t numQuotes() const { return m_inner->numQuotes(); }
     std::size_t numInequalities() const { return 0; }
 
     static std::vector<double> expand(const Eigen::VectorXd& b4) {
@@ -260,8 +260,8 @@ public:
         const std::vector<double> b5 = expand(b4);
         const Eigen::VectorXd b5v = Eigen::Map<const Eigen::VectorXd>(b5.data(), 5);
         Eigen::VectorXd empty(0);
-        inner_->fillResidual(i, b5v, empty, order, block_);
-        out.value = block_.value;
+        m_inner->fillResidual(i, b5v, empty, order, m_block);
+        out.value = m_block.value;
         if (order >= quantape::math::CalibrationOrder::Gradient) {
             const double kappa = b4(1);
             const double theta = b4(2);
@@ -269,10 +269,10 @@ public:
             const double sk = theta / sigma;
             const double st = kappa / sigma;
             out.gradientB.resize(4);
-            out.gradientB(0) = block_.gradientB(0);
-            out.gradientB(1) = block_.gradientB(1) + block_.gradientB(3) * sk;
-            out.gradientB(2) = block_.gradientB(2) + block_.gradientB(3) * st;
-            out.gradientB(3) = block_.gradientB(4);
+            out.gradientB(0) = m_block.gradientB(0);
+            out.gradientB(1) = m_block.gradientB(1) + m_block.gradientB(3) * sk;
+            out.gradientB(2) = m_block.gradientB(2) + m_block.gradientB(3) * st;
+            out.gradientB(3) = m_block.gradientB(4);
             out.gradientA.resize(0);
         }
         if (order >= quantape::math::CalibrationOrder::Hessian) {
@@ -290,20 +290,20 @@ public:
             out.hessianBB.resize(4, 4);
             for (int a = 0; a < 4; ++a) {
                 for (int b = 0; b < 4; ++b) {
-                    const double h5ab = block_.hessianBB(a, b);
-                    const double h5a3 = block_.hessianBB(a, 3);
-                    const double h53b = block_.hessianBB(3, b);
-                    const double h533 = block_.hessianBB(3, 3);
+                    const double h5ab = m_block.hessianBB(a, b);
+                    const double h5a3 = m_block.hessianBB(a, 3);
+                    const double h53b = m_block.hessianBB(3, b);
+                    const double h533 = m_block.hessianBB(3, 3);
                     double value =
                         h5ab + h5a3 * s1[static_cast<std::size_t>(b)] +
                         h53b * s1[static_cast<std::size_t>(a)] +
                         h533 * s1[static_cast<std::size_t>(a)] * s1[static_cast<std::size_t>(b)];
                     if ((a == 1 && b == 1)) {
-                        value += block_.gradientB(3) * skk;
+                        value += m_block.gradientB(3) * skk;
                     } else if (a == 2 && b == 2) {
-                        value += block_.gradientB(3) * stt;
+                        value += m_block.gradientB(3) * stt;
                     } else if ((a == 1 && b == 2) || (a == 2 && b == 1)) {
-                        value += block_.gradientB(3) * skt;
+                        value += m_block.gradientB(3) * skt;
                     }
                     out.hessianBB(a, b) = value;
                 }
@@ -320,8 +320,8 @@ public:
     }
 
 private:
-    const quantape::models::HestonModelCalibrationProblem* inner_;
-    mutable quantape::math::CalibrationResidualBlock block_;
+    const quantape::models::HestonModelCalibrationProblem* m_inner;
+    mutable quantape::math::CalibrationResidualBlock m_block;
 };
 
 // ── Generic IFT-vs-FD harness ──

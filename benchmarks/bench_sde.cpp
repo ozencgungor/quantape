@@ -30,12 +30,12 @@
 
 #include <algorithm>
 #include <chrono>
-#include <memory>
-#include <random>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <random>
 #include <type_traits>
 #include <vector>
 
@@ -906,8 +906,8 @@ int main(int argc, char** argv) {
             bench_us("euler gbm 20k x 252 sobol stream (seq)", double(nPaths * nSteps), reps, [&] {
                 double checksum = 0.0;
                 simulator.simulateBlocks(
-                    x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
-                    sobolSource, nPaths, 1024,
+                    x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model), sobolSource,
+                    nPaths, 1024,
                     [&checksum](const quantape::mc::PathBlock<double>& block, std::size_t) {
                         checksum += block.states.back()(0, 0);
                     },

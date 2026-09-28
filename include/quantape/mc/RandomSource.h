@@ -71,21 +71,21 @@ inline std::uint64_t splitmix64(std::uint64_t x) {
 /// the m-th uniform is `splitmix64(key + m * PSI)`.
 class KeyedStream {
 public:
-    explicit KeyedStream(std::uint64_t key) : key_(key) {}
+    explicit KeyedStream(std::uint64_t key) : m_key(key) {}
 
     /// First draw is the (already fully mixed) key; rejection retries use
     /// splitmix64(key + m * PSI) — one mix per normal on the common path.
     std::uint64_t operator()() {
-        if (counter_++ == 0) {
-            return key_;
+        if (m_counter++ == 0) {
+            return m_key;
         }
-        return splitmix64(key_ + counter_ * kCounterSalt);
+        return splitmix64(m_key + m_counter * kCounterSalt);
     }
 
 private:
     static constexpr std::uint64_t kCounterSalt = 0xBF58476D1CE4E5B9ULL;
-    std::uint64_t key_;
-    std::uint64_t counter_ = 0;
+    std::uint64_t m_key;
+    std::uint64_t m_counter = 0;
 };
 
 /// Key derivation for one logical normal: (seed, path, step, factor) ->
@@ -163,14 +163,14 @@ template <typename Sampler = McFarlandSampler>
 class IidGaussianSource : public RandomSourceBase<IidGaussianSource<Sampler>> {
 public:
     IidGaussianSource(std::size_t factorCount, std::uint64_t seed)
-        : factorCount_(factorCount), seed_(seed) {}
+        : m_factorCount(factorCount), m_seed(seed) {}
 
-    std::size_t factorCount() const { return factorCount_; }
+    std::size_t factorCount() const { return m_factorCount; }
 
     void fillPath(std::size_t pathIndex, std::size_t step, Eigen::MatrixXd& out,
                   std::size_t col) const {
-        for (std::size_t i = 0; i < factorCount_; ++i) {
-            const std::uint64_t key = keyFor(seed_, pathIndex, step, i, factorCount_);
+        for (std::size_t i = 0; i < m_factorCount; ++i) {
+            const std::uint64_t key = keyFor(m_seed, pathIndex, step, i, m_factorCount);
             out(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(col)) =
                 Sampler::sample(key);
         }
@@ -185,16 +185,17 @@ public:
         out.resize(static_cast<Eigen::Index>(uniformStreams), static_cast<Eigen::Index>(nPaths));
         for (std::size_t s = 0; s < uniformStreams; ++s) {
             for (std::size_t j = 0; j < nPaths; ++j) {
-                const std::uint64_t key = keyFor(seed_, pathBegin + j, step,
-                                                 factorCount_ + 1 + streamBegin + s, factorCount_);
+                const std::uint64_t key =
+                    keyFor(m_seed, pathBegin + j, step, m_factorCount + 1 + streamBegin + s,
+                           m_factorCount);
                 out(static_cast<Eigen::Index>(s), static_cast<Eigen::Index>(j)) = toUniform(key);
             }
         }
     }
 
 private:
-    std::size_t factorCount_;
-    std::uint64_t seed_;
+    std::size_t m_factorCount;
+    std::uint64_t m_seed;
 };
 
 } // namespace quantape::mc

@@ -51,15 +51,15 @@ class SdeSimulator {
 public:
     SdeSimulator(TimeGrid timeGrid, std::vector<std::vector<Scalar>> theta,
                  Scheme scheme = Scheme{})
-        : timeGrid_(std::move(timeGrid)), theta_(std::move(theta)), scheme_(std::move(scheme)) {
-        if (theta_.size() != timeGrid_.nSteps()) {
+        : m_timeGrid(std::move(timeGrid)), m_theta(std::move(theta)), m_scheme(std::move(scheme)) {
+        if (m_theta.size() != m_timeGrid.nSteps()) {
             throw std::invalid_argument(
                 "SdeSimulator: theta must hold one vector per grid interval");
         }
     }
 
-    const TimeGrid& timeGrid() const { return timeGrid_; }
-    const std::vector<std::vector<Scalar>>& theta() const { return theta_; }
+    const TimeGrid& timeGrid() const { return m_timeGrid; }
+    const std::vector<std::vector<Scalar>>& theta() const { return m_theta; }
 
     /// Stream blocks to a sink: sink(const PathBlock<Scalar>&, std::size_t blockIndex)
     ///
@@ -140,7 +140,7 @@ public:
     simulatePathSharedTheta(const Eigen::Matrix<PathScalar, Eigen::Dynamic, 1>& x0,
                             const DriftF& drift, const DiffusionF& diffusion, const Source& source,
                             std::size_t pathIndex, const std::vector<PathScalar>& theta) const {
-        const std::size_t nSteps = timeGrid_.nSteps();
+        const std::size_t nSteps = m_timeGrid.nSteps();
         const std::size_t nDims = static_cast<std::size_t>(x0.size());
 
         PathBlock<PathScalar> path;
@@ -175,8 +175,8 @@ public:
         if constexpr (Scheme::uniformStreams > 0) {
             source.fillUniform(step, pathIndex, nPaths, 0, Scheme::uniformStreams, uniforms);
         }
-        scheme_.step(x, xNext, timeGrid_.time(step), timeGrid_.dt(step), z, uniforms, drift,
-                     diffusion, theta, scratch);
+        m_scheme.step(x, xNext, m_timeGrid.time(step), m_timeGrid.dt(step), z, uniforms, drift,
+                      diffusion, theta, scratch);
     }
 
 private:
@@ -185,7 +185,7 @@ private:
                                     const DriftF& drift, const DiffusionF& diffusion,
                                     const Source& source, std::size_t pathBegin,
                                     std::size_t blockPaths) const {
-        const std::size_t nSteps = timeGrid_.nSteps();
+        const std::size_t nSteps = m_timeGrid.nSteps();
         const std::size_t nDims = static_cast<std::size_t>(x0.size());
 
         PathBlock<Scalar> block;
@@ -203,14 +203,14 @@ private:
 
         for (std::size_t k = 0; k < nSteps; ++k) {
             stepPath(block.states[k], block.states[k + 1], k, pathBegin, source, drift, diffusion,
-                     theta_[k], z, uniforms, scratch);
+                     m_theta[k], z, uniforms, scratch);
         }
         return block;
     }
 
-    TimeGrid timeGrid_;
-    std::vector<std::vector<Scalar>> theta_;
-    Scheme scheme_;
+    TimeGrid m_timeGrid;
+    std::vector<std::vector<Scalar>> m_theta;
+    Scheme m_scheme;
 };
 
 } // namespace quantape::mc
