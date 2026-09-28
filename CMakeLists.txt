@@ -120,6 +120,10 @@ endif()
 # Stan Math (statistical modeling library, depends on Eigen, Boost, TBB, and SUNDIALS)
 # ----------------------------------------------------------------------------
 set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math/math-4.9.0)
+if(NOT EXISTS "${STAN_MATH_INCLUDE_DIR}/stan/math.hpp")
+    # layout changed: the checkout root is directly under stan-math/
+    set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math)
+endif()
 include_directories(${STAN_MATH_INCLUDE_DIR})
 
 # Include SUNDIALS headers from the build
@@ -681,6 +685,106 @@ target_compile_definitions(test_sde_gradients PRIVATE
 )
 
 target_compile_options(test_sde_gradients PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Heston model H0: characteristic function, Lewis+BS-CV pricer, CS greeks
+add_executable(test_heston_analytic tests/test_heston_analytic.cpp)
+
+target_link_libraries(test_heston_analytic PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_options(test_heston_analytic PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Heston Stan callback-var instantiation (var / fvar<var> tape wiring)
+add_executable(test_heston_stan tests/test_heston_stan.cpp)
+
+target_link_libraries(test_heston_stan PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_heston_stan PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_heston_stan PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Heston calibration strategies (synthetic quotes, weighted LS shoot-out)
+add_executable(test_heston_calibration tests/test_heston_calibration.cpp)
+
+target_link_libraries(test_heston_calibration PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_heston_calibration PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_heston_calibration PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# Heston calibration IFT/KKT hookup through the generic CalibrationProblem layer
+# In-house double-double precision gates
+add_executable(test_precision tests/test_precision.cpp)
+target_include_directories(test_precision PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(test_precision PRIVATE -Wall -Wextra -Wpedantic -O2 -fno-fast-math)
+
+# Heston theta-driven QE: prices + pathwise gradients (H5)
+add_executable(test_heston_mc tests/test_heston_mc.cpp)
+
+target_link_libraries(test_heston_mc PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_heston_mc PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_heston_mc PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+add_executable(test_heston_ift tests/test_heston_ift.cpp)
+
+target_link_libraries(test_heston_ift PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_heston_ift PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_heston_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
+
+# SDE engine with the Sobol/QMC source
+add_executable(test_sde_qmc tests/test_sde_qmc.cpp)
+
+target_link_libraries(test_sde_qmc PUBLIC
+        quantape
+        TBB::tbb
+)
+
+target_compile_definitions(test_sde_qmc PRIVATE
+        STAN_THREADS=true
+        STAN_NO_RANGE_CHECKS
+        _REENTRANT
+        TBB_INTERFACE_NEW
+)
+
+target_compile_options(test_sde_qmc PRIVATE -Wall -Wextra -Wpedantic -O2)
 
 # Market-risk propagation through calibrations (IFT/KKT tie-in, S5d)
 add_executable(test_market_risk_ift tests/test_market_risk_ift.cpp)

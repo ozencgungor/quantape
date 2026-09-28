@@ -12,14 +12,16 @@ selected automatically by the scalar template parameter.
 include/quantape/      public headers (namespace quantape::)
     math/              integrators, solvers, interpolation, optimization, AD, RNG
     markets/           curves (yield, IR, survival), volatility (IR, EQ, FX), mostly a stub for now
-    processes/         SDE processes (dynamics: f, g, moments)
+    mc/                SDE simulation engine + pathwise AD (gradients, sensitivities); mc/processes/ = SDE process bundles
+    models/            models (process + pricing/calibration mathematics; e.g. HestonModel)
+    payoffs/           payoff helpers (smoothed indicators)
     pricing/           pricers (e.g. Black-Scholes) and AD primitives
     scenario/          Monte Carlo scenario machinery
 src/                   implementation files (model/simulator .cpp)
 tests/                 correctness gates (exit code 0)
-benchmarks/            timing harnesses (not correctness gates)
+benchmarks/            timing harnesses (not correctness gates); `bench_sde` covers the SDE engine and every AD mode
 examples/              usage demos
-docs/                  Doxyfile (generated HTML -> build/docs/doxygen)
+docs/                  Doxyfile + docs/index.html entry point (generated HTML gitignored)
 scripts/               format_code.sh
 ```
 
@@ -34,10 +36,14 @@ umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
 | Module | Contents                                                                                                                                                                                                                                                                                                                                                                                             |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol)                                                                                                  |
-| `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export, and the first-order IFT layer (dp/dm, KKT sensitivities, var composition |
+| `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export |
+| `quantape/calibration/` | Calibration use of the optimizer stack: scalar-generic `CalibrationProblem` concept (double / `var` / `fvar<var>` residuals through `make_callback_var` pricing), assembled LS derivatives + `calibrationIft` (db/da, dlambda/da, calibrator-agnostic multiplier recovery), `CalibrationChain` (instrument-Jacobian route, `propagateMarketRisks`) and the AD twins `CalibrationChainKkt` / `ImplicitFunction` (minimizeDifferential, iftKkt), plus the Heston adapter (`HestonCalibration.h`) |
 | `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP                                                                                                                                                                                                                      |
 | `quantape/markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX), currently a stub                                                                                                                                                                                                                                                                                                                              |
 | `quantape/processes/` | Stochastic models and bridge samplers                                                                                                                                                                                                                                                                                                                                                                |
+| `quantape/models/` | Model layer: characteristic functions and analytic pricers with instrument gradients (`HestonModel.h`: Gatheral CF, Lewis + control variate, complex-step Jacobians) |
+| `quantape/mc/` | SDE simulation engine: time grids, piecewise-constant parameters, blocked/streamed simulation, TBB schedules, keyed reproducible Gaussian/uniform draws, **Sobol/QMC source** (jump-ahead points, digital-shift replicas, layouts documented in `SobolSource.h`), schemes (Euler, predictor-corrector, Milstein, moment-matching QE), Monte Carlo estimator; pathwise AD: **Stan-backed defaults** (reverse `Gradients.h`, forward `ForwardStan.h`, state derivatives `StateDerivatives.h`), opt-in accelerated scalar types under `mc/mcfwdrev/` (fixed-size forward dual, lean reverse tape), checkpointed gluing for long horizons, multiprocessing sharding (bitwise-mergeable samples) |
+| `quantape/payoffs/` | Payoff helpers: branchless smoothed indicators for pathwise-differentiable digital/barrier payoffs |
 | `quantape/scenario/` | Monte Carlo scenario machinery                                                                                                                                                                                                                                                                                                                                                                       |
 | `quantape/pricing/` | Pricers (e.g. Black-Scholes) and AD primitives                                                                                                                                                                                                                                                                                                                                                       |
 
@@ -80,6 +86,18 @@ Run a target and check the exit code; all of the following must exit `0`.
 | `test_optimization` | Optimizer stack: stop criteria, base class, exact gradients/HVPs/constraint Jacobians, Wolfe line search, L-BFGS, QP, SLSQP/AUGLAG constrained fixtures |
 | `test_optimizers_stress` | Hard/edge problems: Rosenbrock n=50, Beale, Himmelblau, 1e8/1e16 conditioning, degenerate constraints, 20-point arbitrage curve, NLopt parity |
 | `test_ift` | IFT sensitivities: `dp/dm` vs analytic + bump-and-recalibrate FD, KKT multiplier sensitivities, degenerate active sets, ridge escalation, condition reporting, var composition |
+| `test_sde_simulator` | SDE core: grids, keyed reproducible draws, Euler moments (OU exact, GBM vs Black-Scholes), CIR, bitwise path/block equivalence, estimator |
+| `test_sde_schemes` | Scheme convergence orders (Euler 1/2, Milstein 1, predictor-corrector 2), CIR positivity |
+| `test_sde_moment_matching` | QE sampler: exact conditional moments, positivity across regimes, uniform-stream contract, CIR terminal moments |
+| `test_sde_processes` | Process bundles (GBM/OU/CIR/Heston) and Heston QE: moments, reference prices, Feller-violating safety |
+| `test_heston_analytic` | Heston model: trap-free CF, Lewis+BS/asymptotic CV pricer, EFGL vs Gauss-Legendre identity, low-order node stability, deterministic-variance limit, QE/Sobol martingale + cross-check, full 9-parameter complex-step gradient/Hessian vs FD, surrogate Taylor, Euler homogeneity |
+| `test_heston_stan` | Heston Stan wiring: `make_callback_var` `var` adjoint == analytic gradient (1-node tape), `fvar<var>` Hessian == analytic Hessian (2-node tape), FD cross-checks |
+| `test_heston_mc` | Theta-driven Heston QE (`theta = {mu, kappa, level, eta, rho}`): bitwise theta-vs-member path equivalence, QE+Sobol catalog vs analytic, pathwise `simulateGradient` greeks vs analytic + engine-FD cross-check |
+| `test_heston_ift` | Generic calibration/IFT layer: KKT vs bump-recalibrate Richardsons, product-risk propagation, instrument-route cross-check, calibrator-agnostic multiplier recovery, Feller-active dlambda/da, a second model (Black-Scholes) through the same concept, and the Stan interop (`LBFGS<var>`, `minimizeDifferential`/`iftKkt` == analytic chain to 1e-13) |
+| `test_heston_calibration` | 10-quote synthetic Heston calibration shoot-out: exact-gradient L-BFGS (price/vega/IV/log space), LM Gauss-Newton, exact-Newton, `LBFGS<var>` callback — noiseless recovery to 1e-9, noisy agreement, hard-start robustness, 9-parameter Jacobian condition/identifiability, model+r and model+S+r+q joint fits, and Feller-constrained AUGLAG vs SLSQP vs a sigma=sqrt(2 kappa theta) boundary reference (binding/inactive KKT multipliers) |
+| `test_sde_qmc` | Sobol source contract and engine invariants (bitwise), QMC vs i.i.d. RMSE at equal N (one-step call, closed form), multi-step Euler moment gates, QE with Sobol uniforms, AD modes agreeing under QMC |
+| `test_sde_gradients` | Pathwise AD: finite-difference wiring, GBM greeks vs Black-Scholes, exact-moment derivatives, forward/checkpointed/lean modes all gate-equal, state derivatives, smoothed digitals, shard merge, schedule determinism |
+| `test_market_risk_ift` | Calibration chains: KKT vs instrument-Jacobian routes, bump-recalibrate, instrument exactness, end-to-end SDE gradient -> IFT |
 | `test_ziggurat` / `test_mcfarland` | Ziggurat / McFarland normal samplers: correctness and throughput |
 | `test_tanh_sinh` | Tanh-Sinh quadrature value + AD gradients/Hessians |
 
@@ -107,6 +125,20 @@ multipliers exported by the constrained solvers, and first-order IFT/KKT
 sensitivities of the optimum w.r.t. market data (`dp/dm`, multiplier
 sensitivities, `var` composition on the caller's tape) — see
 `internal_docs/ad_optimizers.md`.
+
+The SDE engine extends the same discipline to simulation: keyed draws are
+parameter-independent and never dualized (common random numbers are
+bitwise), schemes and functors are scalar-generic, and every AD mode
+differentiates the scheme exactly as coded. Stan-backed implementations are
+the defaults and the reference — reverse (`mc/Gradients.h`), forward
+(`mc/ForwardStan.h`), state derivatives (`mc/StateDerivatives.h`) — while
+the accelerated self-contained scalar types under `mc/mcfwdrev/` (fixed-size
+forward dual, lean reverse tape) are opt-in and gated in the tests against
+the Stan modes. Estimators compose as data (per-path samples, ordered
+reduction, bitwise parallel == sequential, shard-mergeable across
+processes), and market risks propagate through the calibration via the IFT
+layer — KKT route or weighted instrument-Jacobian pseudo-inverse
+(`calibration/CalibrationChain.h`) — without re-calibrating.
 
 ## Documentation
 
