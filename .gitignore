@@ -63,3 +63,13 @@ sobol_run.log
 joe-kuo-extended-*.txt
 joe-kuo-refined-*.txt
 joe-kuo-65536-*.txt
+
+# collected market data
+data/
+
+# python venv
+.venv/
+
+# python bytecode
+__pycache__/
+*.pyc
