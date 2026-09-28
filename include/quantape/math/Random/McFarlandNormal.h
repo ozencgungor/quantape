@@ -23,7 +23,7 @@ namespace quantape::math::mc {
 // EXPONENTIAL ZIGGURAT TABLES (needed for normal tail sampling)
 // ═══════════════════════════════════════════════════════════════════════════
 
-namespace quantape::math::detail {
+namespace detail {
 
 struct ExpTables {
     static constexpr int N_BINS = 252;
@@ -771,7 +771,7 @@ struct NormTables {
         -9223372036854775807LL};
 };
 
-} // namespace quantape::math::detail
+} // namespace detail
 
 // ═══════════════════════════════════════════════════════════════════════════
 // McFarland Exponential Sampler (internal, for tail sampling)
@@ -783,7 +783,7 @@ public:
     explicit McFarlandExponential(RNG& rng) : rng_(rng) {}
 
     double operator()() {
-        using ET = quantape::math::detail::ExpTables;
+        using ET = detail::ExpTables;
         uint64_t u = rng_();
         auto i = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
@@ -804,7 +804,7 @@ private:
     int64_t randInt63() { return static_cast<int64_t>(rng_() & 0x7FFFFFFFFFFFFFFFULL); }
 
     uint8_t sampleAlias() {
-        using ET = quantape::math::detail::ExpTables;
+        using ET = detail::ExpTables;
         uint64_t u = rng_();
         auto j = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
@@ -812,7 +812,7 @@ private:
     }
 
     double overhang(uint8_t j) {
-        using ET = quantape::math::detail::ExpTables;
+        using ET = detail::ExpTables;
         const double* X_j = ET::X + j;
         constexpr double pow2_63 = 9223372036854775808.0;
 
@@ -845,7 +845,7 @@ public:
     explicit McFarlandNormal(RNG& rng) : rng_(rng), exp_(rng) {}
 
     double operator()() {
-        using NT = quantape::math::detail::NormTables;
+        using NT = detail::NormTables;
 
         uint64_t u = rng_();
         auto i = static_cast<uint8_t>(u & 0xFF);
@@ -865,7 +865,7 @@ private:
     int64_t randInt63() { return static_cast<int64_t>(rng_() & 0x7FFFFFFFFFFFFFFFULL); }
 
     uint8_t sampleAlias() {
-        using NT = quantape::math::detail::NormTables;
+        using NT = detail::NormTables;
         uint64_t u = rng_();
         auto j = static_cast<uint8_t>(u & 0xFF);
         auto s = static_cast<int64_t>(u);
@@ -873,7 +873,7 @@ private:
     }
 
     double sampleOverhang() {
-        using NT = quantape::math::detail::NormTables;
+        using NT = detail::NormTables;
         constexpr double pow2_63 = 9223372036854775808.0;
 
         int64_t U_1 = randInt63();

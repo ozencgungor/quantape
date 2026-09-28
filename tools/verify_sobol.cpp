@@ -255,7 +255,9 @@ int main(int argc, char** argv) {
     }
 
     // ── 2. Criterion scores for sampled dimensions ──
-    {
+    if (nNew == 0) {
+        std::printf("criterion: no extension dimensions (input equals/under the base prefix)\n");
+    } else {
         const int k = all ? static_cast<int>(nNew) : std::min<int>(sample, static_cast<int>(nNew));
         std::vector<double> scores;
         std::vector<double> weights(matrices.size());

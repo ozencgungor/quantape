@@ -200,6 +200,74 @@ add_executable(verify_sobol tools/verify_sobol.cpp)
 target_include_directories(verify_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(verify_sobol PRIVATE Threads::Threads)
 
+# Broad statistical analysis battery (exactness, discrepancy, integration, GBM)
+add_executable(analyze_sobol tools/analyze_sobol.cpp)
+target_include_directories(analyze_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(analyze_sobol PRIVATE Threads::Threads)
+
+# Sobol generator + SDE engine source tests
+add_executable(test_sobol_generator tests/test_sobol_generator.cpp)
+target_link_libraries(test_sobol_generator PUBLIC
+        quantape
+        TBB::tbb
+)
+
+# Sobol generator benchmark (throughput, memory, engine QMC costs)
+add_executable(bench_sobol benchmarks/bench_sobol.cpp)
+target_link_libraries(bench_sobol PUBLIC
+        quantape
+        TBB::tbb
+)
+
+# ============================================================================
+# Compile-time Sobol table selection (QSB1 binary asset, zero-copy mmap)
+#
+# Default: our refined 65,536-dimension table, falling back to the unrefined
+# 65,536 run and then the Joe-Kuo D(7) base table. Override with
+#   cmake -DQUANTAPE_SOBOL_TABLE=/path/to/table
+# ============================================================================
+set(_sobol_table_candidates
+    "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-refined-w256.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-unrefined-w256.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/internal_docs/new-joe-kuo-7.21201")
+set(_sobol_default "")
+foreach(_candidate IN LISTS _sobol_table_candidates)
+    if(EXISTS "${_candidate}")
+        set(_sobol_default "${_candidate}")
+        break()
+    endif()
+endforeach()
+set(QUANTAPE_SOBOL_TABLE "${_sobol_default}" CACHE FILEPATH
+    "Joe-Kuo direction-number table baked into the build (default: refined 65,536-dim table)")
+if(NOT QUANTAPE_SOBOL_TABLE STREQUAL "" AND NOT EXISTS "${QUANTAPE_SOBOL_TABLE}")
+    message(STATUS "configured QUANTAPE_SOBOL_TABLE does not exist: ${QUANTAPE_SOBOL_TABLE}")
+    if(NOT _sobol_default STREQUAL "")
+        message(STATUS "falling back to the default: ${_sobol_default}")
+        set(QUANTAPE_SOBOL_TABLE "${_sobol_default}" CACHE FILEPATH
+            "Joe-Kuo direction-number table baked into the build" FORCE)
+    endif()
+endif()
+find_package(Threads REQUIRED)
+add_executable(sobol_to_binary tools/sobol_to_binary.cpp)
+target_include_directories(sobol_to_binary PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(sobol_to_binary PRIVATE Threads::Threads)
+if(EXISTS "${QUANTAPE_SOBOL_TABLE}")
+    message(STATUS "Sobol table (compile-time): ${QUANTAPE_SOBOL_TABLE}")
+    set(QUANTAPE_SOBOL_ASSET "${CMAKE_BINARY_DIR}/sobol_table.qsb")
+    add_custom_command(
+        OUTPUT "${QUANTAPE_SOBOL_ASSET}"
+        COMMAND $<TARGET_FILE:sobol_to_binary> --bits=32 "${QUANTAPE_SOBOL_TABLE}" "${QUANTAPE_SOBOL_ASSET}"
+        DEPENDS sobol_to_binary "${QUANTAPE_SOBOL_TABLE}"
+        COMMENT "Building Sobol binary asset from ${QUANTAPE_SOBOL_TABLE}")
+    add_custom_target(sobol_table ALL DEPENDS "${QUANTAPE_SOBOL_ASSET}")
+    target_compile_definitions(quantape PUBLIC
+        QUANTAPE_SOBOL_DEFAULT_TABLE_PATH="${QUANTAPE_SOBOL_ASSET}")
+    add_dependencies(quantape sobol_table)
+else()
+    message(STATUS "QUANTAPE_SOBOL_TABLE not found (${QUANTAPE_SOBOL_TABLE}); "
+                   "SobolGenerator::fromDefaultTable will be unavailable")
+endif()
+
 # Sobol direction-number refinement (two-sided coordinate descent)
 add_executable(refine_sobol tools/refine_sobol.cpp)
 target_include_directories(refine_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

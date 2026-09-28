@@ -148,6 +148,7 @@ bool writeTable(const std::string& path, const std::vector<Entry>& entries) {
 } // namespace
 
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0); // stream progress into run.log
     Options o;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
