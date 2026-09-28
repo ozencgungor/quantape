@@ -18,6 +18,7 @@
 #include "quantape/mc/SchemesStan.h"
 #include "quantape/mc/SdePrimitives.h"
 #include "quantape/mc/SdeSimulator.h"
+#include "quantape/mc/SobolSource.h"
 #include "quantape/mc/StateDerivatives.h"
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
@@ -87,6 +88,31 @@ struct LinearModel {
         }
     }
 };
+
+// ── Sobol fixture fallback for machines without a configured table ──
+
+std::vector<quantape::math::mc::sobol::Entry> sobolFixture(int nDims, std::uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    std::vector<quantape::math::mc::sobol::Entry> out;
+    std::uint32_t dim = 2;
+    for (int degree = 1; degree <= 10 && static_cast<int>(out.size()) < nDims; ++degree) {
+        for (const std::uint64_t poly : quantape::math::mc::gf2::enumerate_primitive(degree)) {
+            if (static_cast<int>(out.size()) >= nDims) {
+                break;
+            }
+            quantape::math::mc::sobol::Entry e;
+            e.dim = dim++;
+            e.s = static_cast<std::uint32_t>(degree);
+            e.a = quantape::math::mc::gf2::encode_a(poly, degree);
+            e.m.resize(static_cast<std::size_t>(degree));
+            for (int k = 1; k <= degree; ++k) {
+                e.m[static_cast<std::size_t>(k - 1)] = ((rng() % (1ULL << (k - 1))) << 1) | 1;
+            }
+            out.push_back(std::move(e));
+        }
+    }
+    return out;
+}
 
 // ── Theta-driven GBM (θ = {mu, sigma}) and terminal-call payoff for the
 //    pathwise-gradient benches (bundles carry their params in doubles).
@@ -839,6 +865,77 @@ int main(int argc, char** argv) {
                     simulator, x0, theta, quantape::mc::driftOf(model),
                     quantape::mc::diffusionOf(model), source, TerminalCallBatchPayoff{0.018},
                     nPaths, 64, Schedule::Parallel);
+                return g.value + g.gradient(0);
+            });
+        }
+    }
+
+    // ── 9. Sobol/QMC source: generation cost + engine cost ──
+    if (!onlyGrad) {
+        const std::size_t nPaths = 20000;
+        const std::size_t nSteps = 252;
+        const std::vector<double> theta = {0.05, 0.2};
+        const std::vector<std::vector<double>> thetaSteps(nSteps, theta);
+        const TimeGrid grid(1.0, nSteps);
+        const auto x0 = Eigen::VectorXd::Constant(1, 100.0);
+        const GbmThetaModel model;
+        const TerminalCallPayoff payoff{100.0};
+
+        std::shared_ptr<const quantape::math::mc::sobol::SobolGenerator> generator;
+        const std::string tablePath = quantape::math::mc::sobol::SobolGenerator::defaultTablePath();
+        if (!tablePath.empty()) {
+            generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
+        } else {
+            generator = std::make_shared<const quantape::math::mc::sobol::SobolGenerator>(
+                sobolFixture(1024, 20240927));
+        }
+        const quantape::mc::SobolSource sobolSource(generator, 1, nSteps, 0);
+
+        std::printf("sobol source: %s, %u dims\n",
+                    tablePath.empty() ? "fixture" : "configured table",
+                    generator->preparedDimension());
+        {
+            Eigen::MatrixXd z;
+            bench_us("sobol source fill q=1 20k paths", double(nPaths), reps, [&] {
+                sobolSource.fill(0, 0, nPaths, z);
+                return z(0, static_cast<Eigen::Index>(nPaths - 1));
+            });
+        }
+        {
+            const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
+            bench_us("euler gbm 20k x 252 sobol stream (seq)", double(nPaths * nSteps), reps, [&] {
+                double checksum = 0.0;
+                simulator.simulateBlocks(
+                    x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
+                    sobolSource, nPaths, 1024,
+                    [&checksum](const quantape::mc::PathBlock<double>& block, std::size_t) {
+                        checksum += block.states.back()(0, 0);
+                    },
+                    Schedule::Sequential);
+                return checksum;
+            });
+        }
+        {
+            const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
+            bench_us("euler gbm 20k x 252 sobol stream (parallel)", double(nPaths * nSteps), reps,
+                     [&] {
+                         double checksum = 0.0;
+                         simulator.simulateBlocks(
+                             x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
+                             sobolSource, nPaths, 1024,
+                             [&checksum](const quantape::mc::PathBlock<double>& block,
+                                         std::size_t) { checksum += block.states.back()(0, 0); },
+                             Schedule::Parallel);
+                         return checksum;
+                     });
+        }
+        {
+            const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
+            bench_us("gradient euler gbm 20k x 252 (sobol)", double(nPaths), reps, [&] {
+                const auto g = quantape::mc::simulateGradient(
+                    simulator, x0, theta, quantape::mc::driftOf(model),
+                    quantape::mc::diffusionOf(model), sobolSource, payoff, nPaths,
+                    Schedule::Parallel);
                 return g.value + g.gradient(0);
             });
         }
