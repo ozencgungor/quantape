@@ -36,6 +36,12 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/math/Optimization/Constraint.h"
+#include "quantape/math/Optimization/LBFGS.h"
+#include "quantape/math/Optimization/OptimizerPrimitives.h"
+#include "quantape/math/Optimization/OptimizerStanPrimitives.h"
+#include "quantape/math/Optimization/SLSQP.h"
+
 #include <Eigen/Dense>
 
 #include <algorithm>
@@ -46,21 +52,17 @@
 #include <utility>
 #include <vector>
 
-#include "Constraint.h"
-#include "LBFGS.h"
-#include "OptimizerPrimitives.h"
-#include "OptimizerStanPrimitives.h"
-#include "SLSQP.h"
-
 namespace quantape::math {
 
 /// Tolerances for active-set detection and regularization
 struct IftOptions {
     // Active-set detection: |g| <= feasibility_tol AND multiplier > lambda_tol.
-    // 1e-8 comfortably covers both solvers' own feasibility tolerances
-    // (SLSQP's is exact-zero in practice, AUGLAG's is 1e-9) while staying far
-    // below any genuinely-inactive |g| ~ O(1).
-    double feasibility_tol = 1e-8;
+    // 1e-6 covers both solvers' feasibility exits on constraints of scale
+    // O(1) (SLSQP returns ~5e-8, AUGLAG ~1e-9) while staying far below any
+    // genuinely-inactive |g| ~ O(1). Keep it aligned with
+    // CalibrationIftOptions::feasibilityTol when driving the assembled
+    // (double/analytic) chain from the same optimum.
+    double feasibility_tol = 1e-6;
     double lambda_tol = 1e-10; ///< multiplier > tol => strictly active
     double bound_tol = 1e-8;   ///< |x - bound| <= tol*scale => active bound
     double ridge = 0.0;        ///< explicit ridge for H (0 = automatic)

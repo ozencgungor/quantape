@@ -11,7 +11,7 @@
 //   plus: end-to-end SDE gradient (mc/Gradients.h) -> IFT market risk
 #include "quantape/math/StanMath.h"
 
-#include "quantape/math/Optimization/CalibrationChain.h"
+#include "quantape/calibration/CalibrationChainKkt.h"
 #include "quantape/mc/Gradients.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SchemesStan.h"
@@ -160,7 +160,7 @@ CalibrationJacobians sigmaOnlyJacobians(const std::vector<double>& strikes, doub
     CalibrationJacobians jac;
     jac.weights = weights;
     jac.dIdb.resize(nI, 1);
-    jac.dIda = Eigen::MatrixXd::Identity(nI, nI);
+    jac.dIda = -Eigen::MatrixXd::Identity(nI, nI); // I_i = P_i - a_i (price data)
     for (Eigen::Index i = 0; i < nI; ++i) {
         jac.dIdb(i, 0) = bsCallVega(s0, strikes[static_cast<std::size_t>(i)], mu, sigma, tMax);
     }
@@ -175,7 +175,7 @@ CalibrationJacobians singleAssetJacobians(const std::vector<double>& strikes, do
     CalibrationJacobians jac;
     jac.weights = weights;
     jac.dIdb.resize(nI, 2);
-    jac.dIda = Eigen::MatrixXd::Identity(nI, nI);
+    jac.dIda = -Eigen::MatrixXd::Identity(nI, nI); // I_i = P_i - a_i (price data)
     for (Eigen::Index i = 0; i < nI; ++i) {
         jac.dIdb(i, 0) = bsCallDelta(s0, strikes[static_cast<std::size_t>(i)], mu, sigma, tMax);
         jac.dIdb(i, 1) = bsCallVega(s0, strikes[static_cast<std::size_t>(i)], mu, sigma, tMax);

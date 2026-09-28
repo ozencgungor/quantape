@@ -1,8 +1,8 @@
 #ifndef QUANTAPE_MATH_OPTIMIZATION_CALIBRATION_CHAIN_H
 #define QUANTAPE_MATH_OPTIMIZATION_CALIBRATION_CHAIN_H
 
+#include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/math/Optimization/Constraint.h"
-#include "quantape/math/Optimization/ImplicitFunction.h"
 #include "quantape/math/Optimization/OptimizerPrimitives.h"
 
 #include <Eigen/Dense>
@@ -37,6 +37,13 @@ namespace quantape::math {
  * the (weighted) LS optimum while the instrument route is its Gauss–Newton
  * form (residual-curvature terms dropped) — both converge to the
  * bump-and-recalibrate answer as residuals vanish.
+ *
+ * Sign convention (standard implicit function theorem): with the calibration
+ * instrument `I(b, a)` (direct quote prices: `I_i = P_i(b, a) - a_i`, so
+ * `dI/da = -Identity` for price data) and derived parameters `c = f(a)`,
+ * stationarity `I(b*(a), a) = 0` gives
+ *
+ *     db/da = -(dI/db)^+ (dI/da + (dI/dc)(dc/da)).
  *
  * Chain conventions
  * -----------------
@@ -78,7 +85,7 @@ struct InstrumentIftOptions {
 
 /// Instrument-Jacobian route: weighted SVD pseudo-inverse (Savine).
 ///
-///   db/da = (dI/db)^+ (dI/da - dI/dc dc/da),
+///   db/da = -(dI/db)^+ (dI/da + dI/dc dc/da),
 ///   (dI/db)^+ computed on sqrt(Omega) dI/db (thin SVD, cut at svdCut).
 inline InstrumentIftResult instrumentCalibrationJacobian(const CalibrationJacobians& jac,
                                                          const InstrumentIftOptions& options = {}) {
@@ -105,7 +112,7 @@ inline InstrumentIftResult instrumentCalibrationJacobian(const CalibrationJacobi
         if (jac.dcda.rows() != jac.dIdc.cols() || jac.dcda.cols() != nA) {
             throw std::invalid_argument("instrumentCalibrationJacobian: dc/da shape mismatch");
         }
-        rhs -= jac.dIdc * jac.dcda;
+        rhs += jac.dIdc * jac.dcda; // total dI/da through c = f(a)
     }
 
     Eigen::VectorXd sqrtW(nI);
@@ -133,7 +140,7 @@ inline InstrumentIftResult instrumentCalibrationJacobian(const CalibrationJacobi
     result.singularMax = s.size() > 0 ? s.maxCoeff() : 0.0;
     result.condition = result.singularMin > 0.0 ? result.singularMax / result.singularMin
                                                 : std::numeric_limits<double>::infinity();
-    result.dbda = svd.matrixV() * invS.asDiagonal() * svd.matrixU().transpose() * rw;
+    result.dbda = -(svd.matrixV() * invS.asDiagonal() * svd.matrixU().transpose() * rw);
     return result;
 }
 
@@ -155,54 +162,15 @@ inline Eigen::VectorXd propagateMarketRisks(const Eigen::VectorXd& dVdb,
     return out;
 }
 
-namespace detail {
-inline bool iftCalibrationConverged(OptimizeResult result) {
-    // RoundoffLimited is accepted: at realistic quote scales the solver
-    // cannot improve the objective further in floating point and the
-    // iterate is a valid LS optimum (the IFT is then exact to roundoff, as
-    // the bump-recalibrate gates verify). Genuine failures (infeasible,
-    // max eval/time, failure) still throw.
-    return result == OptimizeResult::Success || result == OptimizeResult::GradientTolReached ||
-           result == OptimizeResult::FtolReached || result == OptimizeResult::XtolReached ||
-           result == OptimizeResult::RoundoffLimited;
-}
-} // namespace detail
-
-/**
- * @brief KKT route: calibrate `b` to quotes `a`, then `db/da` by IFT
- *
- * `objective(x, m)` is the fitting objective (`m` = quotes `a`, `x` = model
- * parameters `b`), same callable contract as the optimizer/IFT layer.
- * Constraints and bounds are supported (the returned `info` reports
- * active sets and conditioning; final multipliers land in `state`).
- */
-template <typename F2, typename G2 = NoConstraint, typename H2 = NoConstraint>
-Eigen::MatrixXd
-kktCalibrationJacobian(const F2& objective, const std::vector<double>& quotes,
-                       std::vector<double>& b, OptimizerState& state, IftResult& info,
-                       const G2& g = G2{}, const H2& h = H2{}, const Bounds& bounds = Bounds{},
-                       const StopCriteria& criteria = {}, const IftOptions& options = {}) {
-    std::vector<double> dpdm;
-    const OptimizeResult result =
-        minimizeDifferential(objective, g, h, bounds, quotes, b, state, info, &dpdm, nullptr,
-                             nullptr, criteria, options);
-    if (!detail::iftCalibrationConverged(result)) {
-        throw std::runtime_error("kktCalibrationJacobian: calibration did not converge (code " +
-                                 std::to_string(static_cast<int>(result)) + ")");
-    }
-    if (dpdm.size() != b.size() * quotes.size()) {
-        throw std::runtime_error("kktCalibrationJacobian: IFT returned no Jacobian (code " +
-                                 std::to_string(static_cast<int>(result)) + ")");
-    }
-    Eigen::MatrixXd out(static_cast<Eigen::Index>(b.size()),
-                        static_cast<Eigen::Index>(quotes.size()));
-    for (std::size_t i = 0; i < b.size(); ++i) {
-        for (std::size_t j = 0; j < quotes.size(); ++j) {
-            out(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) =
-                dpdm[i * quotes.size() + j];
-        }
-    }
-    return out;
+/// Bridge: assembled residual derivatives -> instrument-route inputs.
+/// The residual Jacobians already carry sqrt(weight), so the diagonal
+/// weights are unit; `dIdc`/`dcda` are left empty (no derived parameters).
+inline CalibrationJacobians calibrationJacobiansFromAssembled(const CalibrationDerivatives& d) {
+    CalibrationJacobians jac;
+    jac.weights.assign(d.nQuotes, 1.0);
+    jac.dIdb = d.jacobianB;
+    jac.dIda = d.jacobianA;
+    return jac;
 }
 
 } // namespace quantape::math

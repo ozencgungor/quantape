@@ -14,7 +14,7 @@
  * "quantape/math/Optimization/OptimizerStanPrimitives.h" — or "quantape/math/StanPrimitives.h"
  * — for exact gradients, HVPs and constraint Jacobians; the first-order IFT
  * layer (dp/dm, KKT sensitivities, var composition) lives in
- * "quantape/math/Optimization/ImplicitFunction.h" (Stan-dependent, like
+ * "quantape/calibration/ImplicitFunction.h" (Stan-dependent, like
  * OptimizerStanPrimitives.h). This header stays Stan-free.
  */
 
