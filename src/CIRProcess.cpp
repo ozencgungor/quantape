@@ -1,4 +1,4 @@
-#include "quantape/processes/CIRProcess.h"
+#include "quantape/mc/processes/CIRProcess.h"
 
 #include <algorithm>
 #include <cmath>

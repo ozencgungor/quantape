@@ -1,7 +1,7 @@
 #ifndef EQUITY_SIMULATOR_H
 #define EQUITY_SIMULATOR_H
 
-#include "quantape/processes/HestonProcess.h"
+#include "quantape/mc/processes/HestonProcess.h"
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>

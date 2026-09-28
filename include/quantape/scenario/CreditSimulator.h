@@ -1,7 +1,7 @@
 #ifndef CREDIT_SIMULATOR_H
 #define CREDIT_SIMULATOR_H
 
-#include "quantape/processes/CIRProcess.h"
+#include "quantape/mc/processes/CIRProcess.h"
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>

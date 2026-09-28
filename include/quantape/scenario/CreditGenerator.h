@@ -1,7 +1,7 @@
 #ifndef CREDIT_GENERATOR_H
 #define CREDIT_GENERATOR_H
 
-#include "quantape/processes/CIRProcess.h"
+#include "quantape/mc/processes/CIRProcess.h"
 #include "quantape/scenario/CreditSimulator.h"
 #include "quantape/scenario/ModelGenerator.h"
 

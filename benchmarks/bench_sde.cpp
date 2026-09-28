@@ -22,13 +22,15 @@
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
 #include "quantape/mc/mcfwdrev/LeanGradients.h"
-#include "quantape/processes/HestonQeProcess.h"
-#include "quantape/processes/SdeProcesses.h"
+#include "quantape/mc/processes/HestonQeProcess.h"
+#include "quantape/mc/processes/SdeProcesses.h"
 
 #include <Eigen/Dense>
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
+#include <random>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

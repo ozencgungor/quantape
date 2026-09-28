@@ -3,7 +3,7 @@
 
 #include "quantape/mc/MomentMatching.h"
 #include "quantape/mc/SdePrimitives.h"
-#include "quantape/processes/SdeProcesses.h"
+#include "quantape/mc/processes/SdeProcesses.h"
 
 #include <Eigen/Dense>
 

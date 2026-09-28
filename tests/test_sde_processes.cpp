@@ -17,8 +17,8 @@
 #include "quantape/mc/SdePrimitives.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
-#include "quantape/processes/HestonQeProcess.h"
-#include "quantape/processes/SdeProcesses.h"
+#include "quantape/mc/processes/HestonQeProcess.h"
+#include "quantape/mc/processes/SdeProcesses.h"
 
 #include <Eigen/Dense>
 

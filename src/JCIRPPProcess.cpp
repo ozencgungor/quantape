@@ -1,4 +1,4 @@
-#include "quantape/processes/JCIRPPProcess.h"
+#include "quantape/mc/processes/JCIRPPProcess.h"
 
 #include <algorithm>
 #include <cmath>
