@@ -73,12 +73,35 @@ struct FourFactorGbm {
 
 int main(int argc, char** argv) {
     const int reps = argc > 1 ? std::atoi(argv[1]) : 3;
-    const std::string table = argc > 2 ? argv[2] : "joe-kuo-65536-refined-w256.txt";
-    if (!std::filesystem::exists(table)) {
-        std::printf("table not found: %s (run from the repo root)\n", table.c_str());
-        return 0;
+    std::string table = argc > 2 ? argv[2] : "joe-kuo-65536-refined-w256.txt";
+    const auto exists = [](const std::string& path) {
+        return !path.empty() && std::filesystem::exists(path);
+    };
+    // Resolve the text table: explicit path, then parent directories (IDE /
+    // CMake run configurations often start in the build directory), then the
+    // compile-time binary asset. Missing everything is an error.
+    if (!exists(table)) {
+        for (const char* prefix : {"../", "../../", "../../../"}) {
+            const std::string candidate = std::string(prefix) + table;
+            if (exists(candidate)) {
+                table = candidate;
+                break;
+            }
+        }
     }
-    std::printf("Sobol generator benchmark, reps=%d, table=%s\n", reps, table.c_str());
+    const std::string defaultPath = SobolGenerator::defaultTablePath();
+    const bool haveText = exists(table);
+    const bool haveAsset = exists(defaultPath);
+    if (!haveText && !haveAsset) {
+        std::fprintf(stderr,
+                     "bench_sobol: no Sobol table found (looked for '%s' and the compile-time "
+                     "asset '%s'); pass a table path or run from the repo root\n",
+                     table.c_str(), defaultPath.c_str());
+        return 1;
+    }
+    std::printf("Sobol generator benchmark, reps=%d, table=%s%s\n", reps,
+                haveText ? table.c_str() : defaultPath.c_str(),
+                haveText ? "" : " (compile-time binary asset)");
 
     // ── 0. Compile-time table (QSB1 binary asset, zero-copy mmap) ──
     {
@@ -99,8 +122,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    // ── 1. Load / prepare ──
-    {
+    // ── 1. Load / prepare (text table; skipped when only the binary asset is
+    // available) ──
+    if (haveText) {
         const auto t0 = std::chrono::steady_clock::now();
         auto full = SobolGenerator::fromFile(table, SobolOptions{0, 1, false, 32, 0, false});
         const auto t1 = std::chrono::steady_clock::now();
@@ -116,11 +140,12 @@ int main(int argc, char** argv) {
         report_memory("layout slice (252 steps x 4)", slice.preparedDimension(), slice.maxBits());
         auto wide = SobolGenerator::fromFile(table, SobolOptions{0, 1, false, 64, 0, false});
         report_memory("full table (64-bit words)", wide.preparedDimension(), wide.maxBits());
+    } else {
+        std::printf("text table not found: skipping load/prepare timings\n");
     }
 
     std::shared_ptr<const SobolGenerator> shared;
-    if (!SobolGenerator::defaultTablePath().empty() &&
-        std::filesystem::exists(SobolGenerator::defaultTablePath())) {
+    if (haveAsset) {
         shared =
             SobolGenerator::sharedFromDefaultTable(SobolOptions{12345, 1, false, 32, 0, false});
     } else {
