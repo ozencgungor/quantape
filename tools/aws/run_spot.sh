@@ -42,7 +42,12 @@ aws="aws --region $REGION"
 
 # Run log, kept under tools/logs with a descriptive name.
 mkdir -p "$repo_root/tools/logs"
-LOG_FILE="${LOG_FILE:-$repo_root/tools/logs/sobol-${TOOL}-${MARKET}-d${TARGET}-w${WINDOW}-$(date +%Y%m%d-%H%M%S).log}"
+if [ "$TOOL" = "refine_sobol" ]; then
+    LOG_TAG="d${REFINE_FROM}"
+else
+    LOG_TAG="d${TARGET}"
+fi
+LOG_FILE="${LOG_FILE:-$repo_root/tools/logs/sobol-${TOOL}-${MARKET}-${LOG_TAG}-w${WINDOW}-$(date +%Y%m%d-%H%M%S).log}"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo "==> log: $LOG_FILE"
 
