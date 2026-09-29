@@ -26,14 +26,14 @@ int main() {
     CHECK(quantape::log::active(quantape::log::Level::Error));
     CHECK(!quantape::log::active(quantape::log::Level::Debug));
 
-    QTA_LOG_DEBUG("quantape.test", "debug hidden {}", 1);
-    QTA_LOG_INFO("quantape.test", "info visible {}", 2);
-    QTA_LOG_WARN("quantape.test", "warn visible {}", 3.5);
-    QTA_LOG_ERROR("quantape.test", "error visible {}", 4);
+    QTA_LOG_DEBUG("test", "debug hidden {}", 1);
+    QTA_LOG_INFO("test", "info visible {}", 2);
+    QTA_LOG_WARN("test", "warn visible {}", 3.5);
+    QTA_LOG_ERROR("test", "error visible {}", 4);
 
     quantape::log::setLevel(quantape::log::Level::Debug);
     CHECK(quantape::log::active(quantape::log::Level::Debug));
-    QTA_LOG_DEBUG("quantape.test", "debug now visible {}", 5);
+    QTA_LOG_DEBUG("test", "debug now visible {}", 5);
 
     quantape::log::shutdown();
 
@@ -47,9 +47,9 @@ int main() {
     CHECK(contents.find("error visible 4") != std::string::npos);
     CHECK(contents.find("debug now visible 5") != std::string::npos);
     CHECK(contents.find("debug hidden 1") == std::string::npos);
-    CHECK(contents.find("quantape.test") != std::string::npos);
+    CHECK(contents.find("test") != std::string::npos);
 
     fs::remove(log_path, ec);
-    QTA_LOG_INFO("quantape.test", "test_logging: ok");
+    QTA_LOG_INFO("test", "test_logging: ok");
     return 0;
 }

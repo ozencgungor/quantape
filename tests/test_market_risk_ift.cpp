@@ -48,7 +48,7 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
         std::exit(1);
@@ -227,7 +227,7 @@ void testSingleQuoteChain() {
     const double fd =
         (bsCallPrice(s0, k2, mu, bp[0], tMax) - bsCallPrice(s0, k2, mu, bm[0], tMax)) / (2.0 * h);
     checkClose("single-quote IFT vs bump-recalibrate", risk(0), fd, 1e-6);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] single quote: KKT/inst agree, instrument exact, vs FD ({} vs {})",
                  quantape_test::num(risk(0), 9), quantape_test::num(fd, 9));
 }
@@ -281,7 +281,7 @@ void testTwoQuoteChain() {
         const double fd = (vp - vm) / (2.0 * h);
         checkClose("two-quote IFT vs bump-recalibrate", risk(j), fd, 1e-5);
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] two quotes: routes == J^-1, both components vs FD");
+    QTA_LOG_INFO("test", "  [ok] two quotes: routes == J^-1, both components vs FD");
 }
 
 // ── Gates 12/14: weighted best fit (3 quotes, 2 params) ──
@@ -346,7 +346,7 @@ void testBestFitWeighted() {
     }
     const double kktUs = std::chrono::duration<double, std::micro>(kal2 - kal).count();
     const double instUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] best fit (3 quotes, weights): max |KKT-FD|={}, |inst-FD|={}; "
                  "timing warm KKT {} us vs instrument {} us (m=2, nI=3)",
                  quantape_test::num(maxKktErr, 3), quantape_test::num(maxInstErr, 3),
@@ -414,7 +414,7 @@ void testSdeChain() {
     const double analytic = bsCallVega(s0, k2, mu, sigma, tMax) / vega1;
     const double tol = 0.02 * std::fabs(analytic) + 5.0 * estimate.stdErrors(2) / vega1;
     checkClose("SDE -> IFT chain", risk(0), analytic, tol);
-    QTA_LOG_INFO("quantape.test", "  [ok] SDE gradient -> IFT: dV/da={} (analytic {}, se {})",
+    QTA_LOG_INFO("test", "  [ok] SDE gradient -> IFT: dV/da={} (analytic {}, se {})",
                  quantape_test::num(risk(0), 6), quantape_test::num(analytic, 6),
                  quantape_test::num(estimate.stdErrors(2) / vega1, 2));
 }
@@ -422,11 +422,11 @@ void testSdeChain() {
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "Market-risk IFT tests (S5d)");
+    QTA_LOG_INFO("test", "Market-risk IFT tests (S5d)");
     testSingleQuoteChain();
     testTwoQuoteChain();
     testBestFitWeighted();
     testSdeChain();
-    QTA_LOG_INFO("quantape.test", "ALL MARKET-RISK IFT TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL MARKET-RISK IFT TESTS PASSED");
     return 0;
 }

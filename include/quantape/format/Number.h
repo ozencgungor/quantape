@@ -12,6 +12,17 @@ inline constexpr std::size_t kMaxDoubleChars = 384;
 
 enum class FloatFormat { Shortest, Scientific, Fixed, General, Hex };
 
+/// Formattable double wrapper for log/call-site use:
+///   QTA_LOG_INFO("test", "d0={} H00={}", format::num(d0), format::num(H00, 6));
+/// `precision < 0` selects the shortest round-trip form (zmij); otherwise the
+/// value is printed with `%g` semantics at the given significant digits.
+struct Num {
+    double value;
+    int precision = -1;
+};
+
+inline Num num(double value, int precision = -1) { return Num{value, precision}; }
+
 /// Writes `value` into [out, out + size). Returns a pointer past the last
 /// character written; on buffer exhaustion returns `out` with `*out = '\0'`.
 /// `precision < 0` means shortest form; otherwise printf-style precision

@@ -26,7 +26,7 @@ void checkRel(const char* label, const DoubleDouble& got, const DoubleDouble& ex
     const double denom = std::max(1e-300, std::fabs(expected.value()));
     const double err = std::fabs((got - expected).value()) / denom;
     if (!(err <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} rel err {} tol {} (got {} expected {})", label,
+        QTA_LOG_ERROR("test", "FAIL: {} rel err {} tol {} (got {} expected {})", label,
                       quantape_test::num(err, 3), quantape_test::num(tol, 3),
                       quantape_test::num(got.value(), 20),
                       quantape_test::num(expected.value(), 20));
@@ -81,7 +81,7 @@ void testArithmetic() {
         quantape::math::sin(DoubleDouble(1.5707963267948966, 6.123233995736766e-17));
     checkRel("sin(pi/2)", sPi2, DoubleDouble(1.0), 1e-31);
 
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)");
 }
 
@@ -107,7 +107,7 @@ void testSiCiAnchors() {
     checkRel("Si(1)", si1, DoubleDouble(0.94608307036718301494), 1e-15);
     const DoubleDouble si10 = si(DoubleDouble(10.0));
     checkRel("Si(10)", si10, DoubleDouble(1.6583475942188740493), 1e-14);
-    QTA_LOG_INFO("quantape.test", "  [ok] Si anchors in double-double (Si(1), Si(10))");
+    QTA_LOG_INFO("test", "  [ok] Si anchors in double-double (Si(1), Si(10))");
 }
 
 void testOscillatoryExactMoment() {
@@ -149,7 +149,7 @@ void testOscillatoryExactMoment() {
                                     std::max(1e-300, std::fabs(reference.value())));
     }
     CHECK(worst < 1e-10);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
                  quantape_test::num(worst, 2));
 }
@@ -157,10 +157,10 @@ void testOscillatoryExactMoment() {
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "Double-double precision gates");
+    QTA_LOG_INFO("test", "Double-double precision gates");
     testArithmetic();
     testSiCiAnchors();
     testOscillatoryExactMoment();
-    QTA_LOG_INFO("quantape.test", "ALL PRECISION TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL PRECISION TESTS PASSED");
     return 0;
 }

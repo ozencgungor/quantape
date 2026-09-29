@@ -29,7 +29,7 @@ int failures = 0;
 void check(bool ok, const char* name, double got = 0.0, double tol = 0.0) {
     if (!ok) {
         ++failures;
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} (got={} tol={})", name, quantape_test::num(got, 3),
+        QTA_LOG_ERROR("test", "FAIL: {} (got={} tol={})", name, quantape_test::num(got, 3),
                       quantape_test::num(tol, 3));
     }
 }
@@ -93,7 +93,7 @@ void testStanGradientAndHessian() {
         gradErr = std::max(gradErr, std::fabs(grad(i) - g(i)));
     }
     check(gradErr < 1e-9, "stan adjoint == fullGradient", gradErr, 1e-9);
-    QTA_LOG_INFO("quantape.test", "  [ok] var adjoint == fullGradient (max err {}, 1-node tape)",
+    QTA_LOG_INFO("test", "  [ok] var adjoint == fullGradient (max err {}, 1-node tape)",
                  quantape_test::num(gradErr, 2));
 
     double fx2 = 0.0;
@@ -107,7 +107,7 @@ void testStanGradientAndHessian() {
         }
     }
     check(hessErr < 1e-9, "stan fvar<var> Hessian == fullHessian", hessErr, 1e-9);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
                  quantape_test::num(hessErr, 2));
 
@@ -127,7 +127,7 @@ void testStanGradientAndHessian() {
                   "fullHessian column vs FD(gradient)", std::fabs(fd - H(i, idx[k])), 1e-5);
         }
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] fullHessian columns vs central FD of fullGradient");
+    QTA_LOG_INFO("test", "  [ok] fullHessian columns vs central FD of fullGradient");
 }
 
 void testPrimalCache() {
@@ -166,7 +166,7 @@ void testPrimalCache() {
         }
     }
     check(hessErr < 1e-12, "cached fvar<var> Hessian == fullHessian", hessErr, 1e-12);
-    QTA_LOG_INFO("quantape.test", "  [ok] cached price: hessian err {}, rebuilds={}",
+    QTA_LOG_INFO("test", "  [ok] cached price: hessian err {}, rebuilds={}",
                  quantape_test::num(hessErr, 2), cache.rebuilds());
 
     // timing: cached vs uncached hessian
@@ -189,7 +189,7 @@ void testPrimalCache() {
         t1 = now();
         cached += us(t0, t1);
     }
-    QTA_LOG_INFO("quantape.test", "  timings: stan hessian plain {} us, primal-cached {} us ({}x)",
+    QTA_LOG_INFO("test", "  timings: stan hessian plain {} us, primal-cached {} us ({}x)",
                  quantape_test::num(plain / reps, 1), quantape_test::num(cached / reps, 1),
                  quantape_test::num(plain / cached, 1));
 }
@@ -224,7 +224,7 @@ void testTiming() {
         t1 = now();
         hessUs += us(t0, t1);
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  timings: stan gradient (var, value+grad build) {} us, "
                  "stan hessian (fvar<var>, value+grad+hess build) {} us",
                  quantape_test::num(gradUs / reps, 1), quantape_test::num(hessUs / reps, 1));
@@ -233,14 +233,14 @@ void testTiming() {
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "Heston Stan callback-var tests");
+    QTA_LOG_INFO("test", "Heston Stan callback-var tests");
     testStanGradientAndHessian();
     testPrimalCache();
     testTiming();
     if (failures == 0) {
-        QTA_LOG_INFO("quantape.test", "ALL HESTON STAN TESTS PASSED");
+        QTA_LOG_INFO("test", "ALL HESTON STAN TESTS PASSED");
         return 0;
     }
-    QTA_LOG_ERROR("quantape.test", "{} FAILURES", failures);
+    QTA_LOG_ERROR("test", "{} FAILURES", failures);
     return 1;
 }

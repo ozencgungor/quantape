@@ -11,7 +11,7 @@
 #include "TestSupport.h"
 
 void testLogLinearInterpolation() {
-    QTA_LOG_INFO("quantape.test", "=== Log-Linear Interpolation Tests ===");
+    QTA_LOG_INFO("test", "=== Log-Linear Interpolation Tests ===");
 
     std::vector<double> x = {0.0, 1.0, 2.0, 3.0, 4.0};
     std::vector<double> y = {1.0, 2.718, 7.389, 20.086, 54.598}; // approx exp(x)
@@ -20,15 +20,15 @@ void testLogLinearInterpolation() {
 
     double val1 = interp(1.5);
     double expected1 = exp(1.5);
-    QTA_LOG_INFO("quantape.test", "Value at 1.5: {} (expected: {})", quantape_test::num(val1),
+    QTA_LOG_INFO("test", "Value at 1.5: {} (expected: {})", quantape_test::num(val1),
                  quantape_test::num(expected1));
     assert(std::abs(val1 - expected1) < 1e-3);
 
-    QTA_LOG_INFO("quantape.test", "Log-Linear interpolation tests passed!");
+    QTA_LOG_INFO("test", "Log-Linear interpolation tests passed!");
 }
 
 void testCubicSplineInterpolation() {
-    QTA_LOG_INFO("quantape.test", "=== Cubic Spline Interpolation Tests ===");
+    QTA_LOG_INFO("test", "=== Cubic Spline Interpolation Tests ===");
 
     // Test case 1: Simple 3-point natural cubic spline
     std::vector<double> x_simple = {0.0, 1.0, 2.0};
@@ -43,7 +43,7 @@ void testCubicSplineInterpolation() {
 
     double val_simple = interp_simple(0.5);
     double expected_val_simple = 0.6875; // Correct value for natural cubic spline
-    QTA_LOG_INFO("quantape.test", "Value at 0.5 (Simple 3-point): {} (expected: {})",
+    QTA_LOG_INFO("test", "Value at 0.5 (Simple 3-point): {} (expected: {})",
                  quantape_test::num(val_simple), quantape_test::num(expected_val_simple));
     assert(std::abs(val_simple - expected_val_simple) < 1e-9);
 
@@ -55,7 +55,7 @@ void testCubicSplineInterpolation() {
         x_poly, y_poly, quantape::math::CubicDerivativeApprox::Spline);
     double val_poly = interp_poly(1.5);
     double expected_poly = 2.25; // 1.5^2
-    QTA_LOG_INFO("quantape.test", "Value at 1.5 (Polynomial x^2): {} (expected: {})",
+    QTA_LOG_INFO("test", "Value at 1.5 (Polynomial x^2): {} (expected: {})",
                  quantape_test::num(val_poly), quantape_test::num(expected_poly));
     // Natural spline won't match quadratic exactly due to boundary conditions
     // (natural BC has f''=0 at ends, but x^2 has f''=2 everywhere)
@@ -69,29 +69,29 @@ void testCubicSplineInterpolation() {
         x_sin, y_sin, quantape::math::CubicDerivativeApprox::Spline);
     double val_natural_sin = interp_natural_sin(1.5);
     double expected_sin = sin(1.5);
-    QTA_LOG_INFO("quantape.test", "Value at 1.5 (Natural, sin(x)): {} (expected: {})",
+    QTA_LOG_INFO("test", "Value at 1.5 (Natural, sin(x)): {} (expected: {})",
                  quantape_test::num(val_natural_sin), quantape_test::num(expected_sin));
     // Relaxed tolerance for sparse knots on transcendental function
     assert(std::abs(val_natural_sin - expected_sin) < 1e-3);
 
-    QTA_LOG_INFO("quantape.test", "Cubic Spline interpolation tests passed!");
+    QTA_LOG_INFO("test", "Cubic Spline interpolation tests passed!");
 }
 
 void testBilinearInterpolation() {
-    QTA_LOG_INFO("quantape.test", "=== Bilinear Interpolation Tests ===");
+    QTA_LOG_INFO("test", "=== Bilinear Interpolation Tests ===");
     std::vector<double> x = {0, 1};
     std::vector<double> y = {0, 1};
     std::vector<std::vector<double>> z = {{0, 1}, {1, 2}};
     quantape::math::BilinearInterpolation<double> interp(x, y, z);
     double val = interp(0.5, 0.5);
-    QTA_LOG_INFO("quantape.test", "Value at (0.5, 0.5): {} (expected: 1.0)",
+    QTA_LOG_INFO("test", "Value at (0.5, 0.5): {} (expected: 1.0)",
                  quantape_test::num(val));
     assert(std::abs(val - 1.0) < 1e-9);
-    QTA_LOG_INFO("quantape.test", "Bilinear interpolation tests passed!");
+    QTA_LOG_INFO("test", "Bilinear interpolation tests passed!");
 }
 
 void testBicubicInterpolation() {
-    QTA_LOG_INFO("quantape.test", "=== Bicubic Interpolation Tests ===");
+    QTA_LOG_INFO("test", "=== Bicubic Interpolation Tests ===");
     std::vector<double> x = {0, 1, 2};
     std::vector<double> y = {0, 1, 2};
     auto f = [](double x, double y) { return x * y + x + y; };
@@ -105,10 +105,10 @@ void testBicubicInterpolation() {
     quantape::math::BicubicInterpolation<double> interp(x, y, z);
     double val = interp(0.5, 0.5);
     double expected = f(0.5, 0.5);
-    QTA_LOG_INFO("quantape.test", "Value at (0.5, 0.5): {} (expected: {})", quantape_test::num(val),
+    QTA_LOG_INFO("test", "Value at (0.5, 0.5): {} (expected: {})", quantape_test::num(val),
                  quantape_test::num(expected));
     assert(std::abs(val - expected) < 1e-9);
-    QTA_LOG_INFO("quantape.test", "Bicubic interpolation tests passed!");
+    QTA_LOG_INFO("test", "Bicubic interpolation tests passed!");
 }
 
 int main() {
@@ -117,10 +117,10 @@ int main() {
         testCubicSplineInterpolation();
         testBilinearInterpolation();
         testBicubicInterpolation();
-        QTA_LOG_INFO("quantape.test", "All interpolation tests completed successfully!");
+        QTA_LOG_INFO("test", "All interpolation tests completed successfully!");
         return 0;
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.test", "Error: {}", e.what());
+        QTA_LOG_ERROR("test", "Error: {}", e.what());
         return 1;
     }
 }

@@ -62,7 +62,7 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(tol, 3));
         std::exit(1);
@@ -143,7 +143,7 @@ void testTimeGrid() {
         threw = true;
     }
     CHECK(threw);
-    QTA_LOG_INFO("quantape.test", "  [ok] TimeGrid: uniform/irregular/validation");
+    QTA_LOG_INFO("test", "  [ok] TimeGrid: uniform/irregular/validation");
 }
 
 void testSourceContract() {
@@ -186,7 +186,7 @@ void testSourceContract() {
     const double var = sumSq / static_cast<double>(n) - mean * mean;
     checkClose("keyed normal mean", mean, 0.0, 0.02);
     checkClose("keyed normal var", var, 1.0, 0.05);
-    QTA_LOG_INFO("quantape.test", "  [ok] RandomSource: block contract, independence, moments");
+    QTA_LOG_INFO("test", "  [ok] RandomSource: block contract, independence, moments");
 }
 
 void testOuMoments() {
@@ -253,7 +253,7 @@ void testOuMoments() {
     const double varIrr = sumSq / nPaths - meanIrr * meanIrr;
     checkClose("OU irregular mean", meanIrr, e, 5.0 * std::sqrt(v / nPaths));
     checkClose("OU irregular var", varIrr, v, 6.0 * v * std::sqrt(2.0 / nPaths));
-    QTA_LOG_INFO("quantape.test", "  [ok] OU discrete moments: uniform + irregular grids");
+    QTA_LOG_INFO("test", "  [ok] OU discrete moments: uniform + irregular grids");
 }
 
 void testGbmPrice() {
@@ -298,7 +298,7 @@ void testGbmPrice() {
     // e^{mu T} * BS(r = mu).
     const double reference = std::exp(mu * t) * bsCall(s0, k, mu, sigma, t);
     checkClose("GBM undiscounted call", call, reference, 0.01 * reference);
-    QTA_LOG_INFO("quantape.test", "  [ok] GBM: Euler mean exact, E[call] = {} vs analytic {}",
+    QTA_LOG_INFO("test", "  [ok] GBM: Euler mean exact, E[call] = {} vs analytic {}",
                  quantape_test::num(call, 4), quantape_test::num(reference, 4));
 }
 
@@ -338,7 +338,7 @@ void testCirMean() {
     checkClose("CIR mean", mean, e, 5.0 * std::sqrt(v / nPaths));
     checkClose("CIR var (approx)", var, v, 0.1 * v);
     CHECK(negatives * 10 < nPaths); // Euler may dip negative rarely; not the norm
-    QTA_LOG_INFO("quantape.test", "  [ok] CIR: mean exact recursion, var close, negatives={}",
+    QTA_LOG_INFO("test", "  [ok] CIR: mean exact recursion, var close, negatives={}",
                  negatives);
 }
 
@@ -370,7 +370,7 @@ void testReproducibility() {
         }
     }
     CHECK(maxDiff == 0.0);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] reproducibility: simulatePath == block path, block-size invariant");
 }
 
@@ -413,7 +413,7 @@ void testEstimator() {
     const auto call = quantape::mc::estimate(blocks, TerminalCall{k});
     const double reference = bsCall(s0, k, 0.0, sigma, t); // drift 0 => undiscounted
     CHECK(std::fabs(call.mean - reference) <= 5.0 * call.stdError + 0.01 * reference);
-    QTA_LOG_INFO("quantape.test", "  [ok] estimator: call = {} +/- {} vs BS {}",
+    QTA_LOG_INFO("test", "  [ok] estimator: call = {} +/- {} vs BS {}",
                  quantape_test::num(call.mean, 4), quantape_test::num(call.stdError, 4),
                  quantape_test::num(reference, 4));
 }
@@ -476,7 +476,7 @@ void testParallelSchedule() {
         quantape::mc::Schedule::Parallel);
     CHECK(seqLast == parLast);
 
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] parallel schedule: bitwise block equality, estimator order-stable");
 }
 
@@ -489,6 +489,6 @@ int main() {
     testReproducibility();
     testEstimator();
     testParallelSchedule();
-    QTA_LOG_INFO("quantape.test", "ALL SDE SIMULATOR TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SDE SIMULATOR TESTS PASSED");
     return 0;
 }

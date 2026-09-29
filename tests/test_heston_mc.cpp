@@ -70,7 +70,7 @@ bool bitwiseEqual(double a, double b) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
         std::exit(1);
@@ -138,7 +138,7 @@ void testThetaEquivalence() {
         diffs += bitwiseEqual(euEmpty(i), euFilled(i)) ? 0 : 1;
     }
     checkClose("theta equivalence (QE + Euler)", static_cast<double>(diffs), 0.0, 0.0);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] theta-driven paths bitwise equal to member-driven (QE + Euler)");
 }
 
@@ -146,7 +146,7 @@ void testThetaEquivalence() {
 
 void testQmcPricesVsAnalytic() {
     if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        QTA_LOG_WARN("quantape.test", "  [skip] no compile-time Sobol table configured");
+        QTA_LOG_WARN("test", "  [skip] no compile-time Sobol table configured");
         return;
     }
     const auto generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
@@ -195,7 +195,7 @@ void testQmcPricesVsAnalytic() {
     }
     // QMC noise + the documented QE scheme discretization bias.
     checkClose("catalog QE vs analytic", worst, 0.0, 5e-3);
-    QTA_LOG_INFO("quantape.test", "  [ok] catalog QE+Sobol vs analytic (worst |err| {})",
+    QTA_LOG_INFO("test", "  [ok] catalog QE+Sobol vs analytic (worst |err| {})",
                  quantape_test::num(worst, 2));
 }
 
@@ -244,7 +244,7 @@ void testPathwiseGradientsVsAnalytic() {
     const quantape::models::HestonMarket market{1.0, strike, 0.0, 0.0, 1.0};
     const double exactPrice = model.call(params, market);
 
-    QTA_LOG_INFO("quantape.test", "  pathwise QE value {} vs analytic {} (err {}, mc se {})",
+    QTA_LOG_INFO("test", "  pathwise QE value {} vs analytic {} (err {}, mc se {})",
                  quantape_test::num(ad.value, 6), quantape_test::num(exactPrice, 6),
                  quantape_test::num(ad.value - exactPrice, 2),
                  quantape_test::num(ad.valueStdError, 2));
@@ -257,11 +257,11 @@ void testPathwiseGradientsVsAnalytic() {
         worstRel = std::max(worstRel, std::fabs(ad.gradient(i) - exact(i)) /
                                           std::max(1e-12, std::fabs(exact(i))));
         checkClose(names[i], ad.gradient(i), exact(i), tol);
-        QTA_LOG_INFO("quantape.test", "    d/d {} pathwise {}  analytic {}  err {}", names[i],
+        QTA_LOG_INFO("test", "    d/d {} pathwise {}  analytic {}  err {}", names[i],
                      quantape_test::num(ad.gradient(i), 6), quantape_test::num(exact(i), 6),
                      quantape_test::num(ad.gradient(i) - exact(i), 2));
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] pathwise QE gradients vs analytic (worst rel {})",
+    QTA_LOG_INFO("test", "  [ok] pathwise QE gradients vs analytic (worst rel {})",
                  quantape_test::num(worstRel, 2));
 
     // Engine central-FD cross-check on the same discretization (tight).
@@ -296,7 +296,7 @@ void testPathwiseGradientsVsAnalytic() {
         const double fd = (engineValue(tp, xp) - engineValue(tm, xm)) / (2.0 * h);
         checkClose(names[j], ad.gradient(j), fd, 1e-4 * std::max(1.0, std::fabs(fd)));
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] pathwise AD == engine central FD (7 sensitivities)");
+    QTA_LOG_INFO("test", "  [ok] pathwise AD == engine central FD (7 sensitivities)");
 }
 
 // ── 4. flagship: SDE simulation -> calibration -> IFT market risk ──
@@ -325,7 +325,7 @@ void testFlagshipSdeToIft() {
     const double productStrike = 1.0;
     const HestonCallPayoff payoff{productStrike};
     if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        QTA_LOG_WARN("quantape.test",
+        QTA_LOG_WARN("test",
                      "  [skip] flagship chain: no compile-time Sobol table configured");
         return;
     }
@@ -396,7 +396,7 @@ void testFlagshipSdeToIft() {
                 stepLine += " " + std::string(names[i]) + " err " +
                             quantape_test::num(block(i) - gex(0, idx[i]), 2);
             }
-            QTA_LOG_INFO("quantape.test", "{}", stepLine);
+            QTA_LOG_INFO("test", "{}", stepLine);
             if (steps == 64) {
                 g64 = block;
             } else if (steps == 128) {
@@ -408,7 +408,7 @@ void testFlagshipSdeToIft() {
         for (int i = 0; i < 5; ++i) {
             ge(i) = gex(0, idx[i]);
         }
-        QTA_LOG_INFO("quantape.test", "    Richardson(64,128) err: {} (max)",
+        QTA_LOG_INFO("test", "    Richardson(64,128) err: {} (max)",
                      quantape_test::num((gExtrap - ge).cwiseAbs().maxCoeff(), 2));
     }
     // -------------------------------------------------------------------
@@ -436,12 +436,12 @@ void testFlagshipSdeToIft() {
     }
     const double worstRatio =
         ((mcRisk - analyticRisk).array().abs() / (0.02 + 4.0 * sigma.array())).maxCoeff();
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  flagship: MC dV/db through db/da ({}x{}); worst |diff|/(2% + 4 sigma) = {}",
                  static_cast<long>(ift.dbda.rows()), static_cast<long>(ift.dbda.cols()),
                  quantape_test::num(worstRatio, 2));
     checkClose("flagship MC+IFT risk vs analytic", worstRatio, 0.0, 1.0);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] SDE -> calibration IFT -> market risk chain (worst ratio {})",
                  quantape_test::num(worstRatio, 2));
 }
@@ -505,7 +505,7 @@ void testQeStepConvergence() {
     };
     const double bias64 = priceAt(process, x0, theta, 2.0, 64, 1.0, 999) - exact;
     const double bias256 = priceAt(process, x0, theta, 2.0, 256, 1.0, 999) - exact;
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  extreme corner (sigma=0.75, T=2): bias 64 steps {}, 256 steps {}",
                  quantape_test::num(bias64, 2), quantape_test::num(bias256, 2));
     CHECK(bias64 < 0.0 && bias256 < 0.0);
@@ -519,10 +519,10 @@ void testQeStepConvergence() {
     const Eigen::VectorXd y0 = (Eigen::Vector2d() << 0.0, moderate.v0).finished();
     const double biasModerate =
         priceAt(procM, y0, thetaOf(procM), 1.0, 64, 1.0, 555) - model.call(moderate, market1);
-    QTA_LOG_INFO("quantape.test", "  moderate (sigma=0.30, T=1): bias at 64 steps {}",
+    QTA_LOG_INFO("test", "  moderate (sigma=0.30, T=1): bias at 64 steps {}",
                  quantape_test::num(biasModerate, 2));
     CHECK(std::fabs(biasModerate) < 2e-3);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] QE step convergence (first order; large constant only in the "
                  "extreme Feller-violating corner)");
 }
@@ -530,12 +530,12 @@ void testQeStepConvergence() {
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "Heston MC gates (H5)");
+    QTA_LOG_INFO("test", "Heston MC gates (H5)");
     testQeStepConvergence();
     testThetaEquivalence();
     testQmcPricesVsAnalytic();
     testPathwiseGradientsVsAnalytic();
     testFlagshipSdeToIft();
-    QTA_LOG_INFO("quantape.test", "ALL HESTON MC TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL HESTON MC TESTS PASSED");
     return 0;
 }

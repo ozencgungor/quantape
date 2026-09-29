@@ -46,7 +46,7 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(tol, 3));
         std::exit(1);
@@ -94,7 +94,7 @@ void testQeSamplerMoments() {
         checkClose(c.tag, var, c.s2, 6.0 * c.s2 * std::sqrt(2.0 / static_cast<double>(n)));
         CHECK(negatives == 0);
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] qeSample: exact moments + positivity across psi regimes");
+    QTA_LOG_INFO("test", "  [ok] qeSample: exact moments + positivity across psi regimes");
 }
 
 void testUniformStreamContract() {
@@ -118,7 +118,7 @@ void testUniformStreamContract() {
         }
     }
     CHECK(allDifferent);
-    QTA_LOG_INFO("quantape.test", "  [ok] fillUniform: block contract, [0,1), disjoint streams");
+    QTA_LOG_INFO("test", "  [ok] fillUniform: block contract, [0,1), disjoint streams");
 }
 
 // ── CIR with moment matching: exact terminal moments at any resolution ──
@@ -228,7 +228,7 @@ void testCirMomentMatching() {
             }
         }
         CHECK(diff == 0.0);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] CIR QE nSteps={}: mean={} var={} (exact {} / {}), neg=0", nSteps,
                      quantape_test::num(mean, 6), quantape_test::num(var, 3),
                      quantape_test::num(exactMean, 6), quantape_test::num(exactVar, 3));
@@ -241,6 +241,6 @@ int main() {
     testQeSamplerMoments();
     testUniformStreamContract();
     testCirMomentMatching();
-    QTA_LOG_INFO("quantape.test", "ALL SDE MOMENT-MATCHING TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SDE MOMENT-MATCHING TESTS PASSED");
     return 0;
 }

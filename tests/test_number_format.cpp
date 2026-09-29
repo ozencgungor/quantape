@@ -66,6 +66,6 @@ int main() {
     const auto fits = quantape::format::to_chars(tiny, tiny + sizeof(tiny), 1.0);
     CHECK(fits.ec == std::errc{});
 
-    QTA_LOG_INFO("quantape.test", "test_number_format: ok");
+    QTA_LOG_INFO("test", "test_number_format: ok");
     return 0;
 }

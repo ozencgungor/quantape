@@ -37,11 +37,11 @@ int failures = 0;
 void check(const char* label, double got, double expected, double tol) {
     const bool ok = std::fabs(got - expected) <= tol;
     if (ok) {
-        QTA_LOG_INFO("quantape.test", "  {} ok  got={} expected={} err={}", label,
+        QTA_LOG_INFO("test", "  {} ok  got={} expected={} err={}", label,
                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
                      quantape_test::num(std::fabs(got - expected), 3));
     } else {
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL  got={} expected={} err={}", label,
+        QTA_LOG_ERROR("test", "  {} FAIL  got={} expected={} err={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(std::fabs(got - expected), 3));
     }
@@ -213,7 +213,7 @@ void checkComposite() {
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "=== var: implicit-function-theorem gradients ===");
+    QTA_LOG_INFO("test", "=== var: implicit-function-theorem gradients ===");
     checkVarGradient<quantape::math::BisectionSolver<var>>("bisection", 1e-12);
     checkVarGradient<quantape::math::BrentSolver<var>>("brent", 1e-12);
     checkVarGradient<quantape::math::SecantSolver<var>>("secant", 1e-12);
@@ -225,7 +225,7 @@ int main() {
     checkNewtonWithDerivative();
     checkComposite();
 
-    QTA_LOG_INFO("quantape.test", "=== fvar<...>: pathwise value/gradient/Hessian ===");
+    QTA_LOG_INFO("test", "=== fvar<...>: pathwise value/gradient/Hessian ===");
     checkHessian<quantape::math::BrentSolver>("brent", 1e-8);
     checkHessian<quantape::math::SecantSolver>("secant", 1e-8);
     checkHessian<quantape::math::FalsePositionSolver>("falsepos", 1e-8);
@@ -235,9 +235,9 @@ int main() {
     stan::math::recover_memory();
 
     if (failures == 0) {
-        QTA_LOG_INFO("quantape.test", "All solver AD tests passed.");
+        QTA_LOG_INFO("test", "All solver AD tests passed.");
         return 0;
     }
-    QTA_LOG_ERROR("quantape.test", "{} solver AD test(s) FAILED.", failures);
+    QTA_LOG_ERROR("test", "{} solver AD test(s) FAILED.", failures);
     return 1;
 }

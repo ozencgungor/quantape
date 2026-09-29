@@ -71,7 +71,7 @@ bool bitwiseEqual(double a, double b) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(tol, 3));
         std::exit(1);
@@ -83,7 +83,7 @@ void checkClose(const Eigen::VectorXd& got, const Eigen::VectorXd& expected, dou
     CHECK(got.size() == expected.size());
     for (Eigen::Index i = 0; i < got.size(); ++i) {
         if (!(std::fabs(got(i) - expected(i)) <= tol)) {
-            QTA_LOG_ERROR("quantape.test", "FAIL: {} [{}] got={} expected={} tol={}", label,
+            QTA_LOG_ERROR("test", "FAIL: {} [{}] got={} expected={} tol={}", label,
                           static_cast<long long>(i), quantape_test::num(got(i), 12),
                           quantape_test::num(expected(i), 12), quantape_test::num(tol, 3));
             std::exit(1);
@@ -265,7 +265,7 @@ void testSmoothIndicators() {
     const double x = 0.3 * eps;
     checkClose("indicator derivative inside", smoothIndicatorDerivative(x, eps), 1.0 / eps, 0.0);
     checkClose("indicator derivative outside", smoothIndicatorDerivative(0.8 * eps, eps), 0.0, 0.0);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] smoothed indicator: ramp/clamp identities, branchless derivative");
 }
 
@@ -315,7 +315,7 @@ void testFdConsistency() {
         const double ad = estimate.gradient(j);
         const double tol = 1e-6 * std::max(1.0, std::fabs(ad));
         checkClose("fd consistency", ad, fd, tol);
-        QTA_LOG_INFO("quantape.test", "  [ok] fd param {}: ad={} fd={}", j,
+        QTA_LOG_INFO("test", "  [ok] fd param {}: ad={} fd={}", j,
                      quantape_test::num(ad, 12), quantape_test::num(fd, 12));
     }
 
@@ -356,7 +356,7 @@ void testFdConsistency() {
         checkClose("fd checkpointed", checkpoint.gradient(j), fdCheckpoint,
                    1e-6 * std::max(1.0, std::fabs(checkpoint.gradient(j))));
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] fd gates: smoothed digital + checkpointed mode");
+    QTA_LOG_INFO("test", "  [ok] fd gates: smoothed digital + checkpointed mode");
 }
 
 // ── Gate 2: GBM greeks vs Black-Scholes (Milstein), Euler dt bias ──
@@ -381,7 +381,7 @@ void testGbmBlackScholes() {
         const GradientEstimate estimate =
             simulateGradient(simulator, x0, theta, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
                              source, payoff, nPaths, Schedule::Parallel);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  milstein: d={} (bs {}, se {}) v={} (bs {}, se {}) r={} (bs {}, se {})",
                      quantape_test::num(estimate.gradient(0), 6), quantape_test::num(delta, 6),
                      quantape_test::num(estimate.stdErrors(0), 2),
@@ -413,7 +413,7 @@ void testGbmBlackScholes() {
             simulateGradient(simulator, x0, theta, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
                              source, payoff, nPaths, Schedule::Parallel);
         const double vegaError = estimate.gradient(2) - vega;
-        QTA_LOG_INFO("quantape.test", "  euler {} steps: vega err={} (se {}) [reported]", steps[i],
+        QTA_LOG_INFO("test", "  euler {} steps: vega err={} (se {}) [reported]", steps[i],
                      quantape_test::num(vegaError, 6),
                      quantape_test::num(estimate.stdErrors(2), 2));
         checkClose("euler vega sanity", estimate.gradient(2), vega,
@@ -454,7 +454,7 @@ void testOuExactGradient() {
                               std::pow(a, static_cast<double>(nSteps) - 1.0) * (-dt);
     const double exactMean = level + (xInit - level) * an;
 
-    QTA_LOG_INFO("quantape.test", "  ou: dx0={} ({}) dk={} ({} se {}) dlevel={} ({})",
+    QTA_LOG_INFO("test", "  ou: dx0={} ({}) dk={} ({} se {}) dlevel={} ({})",
                  quantape_test::num(estimate.gradient(0), 12), quantape_test::num(exactX0, 12),
                  quantape_test::num(estimate.gradient(1), 6), quantape_test::num(exactKappa, 6),
                  quantape_test::num(estimate.stdErrors(1), 2),
@@ -499,7 +499,7 @@ void testCirQeGradient() {
     const double exactLevel = 1.0 - decay;
     const double exactKappa = (level - v0) * tMax * decay;
 
-    QTA_LOG_INFO("quantape.test", "  cir qe: dx0={} ({}) dk={} ({}) dlevel={} ({})",
+    QTA_LOG_INFO("test", "  cir qe: dx0={} ({}) dk={} ({}) dlevel={} ({})",
                  quantape_test::num(estimate.gradient(0), 6), quantape_test::num(exactX0, 6),
                  quantape_test::num(estimate.gradient(1), 6), quantape_test::num(exactKappa, 6),
                  quantape_test::num(estimate.gradient(2), 6), quantape_test::num(exactLevel, 6));
@@ -542,7 +542,7 @@ void testCheckpointedGradient() {
                    0.001 * std::fabs(exactKappa) + 5.0 * estimate.stdErrors(1));
         checkClose("cp ou dlevel", estimate.gradient(2), 1.0 - an, 1e-10);
         checkClose("cp ou dsigma", estimate.gradient(3), 0.0, 5.0 * estimate.stdErrors(3) + 1e-12);
-        QTA_LOG_INFO("quantape.test", "  [ok] checkpointed OU exact derivatives");
+        QTA_LOG_INFO("test", "  [ok] checkpointed OU exact derivatives");
     }
 
     // 2. Full-tape vs checkpointed equivalence (same paths), parity,
@@ -584,7 +584,7 @@ void testCheckpointedGradient() {
         const double reference =
             doubleValue(GbmModel{}, payoff, grid, thetaSteps, x0, theta, nPaths, 2468);
         CHECK(bitwiseEqual(checkpointed.value, reference));
-        QTA_LOG_INFO("quantape.test", "  [ok] checkpointed: 1024-step parity bitwise, "
+        QTA_LOG_INFO("test", "  [ok] checkpointed: 1024-step parity bitwise, "
                                       "full-vs-glued within 1e-8, schedules bitwise");
     }
 }
@@ -623,7 +623,7 @@ void testParityAndDeterminism() {
     // the AD instantiation is a scalar operator-overloaded loop, so primal
     // parity is tight-relative, not bitwise (schedules *are* bitwise).
     const double parityDiff = std::fabs(seq.value - reference);
-    QTA_LOG_INFO("quantape.test", "  parity: value={}, |ad-double|={} (rel {}), schedules bitwise",
+    QTA_LOG_INFO("test", "  parity: value={}, |ad-double|={} (rel {}), schedules bitwise",
                  quantape_test::num(seq.value, 12), quantape_test::num(parityDiff, 3),
                  quantape_test::num(parityDiff / std::max(1.0, std::fabs(reference)), 3));
     CHECK(parityDiff <= 1e-12 * std::max(1.0, std::fabs(reference)));
@@ -657,7 +657,7 @@ void testForwardMode() {
             checkClose("fwd vs rev", fwd.gradient(j), rev.gradient(j),
                        1e-8 * std::max(1.0, std::fabs(rev.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: GBM Euler == reverse (same paths)");
+        QTA_LOG_INFO("test", "  [ok] forward: GBM Euler == reverse (same paths)");
     }
 
     // 2. Milstein BS greeks via forward mode (N = 3)
@@ -684,7 +684,7 @@ void testForwardMode() {
                    0.015 * std::fabs(vega) + 5.0 * fwd.stdErrors(2));
         checkClose("fwd milstein rho", fwd.gradient(1), rho,
                    0.015 * std::fabs(rho) + 5.0 * fwd.stdErrors(1));
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: Milstein BS greeks (d={} v={} r={})",
+        QTA_LOG_INFO("test", "  [ok] forward: Milstein BS greeks (d={} v={} r={})",
                      quantape_test::num(fwd.gradient(0), 4), quantape_test::num(fwd.gradient(2), 4),
                      quantape_test::num(fwd.gradient(1), 4));
     }
@@ -716,7 +716,7 @@ void testForwardMode() {
         checkClose("fwd cir dlevel", fwd.gradient(2), exactLevel, 1e-3 + 5.0 * fwd.stdErrors(2));
         checkClose("fwd cir dkappa", fwd.gradient(1), exactKappa,
                    1e-3 * std::fabs(exactKappa) + 5.0 * fwd.stdErrors(1));
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: CIR QE moment derivatives");
+        QTA_LOG_INFO("test", "  [ok] forward: CIR QE moment derivatives");
     }
 
     // 4. Smoothed digital FD gate via forward mode
@@ -755,7 +755,7 @@ void testForwardMode() {
             checkClose("fwd smoothed digital", fwd.gradient(j), fd,
                        1e-6 * std::max(1.0, std::fabs(fwd.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: smoothed digital vs FD");
+        QTA_LOG_INFO("test", "  [ok] forward: smoothed digital vs FD");
     }
 
     // 5. State derivatives: forward one-pass == fvar-sweep version, all steps
@@ -787,7 +787,7 @@ void testForwardMode() {
             maxDiff = std::max(maxDiff, (fwdBlocks[k] - sweep.dX[k]).cwiseAbs().maxCoeff());
         }
         checkClose("forward derivatives == sweeps", maxDiff, 0.0, 1e-10);
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: state derivatives one-pass == fvar sweeps");
+        QTA_LOG_INFO("test", "  [ok] forward: state derivatives one-pass == fvar sweeps");
     }
 
     // 5b. Blocked forward == per-path forward (bitwise; partial last block)
@@ -819,7 +819,7 @@ void testForwardMode() {
             TerminalCallBatchPayoff{100.0}, 0, nPaths, 64, Schedule::Parallel);
         CHECK(blockPar.values == block.values);
         CHECK((blockPar.gradients.array() == block.gradients.array()).all());
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: blocked == per-path == parallel (bitwise)");
+        QTA_LOG_INFO("test", "  [ok] forward: blocked == per-path == parallel (bitwise)");
     }
 
     // 6. Forward samples: parallel == sequential bitwise
@@ -843,7 +843,7 @@ void testForwardMode() {
             nPaths, Schedule::Parallel);
         CHECK(seq.values == par.values);
         CHECK((seq.gradients.array() == par.gradients.array()).all());
-        QTA_LOG_INFO("quantape.test", "  [ok] forward: schedules bitwise");
+        QTA_LOG_INFO("test", "  [ok] forward: schedules bitwise");
     }
 }
 
@@ -912,7 +912,7 @@ void testStanForwardMode() {
                        1e-8 * std::max(1.0, std::fabs(r.gradient(j))));
         }
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] stan fvar forward: == Stan reverse (Euler/Milstein/QE)");
+    QTA_LOG_INFO("test", "  [ok] stan fvar forward: == Stan reverse (Euler/Milstein/QE)");
 }
 
 // ── Lean reverse tape: equivalence, determinism, tape size ──
@@ -943,7 +943,7 @@ void testLeanTapeScalar() {
     tape.reverse(h.node);
     checkClose("lean scalar log/div", tape.adjoint(p.node), 1.0 / 0.7 - 2.0 * 0.7, 1e-14);
     checkClose("lean scalar log/div q", tape.adjoint(q.node), -1.0 / 1.3, 1e-14);
-    QTA_LOG_INFO("quantape.test", "  [ok] lean tape: scalar rules exact");
+    QTA_LOG_INFO("test", "  [ok] lean tape: scalar rules exact");
 }
 
 void testLeanReverse() {
@@ -989,7 +989,7 @@ void testLeanReverse() {
             checkClose("lean vs forward", lean.gradient(j), fwd.gradient(j),
                        1e-10 * std::max(1.0, std::fabs(fwd.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] lean reverse: GBM Euler == forward");
+        QTA_LOG_INFO("test", "  [ok] lean reverse: GBM Euler == forward");
     }
 
     // 2. Milstein (lean tape under fvar) and CIR QE
@@ -1018,7 +1018,7 @@ void testLeanReverse() {
             checkClose("lean milstein vs forward", lean.gradient(j), fwd.gradient(j),
                        1e-8 * std::max(1.0, std::fabs(fwd.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] lean reverse: Milstein == forward");
+        QTA_LOG_INFO("test", "  [ok] lean reverse: Milstein == forward");
     }
     {
         const double kappa = 2.0, level = 0.04, sigma = 0.2, v0 = 0.04;
@@ -1043,7 +1043,7 @@ void testLeanReverse() {
             checkClose("lean cir qe vs forward", lean.gradient(j), fwd.gradient(j),
                        1e-8 * std::max(1.0, std::fabs(fwd.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] lean reverse: CIR QE == forward");
+        QTA_LOG_INFO("test", "  [ok] lean reverse: CIR QE == forward");
     }
 
     // 3. Smoothed digital FD gate + schedule determinism + tape size
@@ -1099,7 +1099,7 @@ void testLeanReverse() {
         const std::size_t nodesMilstein = quantape::mc::leanPathTapeNodes(
             SdeSimulator<double, Milstein>(grid, thetaSteps), x0, theta, driftOf(GbmModel{}),
             diffusionOf(GbmModel{}), src, payoff, 0);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] lean reverse: smoothed digital, schedules bitwise; "
                      "tape nodes/path 32 steps: euler={} milstein={}",
                      nodesEuler, nodesMilstein);
@@ -1152,7 +1152,7 @@ void testStateDerivatives() {
                            1e-6 * std::max(1.0, std::fabs(tangent)) + 1e-10);
             }
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] state derivatives: GBM/Euler all steps vs FD");
+        QTA_LOG_INFO("test", "  [ok] state derivatives: GBM/Euler all steps vs FD");
     }
 
     // Milstein and CIR-QE (branchy scheme) coverage
@@ -1214,7 +1214,7 @@ void testStateDerivatives() {
                            1e-5 * std::max(1.0, std::fabs(fd)) + 1e-9);
             }
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] state derivatives: Milstein + CIR QE vs FD");
+        QTA_LOG_INFO("test", "  [ok] state derivatives: Milstein + CIR QE vs FD");
     }
 
     // Chain-rule handoff: dE[pi]/dtheta = E[(dpi/dx_N) * Y_N]
@@ -1252,7 +1252,7 @@ void testStateDerivatives() {
             checkClose("chain-rule handoff", lhs[j], gradient.gradient(j),
                        1e-8 * std::max(1.0, std::fabs(gradient.gradient(j))));
         }
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] state derivatives: chain-rule handoff == simulateGradient");
     }
 }
@@ -1302,14 +1302,14 @@ void testSharding() {
     CHECK(bitwiseEqual(estMerged.valueStdError, estFull.valueStdError));
     CHECK((estMerged.gradient.array() == estFull.gradient.array()).all());
     CHECK((estMerged.stdErrors.array() == estFull.stdErrors.array()).all());
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] multiprocessing shards: merged reduction bitwise == single run");
 }
 
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "SDE gradient tests (S5a)");
+    QTA_LOG_INFO("test", "SDE gradient tests (S5a)");
     testSmoothIndicators();
     testFdConsistency();
     testGbmBlackScholes();
@@ -1323,6 +1323,6 @@ int main() {
     testStanForwardMode();
     testLeanTapeScalar();
     testLeanReverse();
-    QTA_LOG_INFO("quantape.test", "ALL SDE GRADIENT TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SDE GRADIENT TESTS PASSED");
     return 0;
 }

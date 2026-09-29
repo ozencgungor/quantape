@@ -526,7 +526,7 @@ double bench_us(F&& fn, int N) {
 }
 
 int main() {
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "╔═══════════════════════════════════════════════════════════════╗\n"
                  "║  Pricer Hierarchy: Mixed 1st/2nd Order AD                    ║\n"
                  "╚═══════════════════════════════════════════════════════════════╝\n");
@@ -549,11 +549,11 @@ int main() {
     std::vector<PricerHandle*> pricers = {&h_vanilla, &h_exotic, &h_digital};
 
     for (auto* pricer : pricers) {
-        QTA_LOG_INFO("quantape.test", "── {} ──\n", pricer->name);
+        QTA_LOG_INFO("test", "── {} ──\n", pricer->name);
 
         // First order
         auto fo = tp.computeGreeks(*pricer, market_data, n_rates, n_vols);
-        QTA_LOG_INFO("quantape.test", "  PV = {}", quantape_test::num(fo.pv, 6));
+        QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fo.pv, 6));
 
         std::string greeks;
         for (int i = 0; i < fo.greeks.size(); ++i) {
@@ -561,86 +561,86 @@ int main() {
                 greeks += ", ";
             greeks += quantape_test::num(fo.greeks(i), 6);
         }
-        QTA_LOG_INFO("quantape.test", "  Greeks: [{}]", greeks);
+        QTA_LOG_INFO("test", "  Greeks: [{}]", greeks);
 
         // Second order
         auto so = tp.computeHessian(*pricer, market_data, n_rates, n_vols);
-        QTA_LOG_INFO("quantape.test", "  Hessian:");
+        QTA_LOG_INFO("test", "  Hessian:");
         for (int i = 0; i < so.hessian.rows(); ++i) {
             std::string row = "    [";
             for (int j = 0; j < so.hessian.cols(); ++j)
                 row += ' ' + quantape_test::num(so.hessian(i, j), 4);
             row += " ]";
-            QTA_LOG_INFO("quantape.test", "{}", row);
+            QTA_LOG_INFO("test", "{}", row);
         }
 
         // Verify gradient consistency
         double max_grad_diff = (fo.greeks - so.greeks).cwiseAbs().maxCoeff();
-        QTA_LOG_INFO("quantape.test", "  Max |gradient_1st - gradient_2nd|: {}",
+        QTA_LOG_INFO("test", "  Max |gradient_1st - gradient_2nd|: {}",
                      quantape_test::num(max_grad_diff, 2));
 
         // Verify Hessian symmetry
         double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
-        QTA_LOG_INFO("quantape.test", "  Hessian symmetry check: {}\n",
+        QTA_LOG_INFO("test", "  Hessian symmetry check: {}\n",
                      quantape_test::num(max_sym, 2));
     }
 
     // ── Timing comparison ──
-    QTA_LOG_INFO("quantape.test", "── Performance ──\n");
+    QTA_LOG_INFO("test", "── Performance ──\n");
     constexpr int N = 50'000;
 
-    QTA_LOG_INFO("quantape.test", "  {:<35}{:>12}{:>12}{:>10}", "Pricer", "1st order", "2nd order",
+    QTA_LOG_INFO("test", "  {:<35}{:>12}{:>12}{:>10}", "Pricer", "1st order", "2nd order",
                  "ratio");
-    QTA_LOG_INFO("quantape.test", "  {}", std::string(69, '-'));
+    QTA_LOG_INFO("test", "  {}", std::string(69, '-'));
 
     for (auto* pricer : pricers) {
         auto t1 = bench_us([&]() { tp.computeGreeks(*pricer, market_data, n_rates, n_vols); }, N);
 
         auto t2 = bench_us([&]() { tp.computeHessian(*pricer, market_data, n_rates, n_vols); }, N);
 
-        QTA_LOG_INFO("quantape.test", "  {:<35}{:>10} us{:>10} us{:>8}x", pricer->name,
+        QTA_LOG_INFO("test", "  {:<35}{:>10} us{:>10} us{:>8}x", pricer->name,
                      quantape_test::num(t1, 3), quantape_test::num(t2, 3),
                      quantape_test::num(t2 / t1, 1));
     }
 
     // ── Sparse Hessian demo ──
-    QTA_LOG_INFO("quantape.test", "\n── Sparse Hessian (only rate columns) ──\n");
+    QTA_LOG_INFO("test", "\n── Sparse Hessian (only rate columns) ──\n");
     std::vector<int> rate_indices = {0, 1}; // only differentiate w.r.t. rates
     auto sparse = tp.computeHessianSparse(h_vanilla, market_data, n_rates, n_vols, rate_indices);
-    QTA_LOG_INFO("quantape.test", "  Hessian (only rate columns computed):");
+    QTA_LOG_INFO("test", "  Hessian (only rate columns computed):");
     for (int i = 0; i < sparse.hessian.rows(); ++i) {
         std::string row = "    [";
         for (int j = 0; j < sparse.hessian.cols(); ++j)
             row += ' ' + quantape_test::num(sparse.hessian(i, j), 4);
         row += " ]";
-        QTA_LOG_INFO("quantape.test", "{}", row);
+        QTA_LOG_INFO("test", "{}", row);
     }
     QTA_LOG_INFO(
-        "quantape.test", "  (Saves {}% of Hessian columns)",
+        "test", "  (Saves {}% of Hessian columns)",
         quantape_test::num((1 - (double)rate_indices.size() / market_data.size()) * 100, 4));
 
     // ── Architecture diagram ──
-    QTA_LOG_INFO("quantape.test", "\n── Architecture ──\n");
-    QTA_LOG_INFO("quantape.test", "  TradePricer.computeHessian():");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "\n── Architecture ──\n");
+    QTA_LOG_INFO("test", "  TradePricer.computeHessian():");
+    QTA_LOG_INFO("test",
                  "    for j = 0..n-1:                      ← one column per market data point");
-    QTA_LOG_INFO("quantape.test", "      nested_rev_autodiff scope");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "      nested_rev_autodiff scope");
+    QTA_LOG_INFO("test",
                  "      md[i] = fvar<var>(var(θ_i), i==j)  ← tangent direction e_j");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "      fvar<var> pv = pricer.price(md)     ← pricer uses best overload");
-    QTA_LOG_INFO("quantape.test", "      grad(pv.d_)                         ← reverse on tangent");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "      grad(pv.d_)                         ← reverse on tangent");
+    QTA_LOG_INFO("test",
                  "      H[:,j] = md[i].val_.adj()           ← read Hessian column\n");
-    QTA_LOG_INFO("quantape.test", "  Pricer overloads (each independent, composable):");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "  Pricer overloads (each independent, composable):");
+    QTA_LOG_INFO("test",
                  "    Level 0: template just works with fvar<var>     (no code change)");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "    Level 1: gradient as var → AD handles Hessian   (moderate speed)");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "    Level 2: nested make_callback_var               (maximum speed)");
 
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "\n═══════════════════════════════════════════════════════════════");
     return 0;
 }

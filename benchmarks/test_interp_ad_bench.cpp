@@ -828,7 +828,7 @@ int main() {
         std::cout << "  All benchmarks complete.\n";
         std::cout << std::string(65, '=') << "\n";
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.bench", "ERROR: {}", e.what());
+        QTA_LOG_ERROR("bench", "ERROR: {}", e.what());
         return 1;
     }
 

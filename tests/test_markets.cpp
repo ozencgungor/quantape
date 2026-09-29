@@ -17,7 +17,7 @@
 using namespace quantape::markets;
 
 void testIRCurve() {
-    QTA_LOG_INFO("quantape.test", "=== IR Curve Test ===");
+    QTA_LOG_INFO("test", "=== IR Curve Test ===");
 
     // Create IR curve
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0, 10.0};
@@ -25,24 +25,24 @@ void testIRCurve() {
     IRCurveDescriptor desc("USD", "OIS", "2024-01-01");
     IRCurve<double> curve(tenors, rates, desc);
 
-    QTA_LOG_INFO("quantape.test", "Curve: {}", desc.identifier());
+    QTA_LOG_INFO("test", "Curve: {}", desc.identifier());
 
     // Test discount factors
-    QTA_LOG_INFO("quantape.test", "Discount Factors:");
+    QTA_LOG_INFO("test", "Discount Factors:");
     for (double t : {0.5, 1.0, 2.5, 5.0, 10.0}) {
         double df = curve.discountFactor(t);
         double r = curve.zeroRate(t);
-        QTA_LOG_INFO("quantape.test", "  t={}: DF={}, r={}", quantape_test::num(t),
+        QTA_LOG_INFO("test", "  t={}: DF={}, r={}", quantape_test::num(t),
                      quantape_test::num(df), quantape_test::num(r));
     }
 
     // Test forward rate
     double fwd = curve.forwardRate(1.0, 2.0);
-    QTA_LOG_INFO("quantape.test", "Forward rate (1y1y): {}", quantape_test::num(fwd));
+    QTA_LOG_INFO("test", "Forward rate (1y1y): {}", quantape_test::num(fwd));
 }
 
 void testYieldCurve() {
-    QTA_LOG_INFO("quantape.test", "=== Yield Curve Test ===");
+    QTA_LOG_INFO("test", "=== Yield Curve Test ===");
 
     // Create dividend yield curve
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0};
@@ -50,19 +50,19 @@ void testYieldCurve() {
     YieldCurveDescriptor desc("USD", "SPX_DIV", "2024-01-01", "DIVIDEND");
     YieldCurve<double> divCurve(tenors, yields, desc);
 
-    QTA_LOG_INFO("quantape.test", "Curve: {}", desc.identifier());
+    QTA_LOG_INFO("test", "Curve: {}", desc.identifier());
 
-    QTA_LOG_INFO("quantape.test", "Dividend Yields:");
+    QTA_LOG_INFO("test", "Dividend Yields:");
     for (double t : {0.5, 1.0, 2.0, 5.0}) {
         double y = divCurve.yield(t);
         double df = divCurve.discountFactor(t);
-        QTA_LOG_INFO("quantape.test", "  t={}: yield={}, DF={}", quantape_test::num(t),
+        QTA_LOG_INFO("test", "  t={}: yield={}, DF={}", quantape_test::num(t),
                      quantape_test::num(y), quantape_test::num(df));
     }
 }
 
 void testSurvivalProbabilityCurve() {
-    QTA_LOG_INFO("quantape.test", "=== Survival Probability Curve Test ===");
+    QTA_LOG_INFO("test", "=== Survival Probability Curve Test ===");
 
     // Create credit curve
     std::vector<double> tenors = {1.0, 2.0, 5.0, 10.0};
@@ -70,20 +70,20 @@ void testSurvivalProbabilityCurve() {
     CreditDescriptor desc("AAPL", "USD", "SENIOR", "2024-01-01");
     SurvivalProbabilityCurve<double> spCurve(tenors, survProbs, desc);
 
-    QTA_LOG_INFO("quantape.test", "Credit: {}", desc.identifier());
+    QTA_LOG_INFO("test", "Credit: {}", desc.identifier());
 
-    QTA_LOG_INFO("quantape.test", "Credit Metrics:");
+    QTA_LOG_INFO("test", "Credit Metrics:");
     for (double t : {1.0, 2.0, 5.0, 10.0}) {
         double sp = spCurve.survivalProb(t);
         double pd = spCurve.defaultProb(t);
         double avgHazard = spCurve.avgHazardRate(t);
-        QTA_LOG_INFO("quantape.test", "  t={}: SP={}, PD={}, avg hazard={}", quantape_test::num(t),
+        QTA_LOG_INFO("test", "  t={}: SP={}, PD={}, avg hazard={}", quantape_test::num(t),
                      quantape_test::num(sp), quantape_test::num(pd), quantape_test::num(avgHazard));
     }
 }
 
 void testEQDData() {
-    QTA_LOG_INFO("quantape.test", "=== Equity Data Test ===");
+    QTA_LOG_INFO("test", "=== Equity Data Test ===");
 
     // Create curves
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0};
@@ -101,20 +101,20 @@ void testEQDData() {
     EQDDescriptor eqdDesc("SPX", "INDEX", "USD");
     EQDData<double> spxData(spot, divCurve, rateCurve, eqdDesc);
 
-    QTA_LOG_INFO("quantape.test", "Equity: {}", eqdDesc.identifier());
-    QTA_LOG_INFO("quantape.test", "Spot: {}", quantape_test::num(spxData.spot()));
+    QTA_LOG_INFO("test", "Equity: {}", eqdDesc.identifier());
+    QTA_LOG_INFO("test", "Spot: {}", quantape_test::num(spxData.spot()));
 
-    QTA_LOG_INFO("quantape.test", "Forward Prices:");
+    QTA_LOG_INFO("test", "Forward Prices:");
     for (double t : {0.5, 1.0, 2.0, 5.0}) {
         double fwd = spxData.forward(t);
         double df = spxData.discountFactor(t);
-        QTA_LOG_INFO("quantape.test", "  t={}: Forward={}, DF={}", quantape_test::num(t),
+        QTA_LOG_INFO("test", "  t={}: Forward={}, DF={}", quantape_test::num(t),
                      quantape_test::num(fwd), quantape_test::num(df));
     }
 }
 
 void testVolatilitySurfaces() {
-    QTA_LOG_INFO("quantape.test", "=== Volatility Surfaces Test ===");
+    QTA_LOG_INFO("test", "=== Volatility Surfaces Test ===");
 
     try {
         // Create equity vol surface
@@ -129,30 +129,30 @@ void testVolatilitySurfaces() {
             {0.22, 0.19, 0.17, 0.18, 0.20}  // 2y
         };
 
-        QTA_LOG_INFO("quantape.test", "Creating vol surface with {} expiries and {} strikes",
+        QTA_LOG_INFO("test", "Creating vol surface with {} expiries and {} strikes",
                      expiries.size(), strikes.size());
-        QTA_LOG_INFO("quantape.test", "Vol matrix size: {} x {}", vols.size(), vols[0].size());
+        QTA_LOG_INFO("test", "Vol matrix size: {} x {}", vols.size(), vols[0].size());
 
         EQDDescriptor desc("SPX", "INDEX", "USD");
         EQDVolatility<double> volSurf(expiries, strikes, vols, 4500.0, desc);
 
-        QTA_LOG_INFO("quantape.test", "EQD Vol Surface: {}", desc.identifier());
-        QTA_LOG_INFO("quantape.test", "Ref Spot: {}", quantape_test::num(volSurf.referenceSpot()));
+        QTA_LOG_INFO("test", "EQD Vol Surface: {}", desc.identifier());
+        QTA_LOG_INFO("test", "Ref Spot: {}", quantape_test::num(volSurf.referenceSpot()));
 
-        QTA_LOG_INFO("quantape.test", "Sample Volatilities:");
-        QTA_LOG_INFO("quantape.test", "  vol(0.5y, 4500) = {}",
+        QTA_LOG_INFO("test", "Sample Volatilities:");
+        QTA_LOG_INFO("test", "  vol(0.5y, 4500) = {}",
                      quantape_test::num(volSurf.vol(0.5, 4500.0)));
-        QTA_LOG_INFO("quantape.test", "  vol(1.0y, 4250) = {}",
+        QTA_LOG_INFO("test", "  vol(1.0y, 4250) = {}",
                      quantape_test::num(volSurf.vol(1.0, 4250.0)));
-        QTA_LOG_INFO("quantape.test", "  vol(1.0y, 4750) = {}",
+        QTA_LOG_INFO("test", "  vol(1.0y, 4750) = {}",
                      quantape_test::num(volSurf.vol(1.0, 4750.0)));
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.test", "Vol surface error: {}", e.what());
+        QTA_LOG_ERROR("test", "Vol surface error: {}", e.what());
     }
 }
 
 void testFXRate() {
-    QTA_LOG_INFO("quantape.test", "=== FX Rate Test ===");
+    QTA_LOG_INFO("test", "=== FX Rate Test ===");
 
     // Create FX rate with curves
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0};
@@ -169,19 +169,19 @@ void testFXRate() {
     FXDescriptor fxDesc("USD", "EUR", "2024-01-01");
     FXRate<double> fx(spot, usdCurve, eurCurve, fxDesc);
 
-    QTA_LOG_INFO("quantape.test", "FX Pair: {}", fxDesc.pair());
-    QTA_LOG_INFO("quantape.test", "Spot: {}", quantape_test::num(fx.spot()));
+    QTA_LOG_INFO("test", "FX Pair: {}", fxDesc.pair());
+    QTA_LOG_INFO("test", "Spot: {}", quantape_test::num(fx.spot()));
 
-    QTA_LOG_INFO("quantape.test", "Forward Rates (covered IRP):");
+    QTA_LOG_INFO("test", "Forward Rates (covered IRP):");
     for (double t : {0.5, 1.0, 2.0, 5.0}) {
         double fwd = fx.forward(t);
-        QTA_LOG_INFO("quantape.test", "  t={}: Forward={}", quantape_test::num(t),
+        QTA_LOG_INFO("test", "  t={}: Forward={}", quantape_test::num(t),
                      quantape_test::num(fwd));
     }
 }
 
 void testIRVolTypes() {
-    QTA_LOG_INFO("quantape.test", "=== IR Volatility Types Test ===");
+    QTA_LOG_INFO("test", "=== IR Volatility Types Test ===");
 
     // Create a swaption volatility surface
     std::vector<double> expiries = {1.0, 2.0, 5.0};
@@ -195,10 +195,10 @@ void testIRVolTypes() {
     IRVolDescriptor swaptionDesc("USD", "SWAPTION", "", "SOFR");
     SwaptionVolatility<double> swaptionSurf(expiries, tenors, swaptionVols, swaptionDesc);
 
-    QTA_LOG_INFO("quantape.test", "Swaption Vol Surface: {}", swaptionDesc.identifier());
-    QTA_LOG_INFO("quantape.test", "  Vol type: {}",
+    QTA_LOG_INFO("test", "Swaption Vol Surface: {}", swaptionDesc.identifier());
+    QTA_LOG_INFO("test", "  Vol type: {}",
                  (swaptionSurf.volType() == IRVolType::Swaption ? "Swaption" : "Cap"));
-    QTA_LOG_INFO("quantape.test", "  ATM vol (2y expiry, 5y tenor): {}",
+    QTA_LOG_INFO("test", "  ATM vol (2y expiry, 5y tenor): {}",
                  quantape_test::num(swaptionSurf.atmVol(2.0, 5.0)));
 
     // Create a cap volatility surface
@@ -214,15 +214,15 @@ void testIRVolTypes() {
     IRVolDescriptor capDesc("USD", "CAPFLOOR", "", "SOFR");
     CapVolatility<double> capSurf(capExpiries, capTenors, capVols, capDesc);
 
-    QTA_LOG_INFO("quantape.test", "Cap Vol Surface: {}", capDesc.identifier());
-    QTA_LOG_INFO("quantape.test", "  Vol type: {}",
+    QTA_LOG_INFO("test", "Cap Vol Surface: {}", capDesc.identifier());
+    QTA_LOG_INFO("test", "  Vol type: {}",
                  (capSurf.volType() == IRVolType::Cap ? "Cap" : "Swaption"));
-    QTA_LOG_INFO("quantape.test", "  ATM vol (2y expiry, 3M tenor): {}",
+    QTA_LOG_INFO("test", "  ATM vol (2y expiry, 3M tenor): {}",
                  quantape_test::num(capSurf.atmVol(2.0, 0.25)));
 }
 
 void testVolSurfaceOperations() {
-    QTA_LOG_INFO("quantape.test", "=== Volatility Surface Element-Wise Operations Test ===");
+    QTA_LOG_INFO("test", "=== Volatility Surface Element-Wise Operations Test ===");
 
     // Create a simple equity vol surface
     std::vector<double> expiries = {0.5, 1.0, 2.0};
@@ -236,34 +236,34 @@ void testVolSurfaceOperations() {
     EQDDescriptor desc("TEST", "EQUITY", "USD");
     EQDVolatility<double> volSurf(expiries, strikes, vols, 100.0, desc);
 
-    QTA_LOG_INFO("quantape.test", "Original ATM vol (1y, 100): {}",
+    QTA_LOG_INFO("test", "Original ATM vol (1y, 100): {}",
                  quantape_test::num(volSurf.vol(1.0, 100.0)));
 
     // Test 1: Scale by 1.1 (10% vol increase)
-    QTA_LOG_INFO("quantape.test", "Test 1: Scale by 1.1");
+    QTA_LOG_INFO("test", "Test 1: Scale by 1.1");
     EQDVolatility<double> volSurf1 = volSurf;
     volSurf1.scale(1.1);
-    QTA_LOG_INFO("quantape.test", "  After scaling: {}",
+    QTA_LOG_INFO("test", "  After scaling: {}",
                  quantape_test::num(volSurf1.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  Expected: {}", quantape_test::num(0.18 * 1.1));
+    QTA_LOG_INFO("test", "  Expected: {}", quantape_test::num(0.18 * 1.1));
 
     // Test 2: Shift by +0.01 (100 bp vol increase)
-    QTA_LOG_INFO("quantape.test", "Test 2: Shift by +0.01");
+    QTA_LOG_INFO("test", "Test 2: Shift by +0.01");
     EQDVolatility<double> volSurf2 = volSurf;
     volSurf2.shift(0.01);
-    QTA_LOG_INFO("quantape.test", "  After shifting: {}",
+    QTA_LOG_INFO("test", "  After shifting: {}",
                  quantape_test::num(volSurf2.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  Expected: {}", quantape_test::num(0.18 + 0.01));
+    QTA_LOG_INFO("test", "  Expected: {}", quantape_test::num(0.18 + 0.01));
 
     // Test 3: Apply function (square each vol)
-    QTA_LOG_INFO("quantape.test", "Test 3: Apply function (square root)");
+    QTA_LOG_INFO("test", "Test 3: Apply function (square root)");
     EQDVolatility<double> volSurf3 = volSurf;
     volSurf3.applyFunction([](double v) { return std::sqrt(v); });
-    QTA_LOG_INFO("quantape.test", "  After sqrt: {}", quantape_test::num(volSurf3.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  Expected: {}", quantape_test::num(std::sqrt(0.18)));
+    QTA_LOG_INFO("test", "  After sqrt: {}", quantape_test::num(volSurf3.vol(1.0, 100.0)));
+    QTA_LOG_INFO("test", "  Expected: {}", quantape_test::num(std::sqrt(0.18)));
 
     // Test 4: Apply function with coordinates (vol smile adjustment)
-    QTA_LOG_INFO("quantape.test", "Test 4: Apply function with coordinates (moneyness adjustment)");
+    QTA_LOG_INFO("test", "Test 4: Apply function with coordinates (moneyness adjustment)");
     EQDVolatility<double> volSurf4 = volSurf;
     volSurf4.applyFunctionWithCoords([](double v, double expiry, double strike) {
         // Add smile: increase vol for out-of-money options
@@ -271,30 +271,30 @@ void testVolSurfaceOperations() {
         double smileAdj = 0.01 * std::abs(moneyness - 1.0); // OTM adjustment
         return v + smileAdj;
     });
-    QTA_LOG_INFO("quantape.test", "  ATM (100): {}", quantape_test::num(volSurf4.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  OTM Put (90): {}",
+    QTA_LOG_INFO("test", "  ATM (100): {}", quantape_test::num(volSurf4.vol(1.0, 100.0)));
+    QTA_LOG_INFO("test", "  OTM Put (90): {}",
                  quantape_test::num(volSurf4.vol(1.0, 90.0)));
-    QTA_LOG_INFO("quantape.test", "  OTM Call (110): {}",
+    QTA_LOG_INFO("test", "  OTM Call (110): {}",
                  quantape_test::num(volSurf4.vol(1.0, 110.0)));
 
     // Test 5: Bump specific point
-    QTA_LOG_INFO("quantape.test", "Test 5: Bump specific point (1y, 100 strike)");
+    QTA_LOG_INFO("test", "Test 5: Bump specific point (1y, 100 strike)");
     EQDVolatility<double> volSurf5 = volSurf;
     volSurf5.bump(1, 1, 0.05); // expiry index 1 (1y), strike index 1 (100)
-    QTA_LOG_INFO("quantape.test", "  After bumping by 0.05: {}",
+    QTA_LOG_INFO("test", "  After bumping by 0.05: {}",
                  quantape_test::num(volSurf5.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  Expected: {}", quantape_test::num(0.18 + 0.05));
-    QTA_LOG_INFO("quantape.test", "  Nearby point (1y, 90): {} (should be similar to original)",
+    QTA_LOG_INFO("test", "  Expected: {}", quantape_test::num(0.18 + 0.05));
+    QTA_LOG_INFO("test", "  Nearby point (1y, 90): {} (should be similar to original)",
                  quantape_test::num(volSurf5.vol(1.0, 90.0)));
 
     // Test 6: Operator overloads
-    QTA_LOG_INFO("quantape.test", "Test 6: Operator overloads");
+    QTA_LOG_INFO("test", "Test 6: Operator overloads");
     EQDVolatility<double> volSurf6 = volSurf;
     volSurf6 *= 1.2;   // Scale by 1.2
     volSurf6 += 0.005; // Shift by 50 bp
-    QTA_LOG_INFO("quantape.test", "  After *= 1.2 and += 0.005: {}",
+    QTA_LOG_INFO("test", "  After *= 1.2 and += 0.005: {}",
                  quantape_test::num(volSurf6.vol(1.0, 100.0)));
-    QTA_LOG_INFO("quantape.test", "  Expected: {}", quantape_test::num(0.18 * 1.2 + 0.005));
+    QTA_LOG_INFO("test", "  Expected: {}", quantape_test::num(0.18 * 1.2 + 0.005));
 }
 
 int main() {
@@ -308,13 +308,13 @@ int main() {
         testIRVolTypes();
         testVolSurfaceOperations();
 
-        QTA_LOG_INFO("quantape.test", "========================================");
-        QTA_LOG_INFO("quantape.test", "All market data tests completed successfully!");
-        QTA_LOG_INFO("quantape.test", "========================================");
+        QTA_LOG_INFO("test", "========================================");
+        QTA_LOG_INFO("test", "All market data tests completed successfully!");
+        QTA_LOG_INFO("test", "========================================");
 
         return 0;
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.test", "Error: {}", e.what());
+        QTA_LOG_ERROR("test", "Error: {}", e.what());
         return 1;
     }
 }

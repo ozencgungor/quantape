@@ -163,7 +163,7 @@ int main() {
                 const double diff = std::abs(v.val() - ref);
                 if (diff > 1e-12 * (1.0 + std::abs(ref))) {
                     QTA_LOG_ERROR(
-                        "quantape.test", "value mismatch: {} smooth={} x={} ref={} var={} diff={}",
+                        "test", "value mismatch: {} smooth={} x={} ref={} var={} diff={}",
                         methodName(da), smooth, quantape_test::num(x), quantape_test::num(ref),
                         quantape_test::num(v.val()), quantape_test::num(diff));
                     CHECK(false);
@@ -177,7 +177,7 @@ int main() {
                 for (size_t j = 0; j < g_y.size(); ++j) {
                     const double tol = smooth ? 1e-4 : 1e-5;
                     if (std::abs(fd[j] - ad[j]) > tol * (1.0 + std::abs(fd[j]))) {
-                        QTA_LOG_ERROR("quantape.test",
+                        QTA_LOG_ERROR("test",
                                       "gradient mismatch: {} smooth={} x={} j={} fd={} ad={}",
                                       methodName(da), smooth, quantape_test::num(x), j,
                                       quantape_test::num(fd[j]), quantape_test::num(ad[j]));
@@ -197,7 +197,7 @@ int main() {
                     const auto H = adHessian(x, da, smooth);
                     if (linearInY) {
                         if (maxHessian(x, da, smooth) > 1e-8) {
-                            QTA_LOG_ERROR("quantape.test", "hessian not zero: {} x={} max|H|={}",
+                            QTA_LOG_ERROR("test", "hessian not zero: {} x={} max|H|={}",
                                           methodName(da), quantape_test::num(x),
                                           quantape_test::num(maxHessian(x, da, smooth)));
                             CHECK(false);
@@ -212,7 +212,7 @@ int main() {
                             }
                         }
                         if (maxdiff > 5e-3 * (1.0 + maxref)) {
-                            QTA_LOG_ERROR("quantape.test",
+                            QTA_LOG_ERROR("test",
                                           "hessian mismatch: {} x={} maxdiff={} maxref={}",
                                           methodName(da), quantape_test::num(x),
                                           quantape_test::num(maxdiff), quantape_test::num(maxref));
@@ -233,7 +233,7 @@ int main() {
                 const double ad = interp.derivative(stan::math::var(x)).val();
                 const double tol = smooth ? 1e-4 : 1e-5;
                 if (std::abs(fd - ad) > tol * (1.0 + std::abs(fd))) {
-                    QTA_LOG_ERROR("quantape.test",
+                    QTA_LOG_ERROR("test",
                                   "x-derivative mismatch: {} smooth={} x={} fd={} ad={}",
                                   methodName(da), smooth, quantape_test::num(x),
                                   quantape_test::num(fd), quantape_test::num(ad));
@@ -251,10 +251,10 @@ int main() {
             CHECK(interp.usesWeightMatrix() == expectWeights);
         }
 
-        QTA_LOG_INFO("quantape.test", "{}: value/gradient/hessian/x-derivative all pass",
+        QTA_LOG_INFO("test", "{}: value/gradient/hessian/x-derivative all pass",
                      methodName(da));
     }
 
-    QTA_LOG_INFO("quantape.test", "test_cubic_weights: all invariants hold");
+    QTA_LOG_INFO("test", "test_cubic_weights: all invariants hold");
     return 0;
 }

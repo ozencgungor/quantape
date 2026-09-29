@@ -165,7 +165,7 @@ void runIntegrator(const char* name, const Factory& factory, double tol_quad, do
         CHECK(close(theta.adj(), 4.0, tol_quad));
     }
 
-    QTA_LOG_INFO("quantape.test", "  {}: double/var/fvar<var> vs analytic OK", name);
+    QTA_LOG_INFO("test", "  {}: double/var/fvar<var> vs analytic OK", name);
 }
 
 } // namespace
@@ -200,7 +200,7 @@ int main() {
         return quantape::math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
     };
 
-    QTA_LOG_INFO("quantape.test", "── analytic value/gradient/Hessian, all scalar types ──");
+    QTA_LOG_INFO("test", "── analytic value/gradient/Hessian, all scalar types ──");
     runIntegrator("trapezoid (default) ", trapezoid, 1e-8, 1e-6);
     runIntegrator("trapezoid (midpoint)", trapezoid_mid, 1e-3, 1e-3);
     runIntegrator("simpson             ", simpson, 1e-8, 1e-6);
@@ -208,6 +208,6 @@ int main() {
     runIntegrator("gauss-legendre (20) ", legendre, 1e-8, 1e-6);
     runIntegrator("tanh-sinh           ", tanh_sinh, 1e-8, 1e-6);
 
-    QTA_LOG_INFO("quantape.test", "test_integrator_primitives: all invariants hold");
+    QTA_LOG_INFO("test", "test_integrator_primitives: all invariants hold");
     return 0;
 }

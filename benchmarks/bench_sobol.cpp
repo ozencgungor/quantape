@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
     const bool haveText = exists(table);
     const bool haveAsset = exists(defaultPath);
     if (!haveText && !haveAsset) {
-        QTA_LOG_ERROR("quantape.bench",
+        QTA_LOG_ERROR("bench",
                       "no Sobol table found (looked for '{}' and the compile-time asset '{}'); "
                       "pass a table path or run from the repo root",
                       table, defaultPath);

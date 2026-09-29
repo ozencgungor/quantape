@@ -38,7 +38,7 @@ double timeNs(F&& fn, int reps = 1'000'000) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void testStatistics() {
-    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
                                   " STATISTICAL TESTS  (N = 1,000,000,000)\n"
                                   "═══════════════════════════════════════════════════════════\n");
 
@@ -75,10 +75,10 @@ void testStatistics() {
                    3.0 * mean * mean * mean * mean) /
                   (var * var);
 
-    QTA_LOG_INFO("quantape.test", "  Mean       = {}   (expected: 0)", quantape_test::num(mean, 8));
-    QTA_LOG_INFO("quantape.test", "  Variance   = {}   (expected: 1)", quantape_test::num(var, 8));
-    QTA_LOG_INFO("quantape.test", "  Skewness   = {}   (expected: 0)", quantape_test::num(skew, 8));
-    QTA_LOG_INFO("quantape.test", "  Kurtosis   = {}   (expected: 3)", quantape_test::num(kurt, 8));
+    QTA_LOG_INFO("test", "  Mean       = {}   (expected: 0)", quantape_test::num(mean, 8));
+    QTA_LOG_INFO("test", "  Variance   = {}   (expected: 1)", quantape_test::num(var, 8));
+    QTA_LOG_INFO("test", "  Skewness   = {}   (expected: 0)", quantape_test::num(skew, 8));
+    QTA_LOG_INFO("test", "  Kurtosis   = {}   (expected: 3)", quantape_test::num(kurt, 8));
 
     double se_mean = 1.0 / std::sqrt(N);
     double se_var = std::sqrt(2.0 / N);
@@ -88,7 +88,7 @@ void testStatistics() {
     auto check = [](const char* name, double val, double expected, double se) {
         double z = std::abs(val - expected) / se;
         bool pass = z < 4.0;
-        QTA_LOG_INFO("quantape.test", "  {}: z = {} sigma  {}", name, quantape_test::num(z, 2),
+        QTA_LOG_INFO("test", "  {}: z = {} sigma  {}", name, quantape_test::num(z, 2),
                      pass ? "PASS" : "** FAIL **");
         return pass;
     };
@@ -100,7 +100,7 @@ void testStatistics() {
     ok &= check("Kurtosis", kurt, 3.0, se_kurt);
 
     if (ok)
-        QTA_LOG_INFO("quantape.test", "\n  All statistical tests PASSED");
+        QTA_LOG_INFO("test", "\n  All statistical tests PASSED");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -108,7 +108,7 @@ void testStatistics() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void testTails() {
-    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
                                   " TAIL DISTRIBUTION TEST  (N = 10,000,000,000)\n"
                                   "═══════════════════════════════════════════════════════════\n");
 
@@ -127,13 +127,13 @@ void testTails() {
         }
     }
 
-    QTA_LOG_INFO("quantape.test", "  Threshold  Observed     Expected     Ratio");
-    QTA_LOG_INFO("quantape.test", "  ─────────  ──────────   ──────────   ─────");
+    QTA_LOG_INFO("test", "  Threshold  Observed     Expected     Ratio");
+    QTA_LOG_INFO("test", "  ─────────  ──────────   ──────────   ─────");
     for (int j = 0; j < 5; ++j) {
         double expected_frac = std::erfc(thresholds[j] / std::sqrt(2.0));
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
-        QTA_LOG_INFO("quantape.test", "  {} sigma  {}   {}   {}",
+        QTA_LOG_INFO("test", "  {} sigma  {}   {}   {}",
                      quantape_test::num(thresholds[j], 6), quantape_test::num(observed_frac, 6),
                      quantape_test::num(expected_frac, 6), quantape_test::num(ratio, 6));
     }
@@ -144,7 +144,7 @@ void testTails() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void benchmark() {
-    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
                                   " BENCHMARK  (1,000,000 samples each)\n"
                                   "═══════════════════════════════════════════════════════════\n");
 
@@ -168,17 +168,17 @@ void benchmark() {
     double zig_ns = timeNs([&]() { return zig(); });
     double std_ns = timeNs([&]() { return std_normal(mt); });
 
-    QTA_LOG_INFO("quantape.test", "  McFarland + PCG64       : {} ns/sample",
+    QTA_LOG_INFO("test", "  McFarland + PCG64       : {} ns/sample",
                  quantape_test::num(mcf_pcg_ns, 2));
-    QTA_LOG_INFO("quantape.test", "  McFarland + Xoshiro256  : {} ns/sample",
+    QTA_LOG_INFO("test", "  McFarland + Xoshiro256  : {} ns/sample",
                  quantape_test::num(mcf_xo_ns, 2));
-    QTA_LOG_INFO("quantape.test", "  Marsaglia + Xoshiro256  : {} ns/sample",
+    QTA_LOG_INFO("test", "  Marsaglia + Xoshiro256  : {} ns/sample",
                  quantape_test::num(zig_ns, 2));
-    QTA_LOG_INFO("quantape.test", "  std::normal_distribution: {} ns/sample",
+    QTA_LOG_INFO("test", "  std::normal_distribution: {} ns/sample",
                  quantape_test::num(std_ns, 2));
-    QTA_LOG_INFO("quantape.test", "  Speedup vs std (McF+PCG): {}x",
+    QTA_LOG_INFO("test", "  Speedup vs std (McF+PCG): {}x",
                  quantape_test::num(std_ns / mcf_pcg_ns, 2));
-    QTA_LOG_INFO("quantape.test", "  Speedup vs std (Zig+Xo) : {}x",
+    QTA_LOG_INFO("test", "  Speedup vs std (Zig+Xo) : {}x",
                  quantape_test::num(std_ns / zig_ns, 2));
 }
 

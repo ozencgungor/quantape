@@ -88,7 +88,7 @@ int main() {
             integ.integrateToInfinity([](double x) { return x * std::exp(-x); }, 0.0);
         CHECK(close(i_exp, 1.0, 1e-8));
 
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "double: polynomial/sin/endpoint-singular/infinite domains all pass\n"
                      "        (evals on last call: {})",
                      integ.numberOfEvaluations());
@@ -117,10 +117,10 @@ int main() {
             },
             x0, fx, grad);
 
-        QTA_LOG_INFO("quantape.test", "var: I(theta) = {} (expected 1.333333...)",
+        QTA_LOG_INFO("test", "var: I(theta) = {} (expected 1.333333...)",
                      quantape_test::num(fx));
         CHECK(close(fx, 4.0 / 3.0, 1e-9));
-        QTA_LOG_INFO("quantape.test", "     dI/dtheta = {} (expected 1.333333...)",
+        QTA_LOG_INFO("test", "     dI/dtheta = {} (expected 1.333333...)",
                      quantape_test::num(grad(0)));
         CHECK(close(grad(0), 4.0 / 3.0, 1e-8));
 
@@ -146,7 +146,7 @@ int main() {
 
         CHECK(close(fx1, std::exp(1.0) - 1.0, 1e-8));
         CHECK(close(grad1(0), 1.0, 1e-7));
-        QTA_LOG_INFO("quantape.test", "     integrand-parameter gradient = {} (expected 1)",
+        QTA_LOG_INFO("test", "     integrand-parameter gradient = {} (expected 1)",
                      quantape_test::num(grad1(0)));
     }
 
@@ -172,11 +172,11 @@ int main() {
             },
             x0, fx, grad, H);
 
-        QTA_LOG_INFO("quantape.test", "fvar<var>: d2I/dtheta2 = {} (expected 0.666666...)",
+        QTA_LOG_INFO("test", "fvar<var>: d2I/dtheta2 = {} (expected 0.666666...)",
                      quantape_test::num(H(0, 0)));
         CHECK(close(H(0, 0), 2.0 / 3.0, 1e-6));
     }
 
-    QTA_LOG_INFO("quantape.test", "test_tanh_sinh: all invariants hold");
+    QTA_LOG_INFO("test", "test_tanh_sinh: all invariants hold");
     return 0;
 }

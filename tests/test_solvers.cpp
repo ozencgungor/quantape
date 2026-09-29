@@ -15,11 +15,11 @@ int failures = 0;
 
 void report(const char* label, bool ok, double got, double expected, double err) {
     if (ok) {
-        QTA_LOG_INFO("quantape.test", "  {} ok  got={} expected={} err={}", label,
+        QTA_LOG_INFO("test", "  {} ok  got={} expected={} err={}", label,
                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
                      quantape_test::num(err, 3));
     } else {
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL  got={} expected={} err={}", label,
+        QTA_LOG_ERROR("test", "  {} FAIL  got={} expected={} err={}", label,
                       quantape_test::num(got, 15), quantape_test::num(expected, 15),
                       quantape_test::num(err, 3));
     }
@@ -45,7 +45,7 @@ void runSolver(const char* solverName, const Case& c, double tol = 1e-9) {
         const double err = std::fabs(got - c.root);
         report(label, err <= tol, got, c.root, err);
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL  threw: {}", solverName, e.what());
+        QTA_LOG_ERROR("test", "  {} FAIL  threw: {}", solverName, e.what());
         ++failures;
     }
 }
@@ -60,7 +60,7 @@ struct CountingFn {
 };
 
 void testGoldenRoots() {
-    QTA_LOG_INFO("quantape.test", "=== Golden roots (accuracy 1e-12) ===");
+    QTA_LOG_INFO("test", "=== Golden roots (accuracy 1e-12) ===");
 
     const Case cases[] = {
         {"x^2-2", [](double x) { return x * x - 2.0; }, 0.0, 3.0, 1.5, 1.4142135623730951},
@@ -83,7 +83,7 @@ void testGoldenRoots() {
 }
 
 void testBrentActuallyInterpolates() {
-    QTA_LOG_INFO("quantape.test", "=== Brent interpolation regression ===");
+    QTA_LOG_INFO("test", "=== Brent interpolation regression ===");
 
     // Regression for the zeroin-formula bug: with a broken secant/IQI branch
     // Brent silently degraded to bisection and used the same eval count.
@@ -105,21 +105,21 @@ void testBrentActuallyInterpolates() {
         solver.solve(counted, 1e-12, 0.5, 0.0, 1.0);
     }
 
-    QTA_LOG_INFO("quantape.test", "  cos(x)-x evaluation counts bisection={} brent={}",
+    QTA_LOG_INFO("test", "  cos(x)-x evaluation counts bisection={} brent={}",
                  bisectionEvals, brentEvals);
     const bool ok = brentEvals * 2 <= bisectionEvals && brentEvals <= 20;
     if (ok) {
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  interpolation in use ok (brent must use < half the evals)");
     } else {
-        QTA_LOG_ERROR("quantape.test",
+        QTA_LOG_ERROR("test",
                       "  interpolation in use FAIL (brent must use < half the evals)");
         ++failures;
     }
 }
 
 void testNewtonWithDerivative() {
-    QTA_LOG_INFO("quantape.test", "=== Newton with explicit derivative ===");
+    QTA_LOG_INFO("test", "=== Newton with explicit derivative ===");
 
     auto f = [](double x) { return x * x - 2.0; };
     auto df = [](double x) { return 2.0 * x; };
@@ -144,7 +144,7 @@ void testNewtonWithDerivative() {
 }
 
 void testAutoBracketing() {
-    QTA_LOG_INFO("quantape.test", "=== Auto-bracketing ===");
+    QTA_LOG_INFO("test", "=== Auto-bracketing ===");
 
     auto f = [](double x) { return x * x * x - x - 2.0; };
     BrentSolver<double> solver;
@@ -156,7 +156,7 @@ void testAutoBracketing() {
 }
 
 void testTridiagonal() {
-    QTA_LOG_INFO("quantape.test", "=== Tridiagonal solver ===");
+    QTA_LOG_INFO("test", "=== Tridiagonal solver ===");
 
     const std::vector<double> a{0.0, 1.0, 1.0};
     const std::vector<double> b{2.0, 2.0, 2.0};
@@ -177,15 +177,15 @@ template <typename Fn>
 void expectThrow(const char* label, Fn&& fn) {
     try {
         fn();
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL  no exception", label);
+        QTA_LOG_ERROR("test", "  {} FAIL  no exception", label);
         ++failures;
     } catch (const std::exception&) {
-        QTA_LOG_INFO("quantape.test", "  {} ok    threw as expected", label);
+        QTA_LOG_INFO("test", "  {} ok    threw as expected", label);
     }
 }
 
 void testErrorHandling() {
-    QTA_LOG_INFO("quantape.test", "=== Error handling ===");
+    QTA_LOG_INFO("test", "=== Error handling ===");
 
     auto flat = [](double x) { return x * x + 1.0; };
     auto linear = [](double x) { return x - 0.5; };
@@ -233,9 +233,9 @@ int main() {
     testErrorHandling();
 
     if (failures == 0) {
-        QTA_LOG_INFO("quantape.test", "All solver tests passed.");
+        QTA_LOG_INFO("test", "All solver tests passed.");
         return 0;
     }
-    QTA_LOG_ERROR("quantape.test", "{} solver test(s) FAILED.", failures);
+    QTA_LOG_ERROR("test", "{} solver test(s) FAILED.", failures);
     return 1;
 }

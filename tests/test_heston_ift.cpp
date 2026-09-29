@@ -55,7 +55,7 @@ namespace {
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
         std::exit(1);
@@ -348,7 +348,7 @@ Eigen::MatrixXd richardsonJacobian(const Eigen::VectorXd& a, Fn f) {
 }
 
 void testHestonUnconstrained() {
-    QTA_LOG_INFO("quantape.test", "Heston IFT: unconstrained LS");
+    QTA_LOG_INFO("test", "Heston IFT: unconstrained LS");
     const HestonFixture fx = makeHestonFixture();
     const std::vector<double> start{0.05, 1.5, 0.05, 0.5, -0.3};
 
@@ -373,7 +373,7 @@ void testHestonUnconstrained() {
 
     quantape::math::CalibrationIftOptions options;
     const auto ift = quantape::math::calibrationIft(fx.problem, bHat, fx.a, {}, options);
-    QTA_LOG_INFO("quantape.test", "  condition = {}, ridge = {}",
+    QTA_LOG_INFO("test", "  condition = {}, ridge = {}",
                  quantape_test::num(ift.diagnostics.condition, 3),
                  quantape_test::num(ift.diagnostics.ridge, 2));
 
@@ -382,14 +382,14 @@ void testHestonUnconstrained() {
     };
     const Eigen::MatrixXd fd = richardsonJacobian(
         fx.a, [&](const Eigen::VectorXd& a) { return recalibrate(a, asVector(bHat)); });
-    QTA_LOG_INFO("quantape.test", "  db/da (KKT):");
+    QTA_LOG_INFO("test", "  db/da (KKT):");
     for (Eigen::Index i = 0; i < ift.dbda.rows(); ++i) {
         std::string row = "    [";
         for (Eigen::Index j = 0; j < ift.dbda.cols(); ++j) {
             row += quantape_test::num(ift.dbda(i, j), 6) + " ";
         }
         row += "] err vs FD = " + quantape_test::num((ift.dbda.row(i) - fd.row(i)).norm(), 2);
-        QTA_LOG_INFO("quantape.test", "{}", row);
+        QTA_LOG_INFO("test", "{}", row);
     }
     const double rel = (ift.dbda - fd).norm() / std::max(1e-12, fd.norm());
     checkClose("db/da KKT vs bump-recalibrate", rel, 0.0, 1e-4);
@@ -413,7 +413,7 @@ void testHestonUnconstrained() {
         out(0) = fx.model.call(bp, productMarket);
         return out;
     });
-    QTA_LOG_INFO("quantape.test", "  product dV/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
+    QTA_LOG_INFO("test", "  product dV/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
                  quantape_test::num(dVda(0), 6), quantape_test::num(dVda(1), 6),
                  quantape_test::num(dVda(2), 6), quantape_test::num(dVdaFd(0, 0), 6),
                  quantape_test::num(dVdaFd(0, 1), 6), quantape_test::num(dVdaFd(0, 2), 6));
@@ -424,7 +424,7 @@ void testHestonUnconstrained() {
     // the residual-curvature terms vanish, both routes coincide)
     const auto jac = quantape::math::calibrationJacobiansFromAssembled(assembled);
     const auto inst = quantape::math::instrumentCalibrationJacobian(jac);
-    QTA_LOG_INFO("quantape.test", "  instrument route: rank={} cond={}", inst.rank,
+    QTA_LOG_INFO("test", "  instrument route: rank={} cond={}", inst.rank,
                  quantape_test::num(inst.condition, 3));
     for (Eigen::Index i = 0; i < inst.dbda.rows(); ++i) {
         std::string row = "    [";
@@ -432,16 +432,16 @@ void testHestonUnconstrained() {
             row += quantape_test::num(inst.dbda(i, j), 6) + " ";
         }
         row += "]";
-        QTA_LOG_INFO("quantape.test", "{}", row);
+        QTA_LOG_INFO("test", "{}", row);
     }
     checkClose("KKT vs instrument route", (ift.dbda - inst.dbda).norm(), 0.0,
                1e-4 * std::max(1.0, ift.dbda.norm()));
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] unconstrained: KKT vs FD, product risk, instrument route");
 }
 
 void testHestonFellerConstrained() {
-    QTA_LOG_INFO("quantape.test", "Heston IFT: Feller-constrained (binding)");
+    QTA_LOG_INFO("test", "Heston IFT: Feller-constrained (binding)");
     const HestonFixture fx = makeHestonFixture();
     const std::vector<double> start{0.05, 1.5, 0.05, 0.5, -0.3};
 
@@ -452,7 +452,7 @@ void testHestonFellerConstrained() {
         fx.problem, bHat, fx.a, quantape::math::CalibrationOrder::Gradient);
     const auto lambda =
         quantape::math::recoverActiveMultipliers(fx.problem, bHat, assembled.gradientB);
-    QTA_LOG_INFO("quantape.test", "  g = {}, recovered lambda = {} (calibrator exported {})",
+    QTA_LOG_INFO("test", "  g = {}, recovered lambda = {} (calibrator exported {})",
                  quantape_test::num(g(0), 3), quantape_test::num(lambda[0], 6),
                  quantape_test::num(exported.empty() ? 0.0 : exported[0], 6));
     CHECK(g(0) <= 1e-7);
@@ -471,7 +471,7 @@ void testHestonFellerConstrained() {
     // feasibility tolerance into the flat kappa/sigma directions, so the
     // agreement is limited to a few percent. The chain itself is exact given
     // the point and multipliers.
-    QTA_LOG_INFO("quantape.test", "  db/da KKT vs FD: rel err = {} (reference precision limited)",
+    QTA_LOG_INFO("test", "  db/da KKT vs FD: rel err = {} (reference precision limited)",
                  quantape_test::num(rel, 3));
     checkClose("constrained db/da vs bump-recalibrate", rel, 0.0, 5e-2);
 
@@ -486,7 +486,7 @@ void testHestonFellerConstrained() {
         return out;
     });
     const double dlRel = (ift.dlambdaDa - dlambdaFd).norm() / std::max(1e-12, dlambdaFd.norm());
-    QTA_LOG_INFO("quantape.test", "  dlambda/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
+    QTA_LOG_INFO("test", "  dlambda/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
                  quantape_test::num(ift.dlambdaDa(0, 0), 6),
                  quantape_test::num(ift.dlambdaDa(0, 1), 6),
                  quantape_test::num(ift.dlambdaDa(0, 2), 6), quantape_test::num(dlambdaFd(0, 0), 6),
@@ -526,16 +526,16 @@ void testHestonFellerConstrained() {
         const Eigen::MatrixXd fdBoundary = richardsonJacobian(fx.a, boundaryFit);
         const double relBoundary =
             (ift.dbda - fdBoundary).norm() / std::max(1e-12, fdBoundary.norm());
-        QTA_LOG_INFO("quantape.test", "  boundary-reference db/da: rel err = {} (cond ~ 1e3)",
+        QTA_LOG_INFO("test", "  boundary-reference db/da: rel err = {} (cond ~ 1e3)",
                      quantape_test::num(relBoundary, 3));
         checkClose("constrained db/da vs boundary FD", relBoundary, 0.0, 1e-3);
     }
 
-    QTA_LOG_INFO("quantape.test", "  [ok] Feller-constrained: db/da and dlambda/da vs FD");
+    QTA_LOG_INFO("test", "  [ok] Feller-constrained: db/da and dlambda/da vs FD");
 }
 
 void testBlackScholesGenericity() {
-    QTA_LOG_INFO("quantape.test", "Generic layer with a second model (Black-Scholes vol)");
+    QTA_LOG_INFO("test", "Generic layer with a second model (Black-Scholes vol)");
     const double S = 1.0, r = 0.02, q = 0.01;
     const double truthVol = 0.24;
     std::vector<BsCalibrationProblem::Quote> quotes;
@@ -566,13 +566,13 @@ void testBlackScholesGenericity() {
         return owning(xx);
     };
     const Eigen::MatrixXd fd = richardsonJacobian(a, fit);
-    QTA_LOG_INFO("quantape.test", "  dvol/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
+    QTA_LOG_INFO("test", "  dvol/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
                  quantape_test::num(ift.dbda(0, 0), 6), quantape_test::num(ift.dbda(0, 1), 6),
                  quantape_test::num(ift.dbda(0, 2), 6), quantape_test::num(fd(0, 0), 6),
                  quantape_test::num(fd(0, 1), 6), quantape_test::num(fd(0, 2), 6));
     const double rel = (ift.dbda - fd).norm() / std::max(1e-12, fd.norm());
     checkClose("BS dvol/da vs bump-recalibrate", rel, 0.0, 1e-4);
-    QTA_LOG_INFO("quantape.test", "  [ok] same assemble/IFT calls, second model");
+    QTA_LOG_INFO("test", "  [ok] same assemble/IFT calls, second model");
 }
 
 // ── Stan interop: var/fvar<var> through the same adapter ──
@@ -584,7 +584,7 @@ void testBlackScholesGenericity() {
 // per quote regardless of the quadrature.
 
 void testStanInterop() {
-    QTA_LOG_INFO("quantape.test", "Stan interop: var / fvar<var> through the same adapter");
+    QTA_LOG_INFO("test", "Stan interop: var / fvar<var> through the same adapter");
     const HestonFixture fx = makeHestonFixture();
     const std::vector<double> start{0.05, 1.5, 0.05, 0.5, -0.3};
     const std::vector<double> market = asVector(fx.a);
@@ -604,7 +604,7 @@ void testStanInterop() {
         stan::math::recover_memory();
         CHECK(result != quantape::math::OptimizeResult::Failure);
         const Eigen::VectorXd bVar = owning(x);
-        QTA_LOG_INFO("quantape.test", "  LBFGS<var> optimum vs double path: {} (evals={})",
+        QTA_LOG_INFO("test", "  LBFGS<var> optimum vs double path: {} (evals={})",
                      quantape_test::num((bVar - bHat).norm(), 2), state.evals);
         checkClose("var optimum == double optimum", (bVar - bHat).norm(), 0.0, 1e-6);
 
@@ -646,7 +646,7 @@ void testStanInterop() {
         };
         const auto [xF, usF] = solve(fixedObjective, start);
         const auto [x9, us9] = solve(objective, start);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  AD solve: 5-param {} us, 9-param {} us ({}x), optimum diff {}",
                      quantape_test::num(usF, 1), quantape_test::num(us9, 1),
                      quantape_test::num(us9 / usF, 2), quantape_test::num((xF - x9).norm(), 2));
@@ -666,7 +666,7 @@ void testStanInterop() {
             x, state, info, &dpdm);
         const auto t1 = std::chrono::steady_clock::now();
         QTA_LOG_INFO(
-            "quantape.test", "  AD IFT wall: {} us (primal cache)",
+            "test", "  AD IFT wall: {} us (primal cache)",
             quantape_test::num(std::chrono::duration<double, std::micro>(t1 - t0).count(), 1));
         CHECK(result != quantape::math::OptimizeResult::Failure);
         Eigen::MatrixXd adDbda(5, 3);
@@ -678,7 +678,7 @@ void testStanInterop() {
         const Eigen::VectorXd xAd = owning(x);
         const auto ift = quantape::math::calibrationIft(fx.problem, xAd, fx.a);
         const double rel = (adDbda - ift.dbda).norm() / std::max(1.0, ift.dbda.norm());
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  AD IFT (minimizeDifferential) vs analytic chain: rel err = {}",
                      quantape_test::num(rel, 2));
         checkClose("AD IFT == analytic chain", rel, 0.0, 1e-6);
@@ -720,11 +720,11 @@ void testStanInterop() {
         }
         const auto iftC = quantape::math::calibrationIft(fx.problem, xOpt, fx.a, lam);
         const double relC = (adC - iftC.dbda).norm() / std::max(1.0, iftC.dbda.norm());
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  constrained AD IFT vs analytic chain: rel err = {} (active rows={})",
                      quantape_test::num(relC, 2), iftC.diagnostics.activeInequalities.size());
         checkClose("constrained AD IFT == analytic chain", relC, 0.0, 1e-5);
-        QTA_LOG_INFO("quantape.test", "  dlambda/dm (AD) = [{}, {}, {}], analytic = [{}, {}, {}]",
+        QTA_LOG_INFO("test", "  dlambda/dm (AD) = [{}, {}, {}], analytic = [{}, {}, {}]",
                      quantape_test::num(dlamC[0], 6), quantape_test::num(dlamC[1], 6),
                      quantape_test::num(dlamC[2], 6), quantape_test::num(iftC.dlambdaDa(0, 0), 6),
                      quantape_test::num(iftC.dlambdaDa(0, 1), 6),
@@ -734,17 +734,17 @@ void testStanInterop() {
                        iftC.dlambdaDa(0, j), 1e-3 * std::max(1.0, std::fabs(iftC.dlambdaDa(0, j))));
         }
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] var solve + callback-var pricing + AD IFT/KKT chains");
+    QTA_LOG_INFO("test", "  [ok] var solve + callback-var pricing + AD IFT/KKT chains");
 }
 
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "Generic calibration/IFT layer (H6)");
+    QTA_LOG_INFO("test", "Generic calibration/IFT layer (H6)");
     testHestonUnconstrained();
     testHestonFellerConstrained();
     testBlackScholesGenericity();
     testStanInterop();
-    QTA_LOG_INFO("quantape.test", "ALL CALIBRATION IFT TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL CALIBRATION IFT TESTS PASSED");
     return 0;
 }

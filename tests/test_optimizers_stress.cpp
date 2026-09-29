@@ -26,9 +26,9 @@ int failures = 0;
 
 void check(const char* label, bool ok) {
     if (ok) {
-        QTA_LOG_INFO("quantape.test", "  {} ok", label);
+        QTA_LOG_INFO("test", "  {} ok", label);
     } else {
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL", label);
+        QTA_LOG_ERROR("test", "  {} FAIL", label);
         ++failures;
     }
 }
@@ -36,11 +36,11 @@ void check(const char* label, bool ok) {
 void checkClose(const char* label, double got, double expected, double tol) {
     const bool ok = std::fabs(got - expected) <= tol;
     if (!ok) {
-        QTA_LOG_ERROR("quantape.test", "  {} FAIL got={} expected={}", label,
+        QTA_LOG_ERROR("test", "  {} FAIL got={} expected={}", label,
                       quantape_test::num(got, 10), quantape_test::num(expected, 10));
         ++failures;
     } else {
-        QTA_LOG_INFO("quantape.test", "  {} ok  got={} err={}", label, quantape_test::num(got, 10),
+        QTA_LOG_INFO("test", "  {} ok  got={} err={}", label, quantape_test::num(got, 10),
                      quantape_test::num(std::fabs(got - expected), 2));
     }
 }
@@ -166,7 +166,7 @@ struct CurveArb {
 // ── LBFGS stress ──────────────────────────────────────────────────────────
 
 void stressLbfgs() {
-    QTA_LOG_INFO("quantape.test", "=== LBFGS stress ===");
+    QTA_LOG_INFO("test", "=== LBFGS stress ===");
     quantape::math::StopCriteria criteria;
     criteria.maxeval = 100000;
 
@@ -201,7 +201,7 @@ void stressLbfgs() {
             return static_cast<double>(state.evals);
         });
         const double f_final = Rosenbrock{}(x);
-        QTA_LOG_INFO("quantape.test", "  rosenbrock50: evals={} iters={} f={} ({} us)", state.evals,
+        QTA_LOG_INFO("test", "  rosenbrock50: evals={} iters={} f={} ({} us)", state.evals,
                      state.iterations, quantape_test::num(f_final, 3), quantape_test::num(us));
         check("rosenbrock50 f < 1e-4", f_final < 1e-4);
     }
@@ -249,7 +249,7 @@ void stressLbfgs() {
             solver.minimize(q, x, state);
             return static_cast<double>(state.evals);
         });
-        QTA_LOG_INFO("quantape.test", "  illcond1e16: evals={} iters={} x0={} x4={} ({} us)",
+        QTA_LOG_INFO("test", "  illcond1e16: evals={} iters={} x0={} x4={} ({} us)",
                      state.evals, state.iterations, quantape_test::num(x[0], 6),
                      quantape_test::num(x[4], 6), quantape_test::num(us));
         checkClose("illcond1e16 x4", x[4], 1.0, 1e-6);
@@ -303,7 +303,7 @@ void stressLbfgs() {
 // ── SLSQP / AUGLAG stress ─────────────────────────────────────────────────
 
 void stressConstrained() {
-    QTA_LOG_INFO("quantape.test", "=== SLSQP / AugLag stress ===");
+    QTA_LOG_INFO("test", "=== SLSQP / AugLag stress ===");
     quantape::math::StopCriteria criteria;
     criteria.maxeval = 200000;
 
@@ -361,7 +361,7 @@ void stressConstrained() {
             all_one = all_one && std::fabs(xi - 1.0) < 1e-6;
         }
         check("many-bounds x == 1", all_one);
-        QTA_LOG_INFO("quantape.test", "  many-bounds n=100: evals={} iters={} ({} us)", state.evals,
+        QTA_LOG_INFO("test", "  many-bounds n=100: evals={} iters={} ({} us)", state.evals,
                      state.iterations, quantape_test::num(us));
     }
     // Monotone + butterfly on a 20-point curve (arbitrage-like)
@@ -386,7 +386,7 @@ void stressConstrained() {
             feasible = feasible && (p[i] - 2.0 * p[i + 1] + p[i + 2] >= -1e-6);
         }
         check("curve arbitrage feasible", feasible);
-        QTA_LOG_INFO("quantape.test", "  curve-arb n=20: evals={} iters={} ({} us)", state.evals,
+        QTA_LOG_INFO("test", "  curve-arb n=20: evals={} iters={} ({} us)", state.evals,
                      state.iterations, quantape_test::num(us));
     }
     // AUGLAG on the mixed-constraint problem
@@ -422,7 +422,7 @@ void stressConstrained() {
             feasible = feasible && (p[i] - 2.0 * p[i + 1] + p[i + 2] >= -1e-5);
         }
         check("auglag curve arbitrage feasible", feasible);
-        QTA_LOG_INFO("quantape.test", "  auglag curve-arb n=20: evals={} iters={} ({} us)",
+        QTA_LOG_INFO("test", "  auglag curve-arb n=20: evals={} iters={} ({} us)",
                      state.evals, state.iterations, quantape_test::num(us));
     }
 }
@@ -434,9 +434,9 @@ int main() {
     stressConstrained();
     stan::math::recover_memory();
     if (failures == 0) {
-        QTA_LOG_INFO("quantape.test", "test_optimizers_stress: all invariants hold");
+        QTA_LOG_INFO("test", "test_optimizers_stress: all invariants hold");
         return 0;
     }
-    QTA_LOG_ERROR("quantape.test", "{} stress check(s) FAILED", failures);
+    QTA_LOG_ERROR("test", "{} stress check(s) FAILED", failures);
     return 1;
 }

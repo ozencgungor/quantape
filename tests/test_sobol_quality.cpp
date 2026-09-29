@@ -160,7 +160,7 @@ int main() {
             CHECK(tValue2D(matrices[j - 1], matrices[d - 1], 12) == table21[d][j - 1]);
         }
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] tValue2D == brute force ({} checks), Table 2.1 values match", checked);
 
     // Property A: incremental checker agrees with an independent determinant.
@@ -173,7 +173,7 @@ int main() {
     for (int d = 1; d <= static_cast<int>(entries.size()) + 1; ++d) {
         CHECK(brutePropertyA(entries, d));
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] Property A checker matches independent determinant");
+    QTA_LOG_INFO("test", "  [ok] Property A checker matches independent determinant");
 
     // Search: finite deterministic score; the pick is optimal among the
     // evaluated candidates (seed pass plus pruned pass with a tiny budget).
@@ -218,7 +218,7 @@ int main() {
             CHECK(resA[0].score <= score);
         }
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] search: deterministic, finite score, optimal among candidates");
 
     // Fuzz: fast t-value == brute force and symmetric for random valid direction
@@ -256,10 +256,10 @@ int main() {
                 ++checks;
             }
         }
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] fuzz: {} checks fast==brute and symmetric (degrees 1-18)", checks);
     }
 
-    QTA_LOG_INFO("quantape.test", "ALL SOBOL QUALITY TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SOBOL QUALITY TESTS PASSED");
     return 0;
 }

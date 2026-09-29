@@ -90,17 +90,17 @@ Eigen::Matrix<double, -1, -1> hessian2D(double x, double y,
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
                       quantape_test::num(got, 15), quantape_test::num(expected, 15),
                       quantape_test::num(std::fabs(got - expected), 3));
         std::exit(1);
     }
-    QTA_LOG_INFO("quantape.test", "  {} ok  got={} expected={}", label, quantape_test::num(got, 12),
+    QTA_LOG_INFO("test", "  {} ok  got={} expected={}", label, quantape_test::num(got, 12),
                  quantape_test::num(expected, 12));
 }
 
 void testLinear() {
-    QTA_LOG_INFO("quantape.test", "=== linear evaluation-point AD ===");
+    QTA_LOG_INFO("test", "=== linear evaluation-point AD ===");
     const double x = 1.5;
 
     const auto H =
@@ -118,7 +118,7 @@ void testLinear() {
 }
 
 void testLogLinear() {
-    QTA_LOG_INFO("quantape.test", "=== log-linear evaluation-point AD ===");
+    QTA_LOG_INFO("test", "=== log-linear evaluation-point AD ===");
     const double x = 1.5;
     const double t = 0.5, dx = 1.0;
     const double L1 = std::log(1.0), L2 = std::log(4.0);
@@ -139,7 +139,7 @@ void testLogLinear() {
 }
 
 void testBilinear() {
-    QTA_LOG_INFO("quantape.test", "=== bilinear evaluation-point AD ===");
+    QTA_LOG_INFO("test", "=== bilinear evaluation-point AD ===");
     const std::vector<double> bx{0.0, 1.0, 2.0};
     const std::vector<double> by{0.0, 1.0};
     const std::vector<std::vector<double>> z{{1.0, 2.0, 3.0}, {4.0, 6.0, 8.0}};
@@ -161,7 +161,7 @@ void testBilinear() {
 }
 
 void testCubicSplineMixed() {
-    QTA_LOG_INFO("quantape.test", "=== cubic (Spline) mixed x/y Hessian ===");
+    QTA_LOG_INFO("test", "=== cubic (Spline) mixed x/y Hessian ===");
     const double x = 1.55;
 
     const auto H =
@@ -188,7 +188,7 @@ void testCubicSplineMixed() {
 }
 
 void testEvaluateFixed() {
-    QTA_LOG_INFO("quantape.test", "=== passive-abscissa policy ===");
+    QTA_LOG_INFO("test", "=== passive-abscissa policy ===");
 
     {
         stan::math::recover_memory();
@@ -223,6 +223,6 @@ int main() {
     testCubicSplineMixed();
     testEvaluateFixed();
     stan::math::recover_memory();
-    QTA_LOG_INFO("quantape.test", "test_interpolation_xad: all invariants hold");
+    QTA_LOG_INFO("test", "test_interpolation_xad: all invariants hold");
     return 0;
 }

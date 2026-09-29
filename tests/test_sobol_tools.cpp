@@ -162,7 +162,7 @@ int main() {
         CHECK(resumed.size() == 43 && resumed.back().dim == 44);
         CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + resumedPath.string() + "\" --base=\"" +
                   basePath.string() + "\" --sample=4 --m=12 2>/dev/null") == 0);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] extend: structure, net exactness, determinism, resume");
     }
 
@@ -214,7 +214,7 @@ int main() {
                                     "--threads=1 2>/dev/null";
         CHECK(run(inplace) != 0);
         CHECK(fileHash(badPath) == beforeHash);
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] refine: objective {} -> {}, valid, deterministic, dry-run safe",
                      quantape_test::num(beforeMax, 4), quantape_test::num(afterMax, 4));
 
@@ -230,7 +230,7 @@ int main() {
             CHECK(run(fuzz) == 0);
             CHECK(fileHash(path) == h);
         }
-        QTA_LOG_INFO("quantape.test", "  [ok] refine fuzz: 5 seeds, dry-run, no writes");
+        QTA_LOG_INFO("test", "  [ok] refine fuzz: 5 seeds, dry-run, no writes");
     }
 
     // ── verify negative cases ──
@@ -276,11 +276,11 @@ int main() {
             CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + path.string() +
                       "\" --sample=3 --m=10 2>/dev/null") == 0);
         }
-        QTA_LOG_INFO("quantape.test",
+        QTA_LOG_INFO("test",
                      "  [ok] verify: 5 negative cases fail, 10 random valid tables pass");
     }
 
     std::filesystem::remove_all(tmp);
-    QTA_LOG_INFO("quantape.test", "ALL SOBOL TOOL TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SOBOL TOOL TESTS PASSED");
     return 0;
 }

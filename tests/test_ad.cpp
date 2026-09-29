@@ -26,7 +26,7 @@ using ADVariableT = stan::math::var;
 using namespace quantape::math;
 
 void testLinearInterpolationAD() {
-    QTA_LOG_INFO("quantape.test", "=== Linear Interpolation with AD ===");
+    QTA_LOG_INFO("test", "=== Linear Interpolation with AD ===");
 
     // Create interpolation data with AD types
     std::vector<ADVariableT> x = {0.0, 1.0, 2.0, 3.0};
@@ -38,15 +38,15 @@ void testLinearInterpolationAD() {
     ADVariableT x_eval = 1.5;
     ADVariableT y_interp = interp(x_eval);
 
-    QTA_LOG_INFO("quantape.test", "Interpolated value at x=1.5: {}",
+    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}",
                  quantape_test::num(y_interp.val()));
-    QTA_LOG_INFO("quantape.test", "Expected (linear): 2.5");
+    QTA_LOG_INFO("test", "Expected (linear): 2.5");
 
     // Test 2: Compute derivative with respect to x_eval
     stan::math::grad(y_interp.vi_);
     double dy_dx = x_eval.adj();
-    QTA_LOG_INFO("quantape.test", "Derivative d/dx (via AD): {}", quantape_test::num(dy_dx));
-    QTA_LOG_INFO("quantape.test", "Expected slope: 3.0 (slope between (1,1) and (2,4))");
+    QTA_LOG_INFO("test", "Derivative d/dx (via AD): {}", quantape_test::num(dy_dx));
+    QTA_LOG_INFO("test", "Expected slope: 3.0 (slope between (1,1) and (2,4))");
 
     // Test 3: Sensitivity to knot values
     stan::math::recover_memory();
@@ -57,15 +57,15 @@ void testLinearInterpolationAD() {
     ADVariableT result = interp2(1.5);
     stan::math::grad(result.vi_);
 
-    QTA_LOG_INFO("quantape.test", "Sensitivity to knot values:");
-    QTA_LOG_INFO("quantape.test", "  ∂result/∂y[1] = {} (expected: 0.5)",
+    QTA_LOG_INFO("test", "Sensitivity to knot values:");
+    QTA_LOG_INFO("test", "  ∂result/∂y[1] = {} (expected: 0.5)",
                  quantape_test::num(y2[1].adj()));
-    QTA_LOG_INFO("quantape.test", "  ∂result/∂y[2] = {} (expected: 0.5)",
+    QTA_LOG_INFO("test", "  ∂result/∂y[2] = {} (expected: 0.5)",
                  quantape_test::num(y2[2].adj()));
 }
 
 void testCubicSplineInterpolationAD() {
-    QTA_LOG_INFO("quantape.test", "=== Cubic Spline Interpolation with AD ===");
+    QTA_LOG_INFO("test", "=== Cubic Spline Interpolation with AD ===");
 
     // Create data for x^2 function
     std::vector<ADVariableT> x = {0.0, 1.0, 2.0, 3.0};
@@ -77,26 +77,26 @@ void testCubicSplineInterpolationAD() {
     ADVariableT x_eval = 1.5;
     ADVariableT y_interp = spline(x_eval);
 
-    QTA_LOG_INFO("quantape.test", "Interpolated value at x=1.5: {}",
+    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}",
                  quantape_test::num(y_interp.val()));
-    QTA_LOG_INFO("quantape.test", "Expected (x^2): 2.25");
-    QTA_LOG_INFO("quantape.test", "Spline approximation error: {}",
+    QTA_LOG_INFO("test", "Expected (x^2): 2.25");
+    QTA_LOG_INFO("test", "Spline approximation error: {}",
                  quantape_test::num(std::abs(y_interp.val() - 2.25)));
 
     // Compute derivative
     stan::math::grad(y_interp.vi_);
     double dy_dx = x_eval.adj();
-    QTA_LOG_INFO("quantape.test", "Derivative d/dx at x=1.5 (via AD): {}",
+    QTA_LOG_INFO("test", "Derivative d/dx at x=1.5 (via AD): {}",
                  quantape_test::num(dy_dx));
-    QTA_LOG_INFO("quantape.test", "Expected (2*1.5): 3.0");
-    QTA_LOG_INFO("quantape.test", "Derivative error: {}",
+    QTA_LOG_INFO("test", "Expected (2*1.5): 3.0");
+    QTA_LOG_INFO("test", "Derivative error: {}",
                  quantape_test::num(std::abs(dy_dx - 3.0)));
 
     stan::math::recover_memory();
 }
 
 void testAllCubicMethodsAD() {
-    QTA_LOG_INFO("quantape.test", "=== All Cubic Interpolation Methods with AD ===");
+    QTA_LOG_INFO("test", "=== All Cubic Interpolation Methods with AD ===");
 
     // Test smooth function: sin(x) at several points
     std::vector<ADVariableT> x;
@@ -118,9 +118,9 @@ void testAllCubicMethodsAD() {
                    {"Kruger", CubicDerivativeApprox::Kruger},
                    {"Harmonic", CubicDerivativeApprox::Harmonic}};
 
-    QTA_LOG_INFO("quantape.test", "Testing sin(x) at x = π/4");
-    QTA_LOG_INFO("quantape.test", "Expected value: {}", quantape_test::num(expected_value));
-    QTA_LOG_INFO("quantape.test", "Expected derivative: {}", quantape_test::num(expected_deriv));
+    QTA_LOG_INFO("test", "Testing sin(x) at x = π/4");
+    QTA_LOG_INFO("test", "Expected value: {}", quantape_test::num(expected_value));
+    QTA_LOG_INFO("test", "Expected derivative: {}", quantape_test::num(expected_deriv));
 
     for (const auto& [name, method] : methods) {
         stan::math::recover_memory();
@@ -141,7 +141,7 @@ void testAllCubicMethodsAD() {
 
         stan::math::grad(result.vi_);
 
-        QTA_LOG_INFO("quantape.test", "{}: value = {} (err: {}), deriv = {} (err: {})", name,
+        QTA_LOG_INFO("test", "{}: value = {} (err: {}), deriv = {} (err: {})", name,
                      quantape_test::num(result.val()),
                      quantape_test::num(std::abs(result.val() - expected_value)),
                      quantape_test::num(x_test.adj()),
@@ -151,7 +151,7 @@ void testAllCubicMethodsAD() {
 }
 
 void testBilinearInterpolationAD() {
-    QTA_LOG_INFO("quantape.test", "=== Bilinear Interpolation with AD ===");
+    QTA_LOG_INFO("test", "=== Bilinear Interpolation with AD ===");
 
     // Create 2D grid: f(x,y) = x*y
     std::vector<ADVariableT> x = {0.0, 1.0, 2.0};
@@ -171,24 +171,24 @@ void testBilinearInterpolationAD() {
     ADVariableT y_eval = 1.5;
     ADVariableT result = interp(x_eval, y_eval);
 
-    QTA_LOG_INFO("quantape.test", "f(1.5, 1.5) = {}", quantape_test::num(result.val()));
-    QTA_LOG_INFO("quantape.test", "Expected: 2.25 (1.5 * 1.5)");
+    QTA_LOG_INFO("test", "f(1.5, 1.5) = {}", quantape_test::num(result.val()));
+    QTA_LOG_INFO("test", "Expected: 2.25 (1.5 * 1.5)");
 
     // Compute partial derivatives
     stan::math::grad(result.vi_);
-    QTA_LOG_INFO("quantape.test", "∂f/∂x at (1.5, 1.5) = {} (expected: 1.5)",
+    QTA_LOG_INFO("test", "∂f/∂x at (1.5, 1.5) = {} (expected: 1.5)",
                  quantape_test::num(x_eval.adj()));
-    QTA_LOG_INFO("quantape.test", "∂f/∂y at (1.5, 1.5) = {} (expected: 1.5)",
+    QTA_LOG_INFO("test", "∂f/∂y at (1.5, 1.5) = {} (expected: 1.5)",
                  quantape_test::num(y_eval.adj()));
     stan::math::recover_memory();
 }
 
 void testIntegrationAD() {
-    QTA_LOG_INFO("quantape.test", "=== Integration with AD ===");
+    QTA_LOG_INFO("test", "=== Integration with AD ===");
 
     // Test 1: Integrate x^2 from 0 to θ, derivative should be θ^2
-    QTA_LOG_INFO("quantape.test", "Test: I(θ) = ∫₀^θ x² dx");
-    QTA_LOG_INFO("quantape.test", "Expected: I(θ) = θ³/3, dI/dθ = θ²");
+    QTA_LOG_INFO("test", "Test: I(θ) = ∫₀^θ x² dx");
+    QTA_LOG_INFO("test", "Expected: I(θ) = θ³/3, dI/dθ = θ²");
 
     ADVariableT theta = 2.0;
 
@@ -200,18 +200,18 @@ void testIntegrationAD() {
     double expected_integral = std::pow(2.0, 3) / 3.0;
     double expected_derivative = 2.0 * 2.0; // θ^2 at θ=2
 
-    QTA_LOG_INFO("quantape.test", "Integral value: {} (expected: {})",
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
                  quantape_test::num(integral.val()), quantape_test::num(expected_integral));
 
     stan::math::grad(integral.vi_);
-    QTA_LOG_INFO("quantape.test", "Derivative dI/dθ: {} (expected: {})",
+    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})",
                  quantape_test::num(theta.adj()), quantape_test::num(expected_derivative));
-    QTA_LOG_INFO("quantape.test", "Error in derivative: {}",
+    QTA_LOG_INFO("test", "Error in derivative: {}",
                  quantape_test::num(std::abs(theta.adj() - expected_derivative)));
 
     // Test 2: Parametric integral - ∫₀¹ θ*x² dx = θ/3
-    QTA_LOG_INFO("quantape.test", "Test: I(θ) = ∫₀¹ θ*x² dx");
-    QTA_LOG_INFO("quantape.test", "Expected: I(θ) = θ/3, dI/dθ = 1/3");
+    QTA_LOG_INFO("test", "Test: I(θ) = ∫₀¹ θ*x² dx");
+    QTA_LOG_INFO("test", "Expected: I(θ) = θ/3, dI/dθ = 1/3");
 
     stan::math::recover_memory();
     ADVariableT param = 3.0;
@@ -224,19 +224,19 @@ void testIntegrationAD() {
     double expected_integral2 = 3.0 / 3.0;
     double expected_deriv2 = 1.0 / 3.0;
 
-    QTA_LOG_INFO("quantape.test", "Integral value: {} (expected: {})",
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
                  quantape_test::num(integral2.val()), quantape_test::num(expected_integral2));
 
     stan::math::grad(integral2.vi_);
-    QTA_LOG_INFO("quantape.test", "Derivative dI/dθ: {} (expected: {})",
+    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})",
                  quantape_test::num(param.adj()), quantape_test::num(expected_deriv2));
-    QTA_LOG_INFO("quantape.test", "Error in derivative: {}",
+    QTA_LOG_INFO("test", "Error in derivative: {}",
                  quantape_test::num(std::abs(param.adj() - expected_deriv2)));
     stan::math::recover_memory();
 }
 
 void testIntegrateInterpolatedFunctionAD() {
-    QTA_LOG_INFO("quantape.test", "=== Integrate Interpolated Function with AD ===");
+    QTA_LOG_INFO("test", "=== Integrate Interpolated Function with AD ===");
 
     // Create interpolation for exp(x) using AD types
     std::vector<ADVariableT> x_data;
@@ -264,30 +264,30 @@ void testIntegrateInterpolatedFunctionAD() {
     double expected_value = std::exp(1.0) - 1.0;
     double expected_deriv = std::exp(1.0); // d/db[exp(b)-1] = exp(b)
 
-    QTA_LOG_INFO("quantape.test", "Integrating interpolated exp(x) from 0 to 1");
-    QTA_LOG_INFO("quantape.test", "Integral value: {} (expected: {})",
+    QTA_LOG_INFO("test", "Integrating interpolated exp(x) from 0 to 1");
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
                  quantape_test::num(integral.val()), quantape_test::num(expected_value));
-    QTA_LOG_INFO("quantape.test", "Error: {}",
+    QTA_LOG_INFO("test", "Error: {}",
                  quantape_test::num(std::abs(integral.val() - expected_value)));
 
     stan::math::grad(integral.vi_);
-    QTA_LOG_INFO("quantape.test", "Derivative d/d(upper_limit): {} (expected: {})",
+    QTA_LOG_INFO("test", "Derivative d/d(upper_limit): {} (expected: {})",
                  quantape_test::num(upper_limit.adj()), quantape_test::num(expected_deriv));
-    QTA_LOG_INFO("quantape.test", "Error in derivative: {}",
+    QTA_LOG_INFO("test", "Error in derivative: {}",
                  quantape_test::num(std::abs(upper_limit.adj() - expected_deriv)));
 
     // Test sensitivity to knot values
-    QTA_LOG_INFO("quantape.test", "Sensitivity to interpolation knot values:");
-    QTA_LOG_INFO("quantape.test", "  ∂Integral/∂y_data[5] (at x=1.0): {}",
+    QTA_LOG_INFO("test", "Sensitivity to interpolation knot values:");
+    QTA_LOG_INFO("test", "  ∂Integral/∂y_data[5] (at x=1.0): {}",
                  quantape_test::num(y_data[5].adj()));
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  (This shows how integral changes with knot value adjustments)");
     stan::math::recover_memory();
 }
 
 void testFinancialSensitivityExample() {
-    QTA_LOG_INFO("quantape.test", "=== Financial Example: Price Sensitivity ===");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "=== Financial Example: Price Sensitivity ===");
+    QTA_LOG_INFO("test",
                  "Scenario: Discount curve interpolation and present value calculation");
 
     // Discount factors at different maturities (time in years)
@@ -305,21 +305,21 @@ void testFinancialSensitivityExample() {
     ADVariableT discount_factor = discount_curve(cash_flow_time);
     ADVariableT present_value = cash_flow_amount * discount_factor;
 
-    QTA_LOG_INFO("quantape.test", "Cash flow: $100 at t=1.5 years");
-    QTA_LOG_INFO("quantape.test", "Discount factor at t=1.5: {}",
+    QTA_LOG_INFO("test", "Cash flow: $100 at t=1.5 years");
+    QTA_LOG_INFO("test", "Discount factor at t=1.5: {}",
                  quantape_test::num(discount_factor.val()));
-    QTA_LOG_INFO("quantape.test", "Present value: ${}", quantape_test::num(present_value.val()));
+    QTA_LOG_INFO("test", "Present value: ${}", quantape_test::num(present_value.val()));
 
     // Compute sensitivities (Greeks)
     stan::math::grad(present_value.vi_);
 
-    QTA_LOG_INFO("quantape.test", "Price sensitivities to discount curve knots:");
+    QTA_LOG_INFO("test", "Price sensitivities to discount curve knots:");
     for (size_t i = 0; i < discount_factors.size(); ++i) {
-        QTA_LOG_INFO("quantape.test", "  ∂PV/∂DF[t={}] = {}",
+        QTA_LOG_INFO("test", "  ∂PV/∂DF[t={}] = {}",
                      quantape_test::num(maturities[i].val()),
                      quantape_test::num(discount_factors[i].adj()));
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "(These are the risk sensitivities - how PV changes with curve movements)");
     stan::math::recover_memory();
 }
@@ -334,13 +334,13 @@ int main() {
         testIntegrateInterpolatedFunctionAD();
         testFinancialSensitivityExample();
 
-        QTA_LOG_INFO("quantape.test", "========================================");
-        QTA_LOG_INFO("quantape.test", "All AD tests completed successfully!");
-        QTA_LOG_INFO("quantape.test", "========================================");
+        QTA_LOG_INFO("test", "========================================");
+        QTA_LOG_INFO("test", "All AD tests completed successfully!");
+        QTA_LOG_INFO("test", "========================================");
 
         return 0;
     } catch (const std::exception& e) {
-        QTA_LOG_ERROR("quantape.test", "Error: {}", e.what());
+        QTA_LOG_ERROR("test", "Error: {}", e.what());
         return 1;
     }
 }

@@ -67,7 +67,7 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
                       quantape_test::num(got, 12), quantape_test::num(expected, 12),
                       quantape_test::num(tol, 3));
         std::exit(1);
@@ -201,7 +201,7 @@ void testSourceContract() {
     Eigen::MatrixXd block2;
     shifted.fill(3, 5, 7, block2);
     CHECK(!(block.array() == block2.array()).all());
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] Sobol source contract (blocks, uniforms, replica shifts)");
 }
 
@@ -239,7 +239,7 @@ void testEngineWithSobol() {
                   blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
         }
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] Sobol engine invariants (path/block/schedule bitwise)");
+    QTA_LOG_INFO("test", "  [ok] Sobol engine invariants (path/block/schedule bitwise)");
 }
 
 // ── Statistical accuracy ──
@@ -298,7 +298,7 @@ void testQmcVarianceReduction() {
     }
     const double mcRms = std::sqrt(mcSq / static_cast<double>(replicas));
     const double qmcRms = std::sqrt(qmcSq / static_cast<double>(replicas));
-    QTA_LOG_INFO("quantape.test", "  one-step call: MC rmse={}  QMC rmse={}  (ratio {})",
+    QTA_LOG_INFO("test", "  one-step call: MC rmse={}  QMC rmse={}  (ratio {})",
                  quantape_test::num(mcRms, 3), quantape_test::num(qmcRms, 3),
                  quantape_test::num(qmcRms / mcRms, 2));
     CHECK(qmcRms < 0.5 * mcRms);
@@ -381,7 +381,7 @@ void testQeUniformsWithSobol() {
     CHECK(negatives == 0);
     checkClose("qmc qe mean", mean, exactMean, 5e-4 * exactMean + 1e-5);
     checkClose("qmc qe var", var, exactVar, 1e-3 * exactVar + 1e-5);
-    QTA_LOG_INFO("quantape.test", "  [ok] QE with Sobol uniforms: exact CIR moments, no negatives");
+    QTA_LOG_INFO("test", "  [ok] QE with Sobol uniforms: exact CIR moments, no negatives");
 }
 
 // ── Pathwise AD with QMC ──
@@ -409,18 +409,18 @@ void testQmcGradients() {
         checkClose("qmc reverse vs forward", reverse.gradient(j), forward.gradient(j),
                    1e-8 * std::max(1.0, std::fabs(forward.gradient(j))));
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] QMC pathwise AD: reverse == forward on identical points");
+    QTA_LOG_INFO("test", "  [ok] QMC pathwise AD: reverse == forward on identical points");
 }
 
 } // namespace
 
 int main() {
-    QTA_LOG_INFO("quantape.test", "SDE QMC/Sobol tests");
+    QTA_LOG_INFO("test", "SDE QMC/Sobol tests");
     testSourceContract();
     testEngineWithSobol();
     testQmcVarianceReduction();
     testQeUniformsWithSobol();
     testQmcGradients();
-    QTA_LOG_INFO("quantape.test", "ALL SDE QMC TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL SDE QMC TESTS PASSED");
     return 0;
 }

@@ -38,7 +38,7 @@ namespace {
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
                       quantape_test::num(got, 15), quantape_test::num(expected, 15),
                       quantape_test::num(std::fabs(got - expected), 3));
         std::exit(1);
@@ -919,7 +919,7 @@ void testTNewton() {
               quantape::math::OptimizeResult::GradientTolReached);
         checkClose("tnewton rosenbrock x0", x[0], 1.0, 1e-8);
         checkClose("tnewton rosenbrock x1", x[1], 1.0, 1e-8);
-        QTA_LOG_INFO("quantape.test", "  tnewton rosenbrock2: iters={} evals={}", state.iterations,
+        QTA_LOG_INFO("test", "  tnewton rosenbrock2: iters={} evals={}", state.iterations,
                      state.evals);
     }
     // 3-D quadratic: exact Newton directions, fast convergence
@@ -933,7 +933,7 @@ void testTNewton() {
         for (std::size_t i = 0; i < x.size(); ++i) {
             checkClose("tnewton quadratic x", x[i], q.c[i], 1e-9);
         }
-        QTA_LOG_INFO("quantape.test", "  tnewton quadratic3: iters={} evals={}", state.iterations,
+        QTA_LOG_INFO("test", "  tnewton quadratic3: iters={} evals={}", state.iterations,
                      state.evals);
     }
     // `fvar<var>` backend drives the same path
@@ -956,7 +956,7 @@ void testTNewton() {
         CHECK(r == quantape::math::OptimizeResult::GradientTolReached);
         const double f = Himmelblau{}(x);
         CHECK(f < 1e-12);
-        QTA_LOG_INFO("quantape.test", "  tnewton himmelblau(0,0): x=({}, {}) f={}",
+        QTA_LOG_INFO("test", "  tnewton himmelblau(0,0): x=({}, {}) f={}",
                      quantape_test::num(x[0], 4), quantape_test::num(x[1], 4),
                      quantape_test::num(f, 2));
     }
@@ -988,7 +988,7 @@ void testTNewton() {
         CHECK(restarting.minimize(QuarticNonconvex{}, x1) ==
               quantape::math::OptimizeResult::GradientTolReached);
         checkClose("tnewton quartic restart x0", std::fabs(x1[0]), 0.70710678, 1e-6);
-        QTA_LOG_INFO("quantape.test", "  tnewton quartic(0.2,0): plain and restart both converge");
+        QTA_LOG_INFO("test", "  tnewton quartic(0.2,0): plain and restart both converge");
     }
 }
 
@@ -1160,6 +1160,6 @@ int main() {
     testTNewton();
     testBasePlumbing();
     stan::math::recover_memory();
-    QTA_LOG_INFO("quantape.test", "test_optimization: all invariants hold");
+    QTA_LOG_INFO("test", "test_optimization: all invariants hold");
     return 0;
 }

@@ -37,7 +37,7 @@ static bool converged(quantape::math::OptimizeResult r) {
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={}", label,
+        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
                       quantape_test::num(got, 15), quantape_test::num(expected, 15),
                       quantape_test::num(std::fabs(got - expected), 3));
         std::exit(1);
@@ -131,7 +131,7 @@ void testUnconstrainedLsq() {
             checkClose("lsq dp/dm vs FD", dp_dm[i * M + j], fd, 1e-6);
         }
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] unconstrained LSQ: IFT vs analytic 1e-10, vs FD 1e-6, cond={}",
                  quantape_test::num(ift.condition_number, 3));
 }
@@ -184,7 +184,7 @@ void testUnconstrainedNonlinear() {
     CHECK(converged(solver.minimize(fm, xm)));
     checkClose("rosen-shift dp0/dm FD", dp_dm[0], (xp[0] - xm[0]) / (2.0 * h), 1e-6);
     checkClose("rosen-shift dp1/dm FD", dp_dm[1], (xp[1] - xm[1]) / (2.0 * h), 1e-6);
-    QTA_LOG_INFO("quantape.test", "  [ok] nonlinear unconstrained: dp/dm = (1, 2) analytic + FD");
+    QTA_LOG_INFO("test", "  [ok] nonlinear unconstrained: dp/dm = (1, 2) analytic + FD");
 }
 
 // ============================================================================
@@ -237,7 +237,7 @@ void testActiveBound() {
         CHECK(std::fabs(xp[0]) < 1e-10);
         checkClose("bound-active one-sided FD", 0.0, (xp[0] - x_hat[0]) / (-1e-4), 1e-10);
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] active-bound KKT: dp/dm = 0, dlambda/dm = -1 exact + one-sided FD");
 }
 
@@ -266,7 +266,7 @@ void testInactiveInequality() {
     CHECK(ift.active_ineq.empty());
     checkClose("inactive-ineq dp/dm", dp_dm[0], 1.0, 1e-12);
     CHECK(dlam_dm.empty());
-    QTA_LOG_INFO("quantape.test", "  [ok] inactive inequality: unconstrained fallback, dp/dm = 1");
+    QTA_LOG_INFO("test", "  [ok] inactive inequality: unconstrained fallback, dp/dm = 1");
 }
 
 // ============================================================================
@@ -327,7 +327,7 @@ void testEquality() {
         for (std::size_t i = 0; i < 2; ++i)
             checkClose("eq dp/dm FD", dp_dm[i * 2 + j], (xp[i] - x_hat[i]) / h, 1e-6);
     }
-    QTA_LOG_INFO("quantape.test", "  [ok] equality KKT: dp/dm and dnu/dm exact + FD (one-sided)");
+    QTA_LOG_INFO("test", "  [ok] equality KKT: dp/dm and dnu/dm exact + FD (one-sided)");
 }
 
 // ============================================================================
@@ -418,7 +418,7 @@ void testCombinedActive() {
                    1e-6);
         checkClose("combined dnu FD", dnu_dm[j], (st.eq_multipliers[0] - nu[0]) / 1e-4, 1e-6);
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] combined active: exact KKT + multiplier FD + minimizeDifferential");
 }
 
@@ -455,7 +455,7 @@ void testDegenerate() {
     CHECK(ift.pseudo_inverse);
     CHECK(ift.rank < 3);
     checkClose("degenerate dp/dm", dp_dm[0], 0.0, 1e-8);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] degenerate KKT: pseudo-inverse fallback, dp/dm = 0 (rank={})", ift.rank);
 }
 
@@ -481,7 +481,7 @@ void testBoundsOnly() {
     checkClose("bounds dp0/dm1", dp_dm[1], 0.0, 1e-12);
     checkClose("bounds dp1/dm0", dp_dm[2], 0.0, 1e-12);
     checkClose("bounds dp1/dm1", dp_dm[3], 1.0, 1e-12);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] box-bound-active KKT (no callables): dp0 = 0, dp1/dm1 = 1");
 }
 
@@ -506,7 +506,7 @@ void testConditionNumber() {
     checkClose("cond number", ift.condition_number, 1.0 / eps, 1e-6);
     CHECK(!ift.regularized);
     checkClose("ill-cond dp/dm diagonal", dp_dm[0], 1.0, 1e-12);
-    QTA_LOG_INFO("quantape.test", "  [ok] condition number reporting: cond = {}",
+    QTA_LOG_INFO("test", "  [ok] condition number reporting: cond = {}",
                  quantape_test::num(ift.condition_number, 2));
 }
 
@@ -547,7 +547,7 @@ void testVarComposition() {
             ref += w[i] * d(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j));
         checkClose("var composition grad_m", m_var[j].adj(), ref, 1e-10);
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] var composition: caller-tape grad matches w^T dp/dm (1e-10)");
 }
 
@@ -583,7 +583,7 @@ void testAugLagIntegration() {
         checkClose("auglag dp/dm", dp_dm[i], 0.0, 1e-6);
     checkClose("auglag dlam/dm0", dlam_dm[0], 1.0, 1e-6);
     checkClose("auglag dnu/dm1", dnu_dm[1], 1.0, 1e-6);
-    QTA_LOG_INFO("quantape.test", "  [ok] AUGLAG multiplier export -> same KKT IFT (1e-6)");
+    QTA_LOG_INFO("test", "  [ok] AUGLAG multiplier export -> same KKT IFT (1e-6)");
 }
 
 // ============================================================================
@@ -649,7 +649,7 @@ void testNonlinearConstraint() {
         CHECK(converged(rj) || rj == quantape::math::OptimizeResult::RoundoffLimited);
         checkClose("disk dp0/dm0 FD", dp_dm[0], (xp[0] - x_hat[0]) / h, 1e-6);
     }
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] nonlinear active constraint: lambda*H_g in H_L + FD (disk)");
 }
 
@@ -672,7 +672,7 @@ void testRidgeEscalation() {
     CHECK(ift.regularized);
     CHECK(ift.ridge_used > 0.0);
     CHECK(std::isfinite(dp_dm[0]));
-    QTA_LOG_INFO("quantape.test", "  [ok] ridge escalation: indefinite H regularized (ridge={})",
+    QTA_LOG_INFO("test", "  [ok] ridge escalation: indefinite H regularized (ridge={})",
                  quantape_test::num(ift.ridge_used, 2));
 
     // Near-flat but positive definite: no ridge needed, exact answer
@@ -688,7 +688,7 @@ void testRidgeEscalation() {
     CHECK(!ift2.regularized);
     checkClose("flat-PD dp0/dm0", dp2[0], 1.0, 1e-12);
     checkClose("flat-PD dp1/dm1", dp2[3], 1.0, 1e-12);
-    QTA_LOG_INFO("quantape.test", "  [ok] near-flat PD Hessian: no ridge, exact dp/dm (cond={})",
+    QTA_LOG_INFO("test", "  [ok] near-flat PD Hessian: no ridge, exact dp/dm (cond={})",
                  quantape_test::num(ift2.condition_number, 1));
 }
 
@@ -718,7 +718,7 @@ void testConstrainedVarComposition() {
     phi.grad();
     checkClose("constrained var grad_m0", m_var[0].adj(), 0.0, 1e-8);
     checkClose("constrained var grad_m1", m_var[1].adj(), 0.0, 1e-8);
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "  [ok] constrained var composition: SLSQP export + zero grad through KKT");
 }
 
@@ -737,6 +737,6 @@ int main() {
     testNonlinearConstraint();
     testRidgeEscalation();
     testConstrainedVarComposition();
-    QTA_LOG_INFO("quantape.test", "ALL IFT TESTS PASSED");
+    QTA_LOG_INFO("test", "ALL IFT TESTS PASSED");
     return 0;
 }

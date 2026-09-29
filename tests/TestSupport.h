@@ -18,7 +18,7 @@
 #define CHECK(cond)                                                                                \
     do {                                                                                           \
         if (!(cond)) {                                                                             \
-            QTA_LOG_ERROR("quantape.test", "CHECK failed at {}:{}: {}", __FILE__, __LINE__,        \
+            QTA_LOG_ERROR("test", "CHECK failed at {}:{}: {}", __FILE__, __LINE__,        \
                           #cond);                                                                  \
             ::quantape::log::shutdown();                                                           \
             std::fflush(nullptr);                                                                  \

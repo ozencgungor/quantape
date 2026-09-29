@@ -415,7 +415,7 @@ double bench_us(F&& fn, int N) {
 }
 
 int main() {
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "╔═══════════════════════════════════════════════════════════════╗\n"
                  "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain       ║\n"
                  "╚═══════════════════════════════════════════════════════════════╝\n");
@@ -430,7 +430,7 @@ int main() {
     double vol = 0.30, K = 3.3, T_opt = 1.0;
 
     // ── 1. Linear interpolation chain ──
-    QTA_LOG_INFO("quantape.test", "── Chain: Linear Interp → BS ──\n");
+    QTA_LOG_INFO("test", "── Chain: Linear Interp → BS ──\n");
 
     CurveInterp linear_curve{pillar_times, N_PILLARS};
 
@@ -446,15 +446,15 @@ int main() {
 
     stan::math::hessian(linear_functor, x, fx, grad, H);
 
-    QTA_LOG_INFO("quantape.test", "  PV = {}", quantape_test::num(fx, 6));
+    QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fx, 6));
 
     std::ostringstream grad_row;
     for (int i = 0; i < N_PILLARS; ++i)
         grad_row << quantape_test::num(grad(i), 4) << ' ';
-    QTA_LOG_INFO("quantape.test", "  Gradient (∂PV/∂r_i):\n    {}", grad_row.str());
+    QTA_LOG_INFO("test", "  Gradient (∂PV/∂r_i):\n    {}", grad_row.str());
 
     // Show Hessian (only the non-zero block)
-    QTA_LOG_INFO("quantape.test", "  Hessian (∂²PV/∂r_i∂r_j) — non-zero block:");
+    QTA_LOG_INFO("test", "  Hessian (∂²PV/∂r_i∂r_j) — non-zero block:");
     for (int i = 0; i < N_PILLARS; ++i) {
         std::string row = "    [";
         for (int j = 0; j < N_PILLARS; ++j) {
@@ -465,7 +465,7 @@ int main() {
                 row += '.';
         }
         row += " ]";
-        QTA_LOG_INFO("quantape.test", "{}", row);
+        QTA_LOG_INFO("test", "{}", row);
     }
 
     // Finite difference verification
@@ -493,11 +493,11 @@ int main() {
             H_fd(j, i) = H_fd(i, j);
         }
     }
-    QTA_LOG_INFO("quantape.test", "\n  Max |H_AD - H_fd|: {}",
+    QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
                  quantape_test::num((H - H_fd).cwiseAbs().maxCoeff(), 2));
 
     // ── 2. Cubic spline chain ──
-    QTA_LOG_INFO("quantape.test", "\n── Chain: Cubic Spline → BS ──\n");
+    QTA_LOG_INFO("test", "\n── Chain: Cubic Spline → BS ──\n");
 
     CubicSplineInterp spline_curve{pillar_times, N_PILLARS};
 
@@ -509,20 +509,20 @@ int main() {
 
     stan::math::hessian(spline_functor, x, fx2, grad2, H2);
 
-    QTA_LOG_INFO("quantape.test", "  PV = {}", quantape_test::num(fx2, 6));
+    QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fx2, 6));
 
     std::ostringstream grad2_row;
     for (int i = 0; i < N_PILLARS; ++i)
         grad2_row << quantape_test::num(grad2(i), 4) << ' ';
-    QTA_LOG_INFO("quantape.test", "  Gradient:\n    {}", grad2_row.str());
+    QTA_LOG_INFO("test", "  Gradient:\n    {}", grad2_row.str());
 
-    QTA_LOG_INFO("quantape.test", "  Hessian (∂²PV/∂r_i∂r_j):");
+    QTA_LOG_INFO("test", "  Hessian (∂²PV/∂r_i∂r_j):");
     for (int i = 0; i < N_PILLARS; ++i) {
         std::string row = "    [";
         for (int j = 0; j < N_PILLARS; ++j)
             row += ' ' + quantape_test::num(H2(i, j), 2);
         row += " ]";
-        QTA_LOG_INFO("quantape.test", "{}", row);
+        QTA_LOG_INFO("test", "{}", row);
     }
 
     // FD check
@@ -549,11 +549,11 @@ int main() {
             H2_fd(j, i) = H2_fd(i, j);
         }
     }
-    QTA_LOG_INFO("quantape.test", "\n  Max |H_AD - H_fd|: {}",
+    QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
                  quantape_test::num((H2 - H2_fd).cwiseAbs().maxCoeff(), 2));
 
     // ── 3. Timing comparison ──
-    QTA_LOG_INFO("quantape.test", "\n── Performance ──\n");
+    QTA_LOG_INFO("test", "\n── Performance ──\n");
     constexpr int BENCH_N = 50'000;
 
     auto t_linear = bench_us(
@@ -590,14 +590,14 @@ int main() {
     Eigen::VectorXd g_naive(N_PILLARS);
     Eigen::MatrixXd H_naive(N_PILLARS, N_PILLARS);
     stan::math::hessian(naive_functor, x, fx_naive, g_naive, H_naive);
-    QTA_LOG_INFO("quantape.test", "  Max |H_naive - H_mixed|: {}\n",
+    QTA_LOG_INFO("test", "  Max |H_naive - H_mixed|: {}\n",
                  quantape_test::num((H_naive - H).cwiseAbs().maxCoeff(), 2));
 
-    QTA_LOG_INFO("quantape.test", "  {:<35}{:>10}{:>12}", "Approach", "us/call", "vs Naive");
-    QTA_LOG_INFO("quantape.test", "  {}", std::string(57, '-'));
+    QTA_LOG_INFO("test", "  {:<35}{:>10}{:>12}", "Approach", "us/call", "vs Naive");
+    QTA_LOG_INFO("test", "  {}", std::string(57, '-'));
 
     auto row = [&](const char* name, double t) {
-        QTA_LOG_INFO("quantape.test", "  {:<35}{:>10}{:>10}x", name, quantape_test::num(t, 3),
+        QTA_LOG_INFO("test", "  {:<35}{:>10}{:>10}x", name, quantape_test::num(t, 3),
                      quantape_test::num(t_naive / t, 2));
     };
 
@@ -606,23 +606,23 @@ int main() {
     row("Mixed: cubic spline + BS L2", t_spline);
 
     // ── 4. Architecture summary ──
-    QTA_LOG_INFO("quantape.test", "\n── Architecture ──\n");
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test", "\n── Architecture ──\n");
+    QTA_LOG_INFO("test",
                  "  Each function provides overloads for {{double, var, fvar<var>}}.");
-    QTA_LOG_INFO("quantape.test", "  Composition via fvar<var> chains automatically.\n");
-    QTA_LOG_INFO("quantape.test", "  Level 0 (black box):   fvar<var> tapes everything");
-    QTA_LOG_INFO("quantape.test", "  Level 1 (grad as var): make_callback_var for 1st order,");
-    QTA_LOG_INFO("quantape.test", "                         gradient-as-var for 2nd order");
-    QTA_LOG_INFO("quantape.test", "  Level 2 (full analyt): make_callback_var at both levels\n");
-    QTA_LOG_INFO("quantape.test", "  ┌─────────────┐   ┌──────────────┐   ┌─────────┐");
-    QTA_LOG_INFO("quantape.test", "  │ Rate Pillars│──▶│ Curve Interp │──▶│   BS    │──▶ PV");
-    QTA_LOG_INFO("quantape.test", "  │   (input)   │   │ Level 0/1    │   │ Level 2 │");
-    QTA_LOG_INFO("quantape.test", "  └─────────────┘   └──────────────┘   └─────────┘");
-    QTA_LOG_INFO("quantape.test", "       θ               g(θ)              f(g(θ))\n");
-    QTA_LOG_INFO("quantape.test", "  H_total = J_g^T · H_f · J_g  +  Σ_a (∂f/∂g_a) · H_g_a");
-    QTA_LOG_INFO("quantape.test", "  (AD computes this automatically via fvar<var> composition)");
+    QTA_LOG_INFO("test", "  Composition via fvar<var> chains automatically.\n");
+    QTA_LOG_INFO("test", "  Level 0 (black box):   fvar<var> tapes everything");
+    QTA_LOG_INFO("test", "  Level 1 (grad as var): make_callback_var for 1st order,");
+    QTA_LOG_INFO("test", "                         gradient-as-var for 2nd order");
+    QTA_LOG_INFO("test", "  Level 2 (full analyt): make_callback_var at both levels\n");
+    QTA_LOG_INFO("test", "  ┌─────────────┐   ┌──────────────┐   ┌─────────┐");
+    QTA_LOG_INFO("test", "  │ Rate Pillars│──▶│ Curve Interp │──▶│   BS    │──▶ PV");
+    QTA_LOG_INFO("test", "  │   (input)   │   │ Level 0/1    │   │ Level 2 │");
+    QTA_LOG_INFO("test", "  └─────────────┘   └──────────────┘   └─────────┘");
+    QTA_LOG_INFO("test", "       θ               g(θ)              f(g(θ))\n");
+    QTA_LOG_INFO("test", "  H_total = J_g^T · H_f · J_g  +  Σ_a (∂f/∂g_a) · H_g_a");
+    QTA_LOG_INFO("test", "  (AD computes this automatically via fvar<var> composition)");
 
-    QTA_LOG_INFO("quantape.test",
+    QTA_LOG_INFO("test",
                  "\n═══════════════════════════════════════════════════════════════");
     return 0;
 }
