@@ -219,11 +219,12 @@ private:
     /**
      * @brief Bit-level finite check, immune to floating-point fast-math.
      *
-     * This project's Release flags include -ffast-math (-ffinite-math-only),
-     * under which std::isfinite is assumed true and gets compiled away —
-     * the boundary guard would silently pass infinities into the sum. A
-     * memcpy-based exponent check stays in the integer domain and cannot be
-     * optimized under FP assumptions.
+     * If a translation unit enables -ffast-math (-ffinite-math-only),
+     * std::isfinite is assumed true and gets compiled away — the boundary
+     * guard would silently pass infinities into the sum. The project does not
+     * enable fast-math, but consumers may; a memcpy-based exponent check
+     * stays in the integer domain and cannot be optimized under FP
+     * assumptions.
      */
     static bool isFiniteFastMathProof(double v) {
         std::uint64_t bits;

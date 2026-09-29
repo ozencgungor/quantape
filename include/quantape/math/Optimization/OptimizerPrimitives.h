@@ -98,8 +98,8 @@ struct StopCriteria {
     double xtol_rel = 0.0;
     double xtol_abs = 0.0;
     double grad_tol = 1e-10;
-    /// Stop when f <= stopval; -max is the "never" sentinel (finite to stay
-    /// well-defined under the project's release -ffast-math flags).
+    /// Stop when f <= stopval; -max is the "never" sentinel (kept finite so
+    /// comparisons stay well-defined even under aggressive FP flags).
     double stopval = -std::numeric_limits<double>::max();
     int maxeval = 0;      ///< 0 = unlimited
     double maxtime = 0.0; ///< seconds, 0 = unlimited

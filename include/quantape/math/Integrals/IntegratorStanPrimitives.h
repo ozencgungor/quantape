@@ -57,6 +57,7 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "GaussLobattoIntegrator.h"
@@ -76,7 +77,7 @@ struct ScalarTag {
 namespace detail {
 
 struct RuleNode;
-using RuleNodePtr = std::shared_ptr<const RuleNode>;
+using RuleNodePtr = std::shared_ptr<RuleNode>;
 
 /**
  * @brief One node of the linear-expression DAG carried by RuleScalar.
@@ -84,9 +85,39 @@ using RuleNodePtr = std::shared_ptr<const RuleNode>;
  * Scale: scale * a; Add: a + b; Sub: a - b; Slot: the k-th f-evaluation.
  * The evaluation coefficients are constants, so the whole DAG stays linear
  * and each operation costs O(1) (no per-scalar coefficient vectors).
+ *
+ * The DAG can be as deep as the converged rule has evaluations (accumulation
+ * is left-deep), so teardown is iterative: recursive shared_ptr destruction
+ * would overflow the stack for large adaptive rules.
  */
 struct RuleNode {
     enum class Kind : unsigned char { Slot, Scale, Add, Sub };
+
+    RuleNode(Kind k, std::size_t s, double c, RuleNodePtr x, RuleNodePtr y)
+        : kind(k), slot(s), scale(c), a(std::move(x)), b(std::move(y)) {}
+
+    ~RuleNode() {
+        std::vector<RuleNodePtr> pending;
+        if (a)
+            pending.push_back(std::move(a));
+        if (b)
+            pending.push_back(std::move(b));
+        while (!pending.empty()) {
+            RuleNodePtr node = std::move(pending.back());
+            pending.pop_back();
+            if (node.use_count() == 1) {
+                // Last owner: detach the children before this node dies so the
+                // chain is torn down in this loop instead of recursively.
+                if (node->a)
+                    pending.push_back(std::move(node->a));
+                if (node->b)
+                    pending.push_back(std::move(node->b));
+            }
+        }
+    }
+
+    RuleNode(const RuleNode&) = delete;
+    RuleNode& operator=(const RuleNode&) = delete;
 
     Kind kind;
     std::size_t slot = 0;
@@ -115,8 +146,8 @@ struct RuleScalar {
     RuleScalar() = default;
     RuleScalar(double value) : v(value) {} // constant: empty expr
     RuleScalar(double value, std::size_t slot)
-        : v(value), expr(std::make_shared<const RuleNode>(
-                        RuleNode{RuleNode::Kind::Slot, slot, 0.0, nullptr, nullptr})) {}
+        : v(value),
+          expr(std::make_shared<RuleNode>(RuleNode::Kind::Slot, slot, 0.0, nullptr, nullptr)) {}
     RuleScalar(double value, RuleNodePtr e) : v(value), expr(std::move(e)) {}
 
     double val() const { return v; }
@@ -126,19 +157,19 @@ struct RuleScalar {
             return y;
         if (!y)
             return x;
-        return std::make_shared<const RuleNode>(RuleNode{RuleNode::Kind::Add, 0, 0.0, x, y});
+        return std::make_shared<RuleNode>(RuleNode::Kind::Add, 0, 0.0, x, y);
     }
     static RuleNodePtr sub(const RuleNodePtr& x, const RuleNodePtr& y) {
         if (!y)
             return x;
         if (!x)
             return scale(y, -1.0);
-        return std::make_shared<const RuleNode>(RuleNode{RuleNode::Kind::Sub, 0, 0.0, x, y});
+        return std::make_shared<RuleNode>(RuleNode::Kind::Sub, 0, 0.0, x, y);
     }
     static RuleNodePtr scale(const RuleNodePtr& x, double c) {
         if (!x || c == 1.0)
             return x;
-        return std::make_shared<const RuleNode>(RuleNode{RuleNode::Kind::Scale, 0, c, x, nullptr});
+        return std::make_shared<RuleNode>(RuleNode::Kind::Scale, 0, c, x, nullptr);
     }
 
     [[noreturn]] static void nonlinear() {
@@ -175,24 +206,36 @@ struct RuleScalar {
     void accumulate(std::vector<double>& coeffs) const { accumulate(expr.get(), 1.0, coeffs); }
 
 private:
-    static void accumulate(const RuleNode* n, double w, std::vector<double>& coeffs) {
-        if (n == nullptr)
-            return;
-        switch (n->kind) {
-            case RuleNode::Kind::Slot:
-                coeffs[n->slot] += w;
-                break;
-            case RuleNode::Kind::Scale:
-                accumulate(n->a.get(), w * n->scale, coeffs);
-                break;
-            case RuleNode::Kind::Add:
-                accumulate(n->a.get(), w, coeffs);
-                accumulate(n->b.get(), w, coeffs);
-                break;
-            case RuleNode::Kind::Sub:
-                accumulate(n->a.get(), w, coeffs);
-                accumulate(n->b.get(), -w, coeffs);
-                break;
+    static void accumulate(const RuleNode* root, double w, std::vector<double>& coeffs) {
+        // Iterative walk for the same reason as the RuleNode destructor: the
+        // expression DAG is left-deep and can be thousands of nodes deep.
+        std::vector<std::pair<const RuleNode*, double>> stack;
+        if (root != nullptr)
+            stack.emplace_back(root, w);
+        while (!stack.empty()) {
+            const auto [n, weight] = stack.back();
+            stack.pop_back();
+            switch (n->kind) {
+                case RuleNode::Kind::Slot:
+                    coeffs[n->slot] += weight;
+                    break;
+                case RuleNode::Kind::Scale:
+                    if (n->a)
+                        stack.emplace_back(n->a.get(), weight * n->scale);
+                    break;
+                case RuleNode::Kind::Add:
+                    if (n->a)
+                        stack.emplace_back(n->a.get(), weight);
+                    if (n->b)
+                        stack.emplace_back(n->b.get(), weight);
+                    break;
+                case RuleNode::Kind::Sub:
+                    if (n->a)
+                        stack.emplace_back(n->a.get(), weight);
+                    if (n->b)
+                        stack.emplace_back(n->b.get(), -weight);
+                    break;
+            }
         }
     }
 };

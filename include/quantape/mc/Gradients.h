@@ -67,8 +67,8 @@ namespace quantape::mc {
  *   branches) is primal-pinned (a.e. correct derivative). Discontinuous
  *   payoffs must be smoothed (`payoffs/Indicators.h`).
  * - Primal parity with the `double` engine: checkpointed mode is bitwise
- *   (value pass is plain double); full-tape mode agrees to ~1 ulp (not
- *   bitwise under `-ffast-math`; design-doc gate 10).
+ *   (value pass is plain double); full-tape mode agrees to ~1 ulp
+ *   (design-doc gate 10).
  *
  * ## LSM / callable switch
  *

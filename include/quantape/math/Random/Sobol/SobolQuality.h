@@ -34,8 +34,8 @@
 namespace quantape::math::mc {
 namespace sobol {
 
-/// Sentinel for "no finite score". Finite (not infinity) so it stays valid
-/// under -ffast-math, where infinities are undefined behaviour.
+/// Sentinel for "no finite score". Finite (not infinity) so comparisons stay
+/// well-defined even under aggressive floating-point flags.
 inline constexpr double kNoScore = std::numeric_limits<double>::max();
 
 // ═══════════════════════════════════════════════════════════════════════════

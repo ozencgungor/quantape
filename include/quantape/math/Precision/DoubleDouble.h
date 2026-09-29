@@ -19,8 +19,8 @@
 // IMPORTANT: compensated arithmetic requires strict IEEE semantics. The
 // translation unit using this header must NOT be compiled with
 // `-ffast-math`/`-funsafe-math-optimizations` (reassociation folds the
-// error terms away); add `-fno-fast-math` where the project's release flags
-// enable them.
+// error terms away). The project's flags never enable it; keep it that way,
+// and add `-fno-fast-math` if a consumer overrides the flags.
 //
 
 #include <cmath>
