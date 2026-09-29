@@ -10,7 +10,8 @@ selected automatically by the scalar template parameter.
 
 ```
 include/quantape/      public headers (namespace quantape::)
-    math/              integrators, solvers, interpolation, optimization, AD, RNG
+    calibration/       calibration problems, IFT/KKT risk chains, model adapters
+    math/              integrators, solvers, interpolation, optimization, AD, RNG, high-precision arithmetic, special functions
     markets/           curves (yield, IR, survival), volatility (IR, EQ, FX), mostly a stub for now
     mc/                SDE simulation engine + pathwise AD (gradients, sensitivities); mc/processes/ = SDE process bundles
     models/            models (process + pricing/calibration mathematics; e.g. HestonModel)
@@ -23,6 +24,7 @@ benchmarks/            timing harnesses (not correctness gates); `bench_sde` cov
 examples/              usage demos
 docs/                  Doxyfile + docs/index.html entry point (generated HTML gitignored)
 scripts/               format_code.sh
+tools/                 offline tooling: Sobol extenders/refiners/verifiers, analyzers, table packer, market-data fetchers, AWS spot runner
 ```
 
 All headers live under one include root: consumers include
@@ -35,13 +37,13 @@ umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
 
 | Module | Contents                                                                                                                                                                                                                                                                                                                                                                                             |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol)                                                                                                  |
+| `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh, Ooura double-exponential, exponentially fitted Gauss–Laguerre (tabular rule)), in-house double-double arithmetic (`Precision/`) and oscillatory special functions Si/Ci (`SpecialFunctions/`), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol generator + quality)                                                                                                  |
 | `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export |
 | `quantape/calibration/` | Calibration use of the optimizer stack: scalar-generic `CalibrationProblem` concept (double / `var` / `fvar<var>` residuals through `make_callback_var` pricing), assembled LS derivatives + `calibrationIft` (db/da, dlambda/da, calibrator-agnostic multiplier recovery), `CalibrationChain` (instrument-Jacobian route, `propagateMarketRisks`) and the AD twins `CalibrationChainKkt` / `ImplicitFunction` (minimizeDifferential, iftKkt), plus the Heston adapter (`HestonCalibration.h`) |
 | `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP                                                                                                                                                                                                                      |
 | `quantape/markets/` | Curves (yield, IR, survival), volatility (IR, EQ, FX), currently a stub                                                                                                                                                                                                                                                                                                                              |
-| `quantape/processes/` | Stochastic models and bridge samplers                                                                                                                                                                                                                                                                                                                                                                |
-| `quantape/models/` | Model layer: characteristic functions and analytic pricers with instrument gradients (`HestonModel.h`: Gatheral CF, Lewis + control variate, complex-step Jacobians) |
+| `quantape/mc/processes/` | SDE process bundles (GBM, OU, CIR, Heston; Heston QE moment-matching)                                                                                                                                                                                                                                                                                                                                                                |
+| `quantape/models/` | Model layer: characteristic functions and analytic pricers with instrument gradients (`HestonModel.h`: Gatheral CF, Lewis + Black–Scholes/asymptotic control variates, EFGL quadrature, full 9-parameter complex-step gradient/Hessian, quote surrogates, single-node callback-var AD prices in `HestonStanPrimitives.h`) |
 | `quantape/mc/` | SDE simulation engine: time grids, piecewise-constant parameters, blocked/streamed simulation, TBB schedules, keyed reproducible Gaussian/uniform draws, **Sobol/QMC source** (jump-ahead points, digital-shift replicas, layouts documented in `SobolSource.h`), schemes (Euler, predictor-corrector, Milstein, moment-matching QE), Monte Carlo estimator; pathwise AD: **Stan-backed defaults** (reverse `Gradients.h`, forward `ForwardStan.h`, state derivatives `StateDerivatives.h`), opt-in accelerated scalar types under `mc/mcfwdrev/` (fixed-size forward dual, lean reverse tape), checkpointed gluing for long horizons, multiprocessing sharding (bitwise-mergeable samples) |
 | `quantape/payoffs/` | Payoff helpers: branchless smoothed indicators for pathwise-differentiable digital/barrier payoffs |
 | `quantape/scenario/` | Monte Carlo scenario machinery                                                                                                                                                                                                                                                                                                                                                                       |
@@ -51,7 +53,11 @@ umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
 
 ```bash
 cmake -S . -B build
-cmake --build build --target <target> -j 8
+cmake --build build --target <target> -j 2
+
+# Optional: compile-time Sobol table (text or .qsb); packed to a binary asset
+# automatically and exposed via SobolGenerator::fromDefaultTable
+cmake -S . -B build -DQUANTAPE_SOBOL_TABLE=/path/to/joe-kuo-table.txt
 
 # API documentation (Doxygen) -> build/docs/doxygen/html
 cmake --build build --target doc
@@ -65,10 +71,12 @@ transitively.
 
 ## Tests
 
-Run a target and check the exit code; all of the following must exit `0`.
+Run a target and check the exit code, or run the whole registered suite
+through CTest; every gate must exit `0`.
 
 ```bash
-./build/<target>
+./build/<target>          # single correctness gate
+ctest --test-dir build    # all registered tests
 ```
 
 | Target | Validates |
@@ -100,10 +108,28 @@ Run a target and check the exit code; all of the following must exit `0`.
 | `test_market_risk_ift` | Calibration chains: KKT vs instrument-Jacobian routes, bump-recalibrate, instrument exactness, end-to-end SDE gradient -> IFT |
 | `test_ziggurat` / `test_mcfarland` | Ziggurat / McFarland normal samplers: correctness and throughput |
 | `test_tanh_sinh` | Tanh-Sinh quadrature value + AD gradients/Hessians |
+| `test_black76` | Black-76 / GBS analytical Greeks (1st and 2nd order) vs finite differences and Stan AD |
+| `test_mixed_hessian` | Mixed 1st/2nd-order AD through a pricing chain (analytical Greeks where available, AD fallback): mixed Hessian blocks vs FD |
+| `test_pricer_hessian` | Pricer-hierarchy Hessian architecture: nested analytical AD paths per product vs FD |
+| `test_precision` | In-house double-double (~32 digits): error-free arithmetic, sqrt/exp/log/sin/cos, Si anchors, Ooura double-exponential oscillatory integrals vs closed forms |
+| `test_sobol_generator` | Sobol generator: dimension-1 semantics, digital-net exactness, digital shifts/replicas, 32/64-bit storage parity, jump-ahead (gray order), thread equivalence, mmap asset vs text table, engine integration |
+| `test_sobol_quality` | Sobol table quality battery: exactness, discrepancy and integration criteria |
+| `test_sobol_tools` | Table tooling: extend/refine/verify round-trips and failure modes |
 
-Benchmarks live in `benchmarks/` (`test_optimizers_bench`,
-`test_bs_hessian_bench`, AD benches, exp/log bit-trick bench) — timing
-harnesses for the sampling profiler, not correctness gates.
+Benchmarks live in `benchmarks/` (`bench_sde`, `bench_sobol`,
+`test_optimizers_bench`, `test_bs_hessian_bench`, and the Stan/AD
+micro-benchmarks `test_bs_ad_bench`, `test_bvn_ad_bench`,
+`test_interp_ad_bench`, `test_fast_exp_log`) — timing harnesses for the
+sampling profiler, not correctness gates.
+
+## Tools
+
+`tools/` holds offline utilities (not correctness gates): the Sobol table
+pipeline (`extend_sobol`, `refine_sobol`, `verify_sobol`, `analyze_sobol`,
+`sobol_to_binary`), market-data collection under `tools/market_data/` (CBOE /
+Tradier / ORATS option chains, swaption volumes, offline replay) and the AWS
+spot runner `tools/aws/run_spot.sh` with its bundle builder. Run logs,
+collected data and python bytecode are gitignored.
 
 ## AD architecture
 
