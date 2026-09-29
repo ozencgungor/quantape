@@ -29,7 +29,7 @@ echo ""
 # Find all .cpp and .h files and format them
 find . -type f \( -name "*.cpp" -o -name "*.h" \) \
     ! -path "./cmake*/*" \
-    ! -path "./build/*" \
+    ! -path "./build*/*" \
     ! -path "./third-party/*" \
     -print0 | while IFS= read -r -d '' file; do
     echo -e "${YELLOW}Formatting:${NC} $file"
