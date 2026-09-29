@@ -8,11 +8,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -326,14 +326,14 @@ private:
     sharedLookup(const std::string& key, const SobolOptions& options,
                  const std::function<SobolGenerator()>& create) {
         static std::mutex mutex;
-        static std::map<std::string, std::weak_ptr<const SobolGenerator>> cache;
+        static std::unordered_map<std::string, std::weak_ptr<const SobolGenerator>> cache;
         std::string full =
             key + "|" + std::to_string(options.shiftSeed) + "|" +
             std::to_string(options.pointOffset) + "|" + std::to_string(options.maxBits) + "|" +
             std::to_string(options.maxDimension) + "|" + std::to_string(options.keepEntries);
         const std::lock_guard<std::mutex> lock(mutex);
         auto it = cache.find(full);
-        if (it != cache.end()) {
+        if (it != cache.end()) [[likely]] {
             if (auto existing = it->second.lock()) {
                 return existing;
             }

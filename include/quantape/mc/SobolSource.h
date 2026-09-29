@@ -123,7 +123,7 @@ public:
     void fillUniform(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
                      std::size_t streamBegin, std::size_t uniformStreamCount,
                      Eigen::MatrixXd& out) const {
-        if (streamBegin + uniformStreamCount > m_uniformStreams) {
+        if (streamBegin + uniformStreamCount > m_uniformStreams) [[unlikely]] {
             throw std::out_of_range("SobolSource: uniform stream out of range");
         }
         out.resize(static_cast<Eigen::Index>(uniformStreamCount),
@@ -230,7 +230,7 @@ public:
     void fillUniform(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
                      std::size_t streamBegin, std::size_t uniformStreamCount,
                      Eigen::MatrixXd& out) const {
-        if (streamBegin + uniformStreamCount > m_uniformStreams) {
+        if (streamBegin + uniformStreamCount > m_uniformStreams) [[unlikely]] {
             throw std::out_of_range("SobolGaussianSource: uniform stream out of range");
         }
         out.resize(static_cast<Eigen::Index>(uniformStreamCount),

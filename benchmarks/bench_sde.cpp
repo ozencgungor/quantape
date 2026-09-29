@@ -354,25 +354,6 @@ int main(int argc, char** argv) {
                              }
                              return checksum;
                          });
-                bench_us("heston qe stream 50k x 252 (parallel)",
-                         static_cast<double>(nPaths * nSteps), reps, [&] {
-                             const std::size_t blockSize = 4096;
-                             const std::size_t nBlocks = (nPaths + blockSize - 1) / blockSize;
-                             std::vector<double> partials(nBlocks, 0.0);
-                             simulator.simulateBlocks(
-                                 x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
-                                 source, nPaths, blockSize,
-                                 [&partials](const quantape::mc::PathBlock<double>& block,
-                                             std::size_t blockIndex) {
-                                     partials[blockIndex] = block.states.back()(1, 0);
-                                 },
-                                 Schedule::Parallel);
-                             double checksum = 0.0;
-                             for (double v : partials) {
-                                 checksum += v;
-                             }
-                             return checksum;
-                         });
             }
         }
 
@@ -419,6 +400,19 @@ int main(int argc, char** argv) {
                             [&checksum](const quantape::mc::PathBlock<double>& block, std::size_t) {
                                 checksum += block.states.back()(1, 0);
                             });
+                        return checksum;
+                    });
+                bench_us(
+                    "heston qe stream 50k x 252 (parallel)", static_cast<double>(nPaths * nSteps),
+                    reps, [&] {
+                        double checksum = 0.0;
+                        simulator.simulateBlocks(
+                            x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
+                            source, nPaths, 4096,
+                            [&checksum](const quantape::mc::PathBlock<double>& block, std::size_t) {
+                                checksum += block.states.back()(1, 0);
+                            },
+                            Schedule::Parallel);
                         return checksum;
                     });
             }

@@ -60,7 +60,7 @@ struct GbmProcess {
     template <typename Scalar>
     void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>&,
                    std::size_t factor, mc::StateMatrix<Scalar>& out) const {
-        if (factor != 0) {
+        if (factor != 0) [[unlikely]] {
             throw std::invalid_argument("GbmProcess: one factor only");
         }
         out = (Scalar(sigma) * x.array()).matrix();
@@ -83,7 +83,7 @@ struct OuProcess {
     template <typename Scalar>
     void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>&,
                    std::size_t factor, mc::StateMatrix<Scalar>& out) const {
-        if (factor != 0) {
+        if (factor != 0) [[unlikely]] {
             throw std::invalid_argument("OuProcess: one factor only");
         }
         out.resize(x.rows(), x.cols());
@@ -126,7 +126,7 @@ struct CirProcess {
     template <typename Scalar>
     void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>&,
                    std::size_t factor, mc::StateMatrix<Scalar>& out) const {
-        if (factor != 0) {
+        if (factor != 0) [[unlikely]] {
             throw std::invalid_argument("CirProcess: one factor only");
         }
         out = (Scalar(sigma) * x.array().cwiseMax(Scalar(0.0)).sqrt()).matrix();
@@ -177,7 +177,7 @@ struct HestonProcess {
             rhoOut = Scalar(rho);
             return;
         }
-        if (theta.size() < 5) {
+        if (theta.size() < 5) [[unlikely]] {
             throw std::invalid_argument(
                 "HestonProcess: theta must be {mu, kappa, level, eta, rho}");
         }
@@ -191,7 +191,7 @@ struct HestonProcess {
     template <typename Scalar>
     void drift(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& theta,
                mc::StateMatrix<Scalar>& out) const {
-        if (x.rows() != 2) {
+        if (x.rows() != 2) [[unlikely]] {
             throw std::invalid_argument("HestonProcess: state must be (lnS, V)");
         }
         Scalar mu, kappa, level, eta, rho;
@@ -206,7 +206,7 @@ struct HestonProcess {
     template <typename Scalar>
     void diffusion(const mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& theta,
                    std::size_t factor, mc::StateMatrix<Scalar>& out) const {
-        if (x.rows() != 2) {
+        if (x.rows() != 2) [[unlikely]] {
             throw std::invalid_argument("HestonProcess: state must be (lnS, V)");
         }
         using std::sqrt;
@@ -214,14 +214,15 @@ struct HestonProcess {
         coefficients(theta, mu, kappa, level, eta, rho);
         const auto sqrtV = x.row(1).array().cwiseMax(Scalar(0.0)).sqrt();
         out.resize(2, x.cols());
+        if (factor > 1) [[unlikely]] {
+            throw std::invalid_argument("HestonProcess: two factors only");
+        }
         if (factor == 0) {
             out.row(0).array() = rho * sqrtV;
             out.row(1).array() = eta * sqrtV;
-        } else if (factor == 1) {
+        } else {
             out.row(0).array() = sqrt(Scalar(1.0) - rho * rho) * sqrtV;
             out.row(1).setZero();
-        } else {
-            throw std::invalid_argument("HestonProcess: two factors only");
         }
     }
 

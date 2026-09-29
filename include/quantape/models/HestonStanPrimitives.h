@@ -341,7 +341,7 @@ private:
     }
 
     void ensure(const HestonFullPoint& point, double tMax) {
-        if (m_validFull && tMax == m_lastFullTMax && samePoint(point)) {
+        if (m_validFull && tMax == m_lastFullTMax && samePoint(point)) [[likely]] {
             return;
         }
         m_value = m_model->callFull(point, tMax);
@@ -359,7 +359,7 @@ private:
             m_validModel && sameParams(params) && market.spot == m_lastMarket.spot &&
             market.strike == m_lastMarket.strike && market.rate == m_lastMarket.rate &&
             market.dividend == m_lastMarket.dividend && market.tMax == m_lastMarket.tMax;
-        if (sameMarket) {
+        if (sameMarket) [[likely]] {
             return;
         }
         m_valueModel = m_model->call(params, market);

@@ -5,8 +5,9 @@
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>
-#include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 class EquitySimulator : public ModelSimulator {
 public:
@@ -35,8 +36,8 @@ public:
 
 private:
     std::map<std::string, HestonProcess> m_equityModels;
-    std::map<std::string, std::map<int, HestonState>> m_equityPaths;
-    std::set<std::string> m_simulatedEquities;
+    std::unordered_map<std::string, std::map<int, HestonState>> m_equityPaths;
+    std::unordered_set<std::string> m_simulatedEquities;
 };
 
 #endif // EQUITY_SIMULATOR_H

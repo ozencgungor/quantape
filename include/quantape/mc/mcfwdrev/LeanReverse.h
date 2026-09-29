@@ -82,7 +82,7 @@ public:
     /// per-operation path); the arena itself is created once per thread.
     static RevTape& active() {
         static thread_local RevTape* tape = nullptr;
-        if (tape == nullptr) {
+        if (tape == nullptr) [[unlikely]] {
             tape = new RevTape();
         }
         return *tape;
@@ -96,11 +96,11 @@ public:
             m_nodes.resize(n + 1);
         }
     }
-    std::size_t size() const { return m_size - 1; } // excluding sink
+    std::size_t size() const noexcept { return m_size - 1; } // excluding sink
 
     std::uint32_t push(RevOp op, std::uint32_t lhs, std::uint32_t rhs, double value,
                        double lhsValue = 0.0, double rhsValue = 0.0) {
-        if (m_size == m_nodes.size()) {
+        if (m_size == m_nodes.size()) [[unlikely]] {
             m_nodes.resize(m_nodes.size() * 2 + 256);
         }
         m_nodes[m_size] = RevNode{value, 0.0, lhsValue, rhsValue, lhs, rhs, op};
@@ -110,8 +110,8 @@ public:
     /// Independent variable (what gradients are read from).
     std::uint32_t input(double value) { return push(RevOp::Input, kNone, kNone, value); }
 
-    double value(std::uint32_t node) const { return m_nodes[node].value; }
-    double adjoint(std::uint32_t node) const { return m_nodes[node].adjoint; }
+    double value(std::uint32_t node) const noexcept { return m_nodes[node].value; }
+    double adjoint(std::uint32_t node) const noexcept { return m_nodes[node].adjoint; }
 
     /// Reverse sweep seeded at `root` (adjoints start zero at push); walks
     /// real nodes only (index >= 1), node 0 absorbs constant parents.

@@ -51,11 +51,11 @@ public:
         }
     }
 
-    std::size_t nSteps() const { return m_times.size() - 1; }
-    const std::vector<double>& times() const { return m_times; }
-    double time(std::size_t k) const { return m_times[k]; }
-    double dt(std::size_t k) const { return m_times[k + 1] - m_times[k]; }
-    double tMax() const { return m_times.back(); }
+    std::size_t nSteps() const noexcept { return m_times.size() - 1; }
+    const std::vector<double>& times() const noexcept { return m_times; }
+    double time(std::size_t k) const noexcept { return m_times[k]; }
+    double dt(std::size_t k) const noexcept { return m_times[k + 1] - m_times[k]; }
+    double tMax() const noexcept { return m_times.back(); }
 
 private:
     std::vector<double> m_times;

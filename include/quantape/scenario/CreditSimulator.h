@@ -5,8 +5,9 @@
 #include "quantape/scenario/ModelSimulator.h"
 
 #include <map>
-#include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 class CreditSimulator : public ModelSimulator {
 public:
@@ -35,8 +36,8 @@ public:
 
 private:
     std::map<std::string, CIRProcess> m_creditModels;
-    std::map<std::string, std::map<int, CIRState>> m_creditPaths;
-    std::set<std::string> m_simulatedCredits;
+    std::unordered_map<std::string, std::map<int, CIRState>> m_creditPaths;
+    std::unordered_set<std::string> m_simulatedCredits;
 };
 
 #endif // CREDIT_SIMULATOR_H

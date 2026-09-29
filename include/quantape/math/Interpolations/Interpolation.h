@@ -71,14 +71,14 @@ public:
     // ── Public interface (dispatches to Derived) ──
 
     DoubleT operator()(DoubleT x, bool allowExtrapolation = false) const {
-        if (!allowExtrapolation && !isInRange(x)) {
+        if (!allowExtrapolation && !isInRange(x)) [[unlikely]] {
             throw std::runtime_error("Interpolation: x is out of range");
         }
         return derived().valueImpl(x);
     }
 
     DoubleT derivative(DoubleT x, bool allowExtrapolation = false) const {
-        if (!allowExtrapolation && !isInRange(x)) {
+        if (!allowExtrapolation && !isInRange(x)) [[unlikely]] {
             throw std::runtime_error("Interpolation: x is out of range for derivative");
         }
         return derived().derivativeImpl(x);
@@ -94,14 +94,14 @@ public:
      * be a constant: the x adjoint is intentionally not pushed there.
      */
     DoubleT evaluateFixed(DoubleT x, bool allowExtrapolation = false) const {
-        if (!allowExtrapolation && !isInRange(x)) {
+        if (!allowExtrapolation && !isInRange(x)) [[unlikely]] {
             throw std::runtime_error("Interpolation: x is out of range");
         }
         return derived().valueFixedImpl(x);
     }
 
     DoubleT derivativeFixed(DoubleT x, bool allowExtrapolation = false) const {
-        if (!allowExtrapolation && !isInRange(x)) {
+        if (!allowExtrapolation && !isInRange(x)) [[unlikely]] {
             throw std::runtime_error("Interpolation: x is out of range for derivative");
         }
         return derived().derivativeFixedImpl(x);
