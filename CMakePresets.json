@@ -11,6 +11,9 @@
       "displayName": "Debug",
       "description": "Unoptimized build with symbols (default); benchmarks off",
       "binaryDir": "${sourceDir}/build/debug",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -20,6 +23,9 @@
       "displayName": "Release",
       "description": "Optimized build (-O3 -march=native -DNDEBUG); benchmarks on",
       "binaryDir": "${sourceDir}/build/release",
+      "environment": {
+        "CMAKE_BUILD_PARALLEL_LEVEL": "2"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -30,13 +36,13 @@
       "name": "debug",
       "configurePreset": "debug",
       "targets": ["build_all"],
-      "jobs": 8
+      "jobs": 2
     },
     {
       "name": "release",
       "configurePreset": "release",
       "targets": ["build_all"],
-      "jobs": 8
+      "jobs": 2
     }
   ],
   "testPresets": [
