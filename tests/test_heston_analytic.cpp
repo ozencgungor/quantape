@@ -34,13 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 namespace {
 
@@ -53,8 +47,9 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        std::fprintf(stderr, "FAIL: %s got=%.15g expected=%.15g err=%.3g tol=%.3g\n", label, got,
-                     expected, std::fabs(got - expected), tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={} tol={}", label,
+                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
+                      quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
         std::exit(1);
     }
 }
@@ -82,7 +77,8 @@ void testQuadratures() {
         const double expected = (m % 2 == 0) ? 2.0 / static_cast<double>(m + 1) : 0.0;
         checkClose("legendre moment", integral, expected, 1e-12);
     }
-    std::printf("  [ok] quadrature moments exact (Laguerre k!, Legendre 2/(m+1))\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] quadrature moments exact (Laguerre k!, Legendre 2/(m+1))");
 }
 
 void testCharacteristicIdentities() {
@@ -97,7 +93,7 @@ void testCharacteristicIdentities() {
         quantape::models::HestonModel::characteristic(std::complex<double>(0.0, -0.5), p, 1.5);
     CHECK(isFiniteBitwise(half.real()) && isFiniteBitwise(half.imag()));
     CHECK(half.real() > 0.0 && half.real() < 1.0);
-    std::printf("  [ok] characteristic function: phi(0)=1, phi(-i/2) in (0,1)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] characteristic function: phi(0)=1, phi(-i/2) in (0,1)");
 }
 
 void testDeterministicVarianceLimit() {
@@ -123,7 +119,7 @@ void testDeterministicVarianceLimit() {
         const quantape::models::HestonModel model;
         checkClose("BS limit", model.call(params, market), bs.price(), 1e-6);
     }
-    std::printf("  [ok] deterministic-variance limit -> BS(integrated variance)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] deterministic-variance limit -> BS(integrated variance)");
 }
 
 void testSelfConvergence() {
@@ -137,7 +133,7 @@ void testSelfConvergence() {
         quantape::models::HestonQuadrature::GaussLegendre});
     checkClose("order/uMax convergence", coarse.call(params, market), fine.call(params, market),
                1e-9);
-    std::printf("  [ok] pricer self-convergence in order and truncation\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] pricer self-convergence in order and truncation");
 }
 
 void testQeSobolMartingaleAndCrossCheck() {
@@ -154,7 +150,8 @@ void testQeSobolMartingaleAndCrossCheck() {
     const quantape::models::HestonMarket market{1.0, 1.0, mu, 0.0, 1.0};
     const quantape::models::HestonModel model(quantape::models::HestonConfig{512, 200.0});
     if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        std::printf("  [skip] QE/Sobol cross-check: no compile-time Sobol table configured\n");
+        QTA_LOG_WARN("quantape.test",
+                     "  [skip] QE/Sobol cross-check: no compile-time Sobol table configured");
         return;
     }
     const auto generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
@@ -208,9 +205,11 @@ void testQeSobolMartingaleAndCrossCheck() {
         const double mean = call / static_cast<double>(n);
         const double analytic = model.undiscountedCall(params, market);
         checkClose("QE 252-step call", mean, analytic, 0.015 * analytic);
-        std::printf("  [ok] QE/Sobol: corrected one-step martingale, 252-step call %.5f vs %.5f "
-                    "(scheme bias %.2f%%)\n",
-                    mean, analytic, 100.0 * (mean / analytic - 1.0));
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] QE/Sobol: corrected one-step martingale, 252-step call {} vs {} "
+                     "(scheme bias {}%)",
+                     quantape_test::num(mean, 5), quantape_test::num(analytic, 5),
+                     quantape_test::num(100.0 * (mean / analytic - 1.0), 2));
     }
 }
 
@@ -245,8 +244,9 @@ void testControlVariates() {
         const double reference = referenceModel.call(*paramSets[idx], *marketSets[idx]);
         const quantape::models::HestonModel model(quantape::models::HestonConfig{512, 200.0, cv});
         const double price = model.call(*paramSets[idx], *marketSets[idx]);
-        std::printf("    CV %-16s price=%.12f  err=%.2e (EFGL vs Gauss-Legendre)\n", names[idx],
-                    price, price - reference);
+        QTA_LOG_INFO("quantape.test", "    CV {} price={}  err={} (EFGL vs Gauss-Legendre)",
+                     names[idx], quantape_test::num(price, 12),
+                     quantape_test::num(price - reference, 2));
         checkClose(names[idx], price, reference, 1e-9);
         ++idx;
     }
@@ -265,10 +265,12 @@ void testControlVariates() {
                                        quantape::models::HestonQuadrature::GaussLegendre});
     const double errBs = std::fabs(lowBs.call(slow, slowMarket) - truth);
     const double errAsym = std::fabs(lowAsym.call(slow, slowMarket) - truth);
-    std::printf("  low-order (24 nodes) errors: BS-CV %.3e, asymptotic-CV %.3e (auto CV chosen)\n",
-                errBs, errAsym);
+    QTA_LOG_INFO("quantape.test",
+                 "  low-order (24 nodes) errors: BS-CV {}, asymptotic-CV {} (auto CV chosen)",
+                 quantape_test::num(errBs, 3), quantape_test::num(errAsym, 3));
     CHECK(errAsym < errBs);
-    std::printf("  [ok] control variates: Si/Ci anchors, CV identity, node stability\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] control variates: Si/Ci anchors, CV identity, node stability");
 }
 
 void testSurrogate() {
@@ -320,14 +322,17 @@ void testSurrogate() {
         }
         t1 = now();
         const double evalNs = ns(t0, t1) / 2000000.0;
-        std::printf("  timings: price %.1f us, CS gradient %.1f us, Hessian %.1f us, "
-                    "surrogate build %.1f us, surrogate eval %.0f ns (%.0fx cheaper/eval, "
-                    "sink %.3g)\n",
-                    priceNs / 1000.0, gradNs / 1000.0, hessNs / 1000.0,
-                    (priceNs + gradNs + hessNs) / 1000.0, evalNs, priceNs / evalNs, sink);
+        QTA_LOG_INFO("quantape.test",
+                     "  timings: price {} us, CS gradient {} us, Hessian {} us, "
+                     "surrogate build {} us, surrogate eval {} ns ({}x cheaper/eval, sink {})",
+                     quantape_test::num(priceNs / 1000.0, 1),
+                     quantape_test::num(gradNs / 1000.0, 1), quantape_test::num(hessNs / 1000.0, 1),
+                     quantape_test::num((priceNs + gradNs + hessNs) / 1000.0, 1),
+                     quantape_test::num(evalNs, 0), quantape_test::num(priceNs / evalNs, 0),
+                     quantape_test::num(sink, 3));
     }
-    std::printf("  [ok] quote surrogate: value/gradient/Hessian, Taylor err %.2e\n",
-                std::fabs(taylor - exact));
+    QTA_LOG_INFO("quantape.test", "  [ok] quote surrogate: value/gradient/Hessian, Taylor err {}",
+                 quantape_test::num(std::fabs(taylor - exact), 2));
 }
 
 void testSmallSigmaAndPolicyBoundaries() {
@@ -350,8 +355,9 @@ void testSmallSigmaAndPolicyBoundaries() {
         checkClose("small-sigma price (sigma=0.01)", price, ref, 1e-8 * std::max(1.0, ref));
         const auto g = efgl.fullGradient(quantape::models::toFullPoint(params, market), 1.0);
         CHECK(std::isfinite(g(0, quantape::models::HESTON_SIGMA)));
-        std::printf("  [ok] small sigma (0.01): price=%.10f ref=%.10f dsigma=% .6f\n", price, ref,
-                    g(0, quantape::models::HESTON_SIGMA));
+        QTA_LOG_INFO("quantape.test", "  [ok] small sigma (0.01): price={} ref={} dsigma={}",
+                     quantape_test::num(price, 10), quantape_test::num(ref, 10),
+                     quantape_test::num(g(0, quantape::models::HESTON_SIGMA), 6));
     }
 
     // Auto CV threshold (c_inf = 0.15): the two branches must agree at the
@@ -382,8 +388,9 @@ void testSmallSigmaAndPolicyBoundaries() {
         checkClose("CV branch gradient identity at threshold", worstGrad, 0.0, 1e-6);
         checkClose("Auto picks a branch at the threshold", autoValue, std::min(cfValue, asValue),
                    1e-9 + std::fabs(cfValue - asValue));
-        std::printf("  [ok] Auto-CV threshold: branch identity dV=%.2e dgrad=%.2e\n",
-                    std::fabs(cfValue - asValue), worstGrad);
+        QTA_LOG_INFO("quantape.test", "  [ok] Auto-CV threshold: branch identity dV={} dgrad={}",
+                     quantape_test::num(std::fabs(cfValue - asValue), 2),
+                     quantape_test::num(worstGrad, 2));
     }
 
     // EFGL vs Gauss-Legendre across an oscillation-frequency sweep (the
@@ -400,7 +407,8 @@ void testSmallSigmaAndPolicyBoundaries() {
             worst = std::max(worst,
                              std::fabs(efgl.call(params, market) - reference.call(params, market)));
         }
-        std::printf("  [ok] EFGL vs GL across frequency rows: max |dC| = %.2e\n", worst);
+        QTA_LOG_INFO("quantape.test", "  [ok] EFGL vs GL across frequency rows: max |dC| = {}",
+                     quantape_test::num(worst, 2));
         checkClose("EFGL row-switch continuity", worst, 0.0, 1e-9);
     }
 }
@@ -444,8 +452,9 @@ void testOscillatoryValidator() {
         0.05, 2000);
     const double price = base + prefactor * quadrature;
     const double reference = model.call(params, market);
-    std::printf("  [ok] DE validator: price %.10f vs EFGL %.10f (err %.2e)\n", price, reference,
-                price - reference);
+    QTA_LOG_INFO("quantape.test", "  [ok] DE validator: price {} vs EFGL {} (err {})",
+                 quantape_test::num(price, 10), quantape_test::num(reference, 10),
+                 quantape_test::num(price - reference, 2));
     checkClose("double-exponential Lewis integral vs EFGL", price, reference, 1e-8);
 }
 
@@ -482,7 +491,7 @@ void testFullJacobians() {
             (model.callFull(up, market.tMax) - model.callFull(down, market.tMax)) / (2.0 * h);
         checkClose(names[j], g(0, j), fd, 1e-6 * std::max(1.0, std::fabs(fd)));
     }
-    std::printf("  [ok] full 9-parameter gradient vs central FD\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] full 9-parameter gradient vs central FD");
 
     const auto H = model.fullHessian(x, market.tMax);
     const auto H5 = model.callHessian(params, market);
@@ -509,14 +518,14 @@ void testFullJacobians() {
                        1e-4 * std::max(1.0, std::fabs(fd)));
         }
     }
-    std::printf("  [ok] fullHessian market block vs FD of fullGradient\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] fullHessian market block vs FD of fullGradient");
 
     // Euler homogeneity of the call: S C_SS + K C_SK = 0, S C_SK + K C_KK = 0
     const double e1 = market.spot * H(5, 5) + market.strike * H(5, 6);
     const double e2 = market.spot * H(5, 6) + market.strike * H(6, 6);
     checkClose("Euler 1", e1, 0.0, 1e-5);
     checkClose("Euler 2", e2, 0.0, 1e-5);
-    std::printf("  [ok] market-Hessian Euler homogeneity (spot/strike scaling)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] market-Hessian Euler homogeneity (spot/strike scaling)");
 
     // Full 9-parameter surrogate Taylor consistency
     const auto surrogate = quantape::models::makeFullSurrogate(model, x, market.tMax);
@@ -528,8 +537,9 @@ void testFullJacobians() {
     }
     const double exact = model.callFull(shifted, market.tMax);
     checkClose("full surrogate Taylor", surrogate.eval(dx), exact, 2e-6);
-    std::printf("  [ok] full 9-parameter surrogate: value/gradient/Hessian, Taylor err %.2e\n",
-                std::fabs(surrogate.eval(dx) - exact));
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] full 9-parameter surrogate: value/gradient/Hessian, Taylor err {}",
+                 quantape_test::num(std::fabs(surrogate.eval(dx) - exact), 2));
 
     const auto now = [] { return std::chrono::steady_clock::now(); };
     const auto ns = [](auto a, auto b) {
@@ -554,9 +564,11 @@ void testFullJacobians() {
     }
     t1 = now();
     const double buildUs = ns(t0, t1) / 20.0 / 1000.0;
-    std::printf("  full-Jacobian timings: gradient %.1f us, Hessian %.1f us, "
-                "surrogate build %.1f us (sink %.3g)\n",
-                gradUs, hessUs, buildUs, sink);
+    QTA_LOG_INFO("quantape.test",
+                 "  full-Jacobian timings: gradient {} us, Hessian {} us, "
+                 "surrogate build {} us (sink {})",
+                 quantape_test::num(gradUs, 1), quantape_test::num(hessUs, 1),
+                 quantape_test::num(buildUs, 1), quantape_test::num(sink, 3));
 }
 
 void testComplexStepGradients() {
@@ -577,13 +589,13 @@ void testComplexStepGradients() {
         const double fd = (model.call(up, market) - model.call(down, market)) / (2.0 * h);
         checkClose("complex-step vs FD", cs(0, j), fd, 1e-6 * std::max(1e-8, std::fabs(fd)) + 1e-9);
     }
-    std::printf("  [ok] complex-step gradients vs central FD (all 5 parameters)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] complex-step gradients vs central FD (all 5 parameters)");
 }
 
 } // namespace
 
 int main() {
-    std::printf("Heston model (H0) tests\n");
+    QTA_LOG_INFO("quantape.test", "Heston model (H0) tests");
     testQuadratures();
     testCharacteristicIdentities();
     testDeterministicVarianceLimit();
@@ -595,6 +607,6 @@ int main() {
     testFullJacobians();
     testSmallSigmaAndPolicyBoundaries();
     testOscillatoryValidator();
-    std::printf("ALL HESTON MODEL TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL HESTON MODEL TESTS PASSED");
     return 0;
 }

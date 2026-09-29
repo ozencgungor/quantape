@@ -8,6 +8,7 @@
 //   3. batch fillPath cost for a 252-step x 4-factor layout
 //   4. engine path cost: GBM (1 factor) and 4-factor geometric model,
 //      Sobol vs iid source, sequential vs parallel schedule
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/SobolGenerator.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SdeSimulator.h"
@@ -93,10 +94,10 @@ int main(int argc, char** argv) {
     const bool haveText = exists(table);
     const bool haveAsset = exists(defaultPath);
     if (!haveText && !haveAsset) {
-        std::fprintf(stderr,
-                     "bench_sobol: no Sobol table found (looked for '%s' and the compile-time "
-                     "asset '%s'); pass a table path or run from the repo root\n",
-                     table.c_str(), defaultPath.c_str());
+        QTA_LOG_ERROR("quantape.bench",
+                      "no Sobol table found (looked for '{}' and the compile-time asset '{}'); "
+                      "pass a table path or run from the repo root",
+                      table, defaultPath);
         return 1;
     }
     std::printf("Sobol generator benchmark, reps=%d, table=%s%s\n", reps,

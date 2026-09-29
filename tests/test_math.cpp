@@ -4,10 +4,12 @@
 #include <iomanip>
 #include <iostream>
 
+#include "TestSupport.h"
+
 using namespace quantape::math;
 
 void testIntegration() {
-    std::cout << "=== Integration Tests ===\n\n";
+    QTA_LOG_INFO("quantape.test", "=== Integration Tests ===");
 
     // Test function: f(x) = x^2, integral from 0 to 1 should be 1/3
     auto f_square = [](double x) { return x * x; };
@@ -17,11 +19,12 @@ void testIntegration() {
         TrapezoidIntegratorDefault<double> integrator(1e-8, 1000);
         double result = integrator(f_square, 0.0, 1.0);
         double exact = 1.0 / 3.0;
-        std::cout << "Trapezoid (Default Policy):\n";
-        std::cout << "  ∫₀¹ x² dx = " << std::setprecision(10) << result << "\n";
-        std::cout << "  Exact     = " << exact << "\n";
-        std::cout << "  Error     = " << std::fabs(result - exact) << "\n";
-        std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
+        QTA_LOG_INFO("quantape.test", "Trapezoid (Default Policy):");
+        QTA_LOG_INFO("quantape.test", "  ∫₀¹ x² dx = {}", quantape_test::num(result));
+        QTA_LOG_INFO("quantape.test", "  Exact     = {}", quantape_test::num(exact));
+        QTA_LOG_INFO("quantape.test", "  Error     = {}",
+                     quantape_test::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("quantape.test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
     // Test 2: Trapezoid integrator with midpoint policy
@@ -29,11 +32,12 @@ void testIntegration() {
         TrapezoidIntegratorMidPoint<double> integrator(1e-8, 1000);
         double result = integrator(f_square, 0.0, 1.0);
         double exact = 1.0 / 3.0;
-        std::cout << "Trapezoid (MidPoint Policy):\n";
-        std::cout << "  ∫₀¹ x² dx = " << std::setprecision(10) << result << "\n";
-        std::cout << "  Exact     = " << exact << "\n";
-        std::cout << "  Error     = " << std::fabs(result - exact) << "\n";
-        std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
+        QTA_LOG_INFO("quantape.test", "Trapezoid (MidPoint Policy):");
+        QTA_LOG_INFO("quantape.test", "  ∫₀¹ x² dx = {}", quantape_test::num(result));
+        QTA_LOG_INFO("quantape.test", "  Exact     = {}", quantape_test::num(exact));
+        QTA_LOG_INFO("quantape.test", "  Error     = {}",
+                     quantape_test::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("quantape.test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
     // Test 3: Simpson integrator
@@ -41,11 +45,12 @@ void testIntegration() {
         SimpsonIntegrator<double> integrator(1e-8, 1000);
         double result = integrator(f_square, 0.0, 1.0);
         double exact = 1.0 / 3.0;
-        std::cout << "Simpson's Rule:\n";
-        std::cout << "  ∫₀¹ x² dx = " << std::setprecision(10) << result << "\n";
-        std::cout << "  Exact     = " << exact << "\n";
-        std::cout << "  Error     = " << std::fabs(result - exact) << "\n";
-        std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
+        QTA_LOG_INFO("quantape.test", "Simpson's Rule:");
+        QTA_LOG_INFO("quantape.test", "  ∫₀¹ x² dx = {}", quantape_test::num(result));
+        QTA_LOG_INFO("quantape.test", "  Exact     = {}", quantape_test::num(exact));
+        QTA_LOG_INFO("quantape.test", "  Error     = {}",
+                     quantape_test::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("quantape.test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
     // Test 4: Gauss-Legendre integrator (various orders)
@@ -54,10 +59,11 @@ void testIntegration() {
         for (size_t order : {2, 3, 5, 10, 20}) {
             GaussLegendreIntegrator<double> integrator(order);
             double result = integrator(f_square, 0.0, 1.0);
-            std::cout << "Gauss-Legendre (order " << order << "):\n";
-            std::cout << "  ∫₀¹ x² dx = " << std::setprecision(10) << result << "\n";
-            std::cout << "  Error     = " << std::fabs(result - exact) << "\n";
-            std::cout << "  Evals     = " << integrator.numberOfEvaluations() << "\n\n";
+            QTA_LOG_INFO("quantape.test", "Gauss-Legendre (order {}):", order);
+            QTA_LOG_INFO("quantape.test", "  ∫₀¹ x² dx = {}", quantape_test::num(result));
+            QTA_LOG_INFO("quantape.test", "  Error     = {}",
+                         quantape_test::num(std::fabs(result - exact)));
+            QTA_LOG_INFO("quantape.test", "  Evals     = {}", integrator.numberOfEvaluations());
         }
     }
 
@@ -75,34 +81,38 @@ void testIntegration() {
         GaussLegendreIntegrator<double> gauss(20);
         double result_gauss = gauss(f_sin, 0.0, M_PI);
 
-        std::cout << "Integral of sin(x) from 0 to π:\n";
-        std::cout << "  Trapezoid  = " << std::setprecision(10) << result_trap
-                  << " (error: " << std::fabs(result_trap - exact) << ")\n";
-        std::cout << "  Simpson    = " << result_simpson
-                  << " (error: " << std::fabs(result_simpson - exact) << ")\n";
-        std::cout << "  Gauss-20   = " << result_gauss
-                  << " (error: " << std::fabs(result_gauss - exact) << ")\n";
-        std::cout << "  Exact      = " << exact << "\n\n";
+        QTA_LOG_INFO("quantape.test", "Integral of sin(x) from 0 to π:");
+        QTA_LOG_INFO("quantape.test", "  Trapezoid  = {} (error: {})",
+                     quantape_test::num(result_trap),
+                     quantape_test::num(std::fabs(result_trap - exact)));
+        QTA_LOG_INFO("quantape.test", "  Simpson    = {} (error: {})",
+                     quantape_test::num(result_simpson),
+                     quantape_test::num(std::fabs(result_simpson - exact)));
+        QTA_LOG_INFO("quantape.test", "  Gauss-20   = {} (error: {})",
+                     quantape_test::num(result_gauss),
+                     quantape_test::num(std::fabs(result_gauss - exact)));
+        QTA_LOG_INFO("quantape.test", "  Exact      = {}", quantape_test::num(exact));
     }
 }
 
 void testSolvers() {
-    std::cout << "=== Root Finding Tests ===\n\n";
+    QTA_LOG_INFO("quantape.test", "=== Root Finding Tests ===");
 
     // Test 1: f(x) = x^2 - 2, root at x = sqrt(2)
     {
         auto f = [](double x) { return x * x - 2.0; };
         double exact = std::sqrt(2.0);
 
-        std::cout << "Finding root of x² - 2 = 0 (exact: √2 = " << exact << "):\n\n";
+        QTA_LOG_INFO("quantape.test",
+                     "Finding root of x² - 2 = 0 (exact: √2 = {}):", quantape_test::num(exact));
 
         // Bisection
         {
             BisectionSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  Bisection:  root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n";
+            QTA_LOG_INFO("quantape.test", "  Bisection:  root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
 
         // Secant
@@ -110,8 +120,8 @@ void testSolvers() {
             SecantSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  Secant:     root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n";
+            QTA_LOG_INFO("quantape.test", "  Secant:     root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
 
         // Newton (with finite differences)
@@ -119,8 +129,8 @@ void testSolvers() {
             NewtonSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  Newton:     root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n";
+            QTA_LOG_INFO("quantape.test", "  Newton:     root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
 
         // Brent
@@ -128,8 +138,8 @@ void testSolvers() {
             BrentSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  Brent:      root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n";
+            QTA_LOG_INFO("quantape.test", "  Brent:      root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
 
         // Ridder
@@ -137,8 +147,8 @@ void testSolvers() {
             RidderSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  Ridder:     root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n";
+            QTA_LOG_INFO("quantape.test", "  Ridder:     root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
 
         // False Position
@@ -146,8 +156,8 @@ void testSolvers() {
             FalsePositionSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            std::cout << "  FalsePos:   root = " << std::setprecision(15) << root
-                      << " (error: " << std::fabs(root - exact) << ")\n\n";
+            QTA_LOG_INFO("quantape.test", "  FalsePos:   root = {} (error: {})",
+                         quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
         }
     }
 
@@ -156,14 +166,15 @@ void testSolvers() {
         auto f = [](double x) { return std::exp(x) - 3.0; };
         double exact = std::log(3.0);
 
-        std::cout << "Finding root of exp(x) - 3 = 0 (exact: ln(3) = " << exact << "):\n\n";
+        QTA_LOG_INFO("quantape.test", "Finding root of exp(x) - 3 = 0 (exact: ln(3) = {}):",
+                     quantape_test::num(exact));
 
         BrentSolver<double> solver;
         double root = solver.solve(f, 1e-10, 1.0, 0.0, 2.0);
 
-        std::cout << "  Brent:      root = " << std::setprecision(15) << root
-                  << " (error: " << std::fabs(root - exact) << ")\n";
-        std::cout << "  f(root)     = " << f(root) << "\n\n";
+        QTA_LOG_INFO("quantape.test", "  Brent:      root = {} (error: {})",
+                     quantape_test::num(root), quantape_test::num(std::fabs(root - exact)));
+        QTA_LOG_INFO("quantape.test", "  f(root)     = {}", quantape_test::num(f(root)));
     }
 
     // Test 3: Automatic bracketing
@@ -173,9 +184,9 @@ void testSolvers() {
         BrentSolver<double> solver;
         double root = solver.solve(f, 1e-10, 1.5, 0.1); // Auto-bracket from guess with step
 
-        std::cout << "Finding root of x³ - x - 2 = 0 with auto-bracketing:\n";
-        std::cout << "  Brent:      root = " << std::setprecision(15) << root << "\n";
-        std::cout << "  f(root)     = " << f(root) << "\n\n";
+        QTA_LOG_INFO("quantape.test", "Finding root of x³ - x - 2 = 0 with auto-bracketing:");
+        QTA_LOG_INFO("quantape.test", "  Brent:      root = {}", quantape_test::num(root));
+        QTA_LOG_INFO("quantape.test", "  f(root)     = {}", quantape_test::num(f(root)));
     }
 
     // Test 4: Newton with explicit derivative
@@ -189,14 +200,14 @@ void testSolvers() {
         solver.setMaxEvaluations(100);
         double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
 
-        std::cout << "Newton with explicit derivative for x² - 2 = 0:\n";
-        std::cout << "  Root        = " << std::setprecision(15) << root
-                  << " (error: " << std::fabs(root - exact) << ")\n\n";
+        QTA_LOG_INFO("quantape.test", "Newton with explicit derivative for x² - 2 = 0:");
+        QTA_LOG_INFO("quantape.test", "  Root        = {} (error: {})", quantape_test::num(root),
+                     quantape_test::num(std::fabs(root - exact)));
     }
 }
 
 void testQuadratureOnStandardDomain() {
-    std::cout << "=== Quadrature on Standard Domain [-1, 1] ===\n\n";
+    QTA_LOG_INFO("quantape.test", "=== Quadrature on Standard Domain [-1, 1] ===");
 
     // Test polynomial integration (Gauss quadrature is exact for polynomials)
     // For order n, exact for polynomials up to degree 2n-1
@@ -210,40 +221,39 @@ void testQuadratureOnStandardDomain() {
     double exact_poly2 = 4.0;
     double exact_poly4 = 16.0 / 5.0;
 
-    std::cout << "Polynomial degree 2: 1 + 2x + 3x²\n";
-    std::cout << "Exact integral [-1, 1]: " << exact_poly2 << "\n";
+    QTA_LOG_INFO("quantape.test", "Polynomial degree 2: 1 + 2x + 3x²");
+    QTA_LOG_INFO("quantape.test", "Exact integral [-1, 1]: {}", quantape_test::num(exact_poly2));
 
     for (size_t order : {2, 3, 5}) {
         GaussLegendreQuadrature<double> quad(order);
         double result = quad.integrate(poly2, -1.0, 1.0);
-        std::cout << "  Order " << order << ": " << std::setprecision(15) << result
-                  << " (error: " << std::fabs(result - exact_poly2) << ")\n";
+        QTA_LOG_INFO("quantape.test", "  Order {}: {} (error: {})", order,
+                     quantape_test::num(result),
+                     quantape_test::num(std::fabs(result - exact_poly2)));
     }
 
-    std::cout << "\nPolynomial degree 4: 1 + x + x² + x³ + x⁴\n";
-    std::cout << "Exact integral [-1, 1]: " << exact_poly4 << "\n";
+    QTA_LOG_INFO("quantape.test", "Polynomial degree 4: 1 + x + x² + x³ + x⁴");
+    QTA_LOG_INFO("quantape.test", "Exact integral [-1, 1]: {}", quantape_test::num(exact_poly4));
 
     for (size_t order : {2, 3, 5}) {
         GaussLegendreQuadrature<double> quad(order);
         double result = quad.integrate(poly4, -1.0, 1.0);
-        std::cout << "  Order " << order << ": " << std::setprecision(15) << result
-                  << " (error: " << std::fabs(result - exact_poly4) << ")\n";
+        QTA_LOG_INFO("quantape.test", "  Order {}: {} (error: {})", order,
+                     quantape_test::num(result),
+                     quantape_test::num(std::fabs(result - exact_poly4)));
     }
-    std::cout << "\n";
 }
 
 int main() {
-    std::cout << std::setprecision(15);
-
     try {
         testIntegration();
         testQuadratureOnStandardDomain();
         testSolvers();
 
-        std::cout << "All tests completed successfully!\n";
+        QTA_LOG_INFO("quantape.test", "All tests completed successfully!");
         return 0;
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
+        QTA_LOG_ERROR("quantape.test", "Error: {}", e.what());
         return 1;
     }
 }

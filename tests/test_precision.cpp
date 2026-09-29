@@ -15,13 +15,7 @@
 #include <cstdlib>
 #include <initializer_list>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::math::DoubleDouble;
 
@@ -32,8 +26,10 @@ void checkRel(const char* label, const DoubleDouble& got, const DoubleDouble& ex
     const double denom = std::max(1e-300, std::fabs(expected.value()));
     const double err = std::fabs((got - expected).value()) / denom;
     if (!(err <= tol)) {
-        std::fprintf(stderr, "FAIL: %s rel err %.3e tol %.3e (got %.20e expected %.20e)\n", label,
-                     err, tol, got.value(), expected.value());
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} rel err {} tol {} (got {} expected {})", label,
+                      quantape_test::num(err, 3), quantape_test::num(tol, 3),
+                      quantape_test::num(got.value(), 20),
+                      quantape_test::num(expected.value(), 20));
         std::exit(1);
     }
 }
@@ -85,7 +81,8 @@ void testArithmetic() {
         quantape::math::sin(DoubleDouble(1.5707963267948966, 6.123233995736766e-17));
     checkRel("sin(pi/2)", sPi2, DoubleDouble(1.0), 1e-31);
 
-    std::printf("  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)");
 }
 
 void testSiCiAnchors() {
@@ -110,7 +107,7 @@ void testSiCiAnchors() {
     checkRel("Si(1)", si1, DoubleDouble(0.94608307036718301494), 1e-15);
     const DoubleDouble si10 = si(DoubleDouble(10.0));
     checkRel("Si(10)", si10, DoubleDouble(1.6583475942188740493), 1e-14);
-    std::printf("  [ok] Si anchors in double-double (Si(1), Si(10))\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] Si anchors in double-double (Si(1), Si(10))");
 }
 
 void testOscillatoryExactMoment() {
@@ -152,16 +149,18 @@ void testOscillatoryExactMoment() {
                                     std::max(1e-300, std::fabs(reference.value())));
     }
     CHECK(worst < 1e-10);
-    std::printf("  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel %.2e)\n", worst);
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
+                 quantape_test::num(worst, 2));
 }
 
 } // namespace
 
 int main() {
-    std::printf("Double-double precision gates\n");
+    QTA_LOG_INFO("quantape.test", "Double-double precision gates");
     testArithmetic();
     testSiCiAnchors();
     testOscillatoryExactMoment();
-    std::printf("ALL PRECISION TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL PRECISION TESTS PASSED");
     return 0;
 }

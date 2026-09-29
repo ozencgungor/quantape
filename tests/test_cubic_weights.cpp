@@ -19,13 +19,7 @@
 #include <iostream>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::cerr << "FAIL: " << #cond << " (line " << __LINE__ << ")\n";                      \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::math::CubicInterpolation;
 
@@ -150,7 +144,6 @@ const char* methodName(CubicInterpolation<double>::DerivativeApprox da) {
 } // namespace
 
 int main() {
-    std::cout << std::setprecision(6);
     const std::vector<CubicInterpolation<double>::DerivativeApprox> methods = {
         quantape::math::CubicDerivativeApprox::Spline,
         quantape::math::CubicDerivativeApprox::Parabolic,
@@ -169,9 +162,10 @@ int main() {
                 const stan::math::var v = interp(stan::math::var(x));
                 const double diff = std::abs(v.val() - ref);
                 if (diff > 1e-12 * (1.0 + std::abs(ref))) {
-                    std::cerr << "value mismatch: " << methodName(da) << " smooth=" << smooth
-                              << " x=" << x << " ref=" << std::setprecision(17) << ref
-                              << " var=" << v.val() << " diff=" << diff << "\n";
+                    QTA_LOG_ERROR(
+                        "quantape.test", "value mismatch: {} smooth={} x={} ref={} var={} diff={}",
+                        methodName(da), smooth, quantape_test::num(x), quantape_test::num(ref),
+                        quantape_test::num(v.val()), quantape_test::num(diff));
                     CHECK(false);
                 }
             }
@@ -183,9 +177,10 @@ int main() {
                 for (size_t j = 0; j < g_y.size(); ++j) {
                     const double tol = smooth ? 1e-4 : 1e-5;
                     if (std::abs(fd[j] - ad[j]) > tol * (1.0 + std::abs(fd[j]))) {
-                        std::cerr << "gradient mismatch: " << methodName(da) << " smooth=" << smooth
-                                  << " x=" << x << " j=" << j << " fd=" << fd[j] << " ad=" << ad[j]
-                                  << "\n";
+                        QTA_LOG_ERROR("quantape.test",
+                                      "gradient mismatch: {} smooth={} x={} j={} fd={} ad={}",
+                                      methodName(da), smooth, quantape_test::num(x), j,
+                                      quantape_test::num(fd[j]), quantape_test::num(ad[j]));
                         CHECK(false);
                     }
                 }
@@ -202,8 +197,9 @@ int main() {
                     const auto H = adHessian(x, da, smooth);
                     if (linearInY) {
                         if (maxHessian(x, da, smooth) > 1e-8) {
-                            std::cerr << "hessian not zero: " << methodName(da) << " x=" << x
-                                      << " max|H|=" << maxHessian(x, da, smooth) << "\n";
+                            QTA_LOG_ERROR("quantape.test", "hessian not zero: {} x={} max|H|={}",
+                                          methodName(da), quantape_test::num(x),
+                                          quantape_test::num(maxHessian(x, da, smooth)));
                             CHECK(false);
                         }
                     } else {
@@ -216,8 +212,10 @@ int main() {
                             }
                         }
                         if (maxdiff > 5e-3 * (1.0 + maxref)) {
-                            std::cerr << "hessian mismatch: " << methodName(da) << " x=" << x
-                                      << " maxdiff=" << maxdiff << " maxref=" << maxref << "\n";
+                            QTA_LOG_ERROR("quantape.test",
+                                          "hessian mismatch: {} x={} maxdiff={} maxref={}",
+                                          methodName(da), quantape_test::num(x),
+                                          quantape_test::num(maxdiff), quantape_test::num(maxref));
                             CHECK(false);
                         }
                     }
@@ -235,8 +233,10 @@ int main() {
                 const double ad = interp.derivative(stan::math::var(x)).val();
                 const double tol = smooth ? 1e-4 : 1e-5;
                 if (std::abs(fd - ad) > tol * (1.0 + std::abs(fd))) {
-                    std::cerr << "x-derivative mismatch: " << methodName(da) << " smooth=" << smooth
-                              << " x=" << x << " fd=" << fd << " ad=" << ad << "\n";
+                    QTA_LOG_ERROR("quantape.test",
+                                  "x-derivative mismatch: {} smooth={} x={} fd={} ad={}",
+                                  methodName(da), smooth, quantape_test::num(x),
+                                  quantape_test::num(fd), quantape_test::num(ad));
                     CHECK(false);
                 }
             }
@@ -251,9 +251,10 @@ int main() {
             CHECK(interp.usesWeightMatrix() == expectWeights);
         }
 
-        std::cout << methodName(da) << ": value/gradient/hessian/x-derivative all pass\n";
+        QTA_LOG_INFO("quantape.test", "{}: value/gradient/hessian/x-derivative all pass",
+                     methodName(da));
     }
 
-    std::cout << "test_cubic_weights: all invariants hold\n";
+    QTA_LOG_INFO("quantape.test", "test_cubic_weights: all invariants hold");
     return 0;
 }

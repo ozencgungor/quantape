@@ -1,4 +1,4 @@
-# Clang-Format configuration for generic_MC project
+# Clang-Format configuration for quantape project
 # Based on LLVM style with customizations for modern C++
 
 BasedOnStyle: LLVM

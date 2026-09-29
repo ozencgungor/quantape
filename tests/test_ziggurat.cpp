@@ -14,6 +14,8 @@
 #include <random>
 #include <vector>
 
+#include "TestSupport.h"
+
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -38,55 +40,59 @@ double timeNs(F&& fn, int reps = 1'000'000) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void testTableGeneration() {
-    std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " ZIGGURAT TABLE VERIFICATION\n";
-    std::cout << "═══════════════════════════════════════════════════════════\n\n";
+    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+                                  " ZIGGURAT TABLE VERIFICATION\n"
+                                  "═══════════════════════════════════════════════════════════\n");
 
     auto tab = quantape::math::mc::generateZigguratTables();
     auto v = quantape::math::mc::verifyZigguratTables(tab);
 
-    std::cout << std::setprecision(16);
-    std::cout << "  r (tail cutoff)      = " << tab.r << "\n";
-    std::cout << "  v (layer area)       = " << tab.A << "\n";
-    std::cout << "  base width v/y[0]    = " << tab.A / tab.y[0] << "\n";
-    std::cout << "  x[0] = r             = " << tab.x[0] << "\n";
-    std::cout << "  x[1]                 = " << tab.x[1] << "\n";
-    std::cout << "  x[N-2] = x[254]      = " << tab.x[254] << "\n";
-    std::cout << "  x[N-1] = x[255]      = " << tab.x[255] << " (sentinel, should be 0)\n";
-    std::cout << "  y[0]                 = " << tab.y[0] << "\n";
-    std::cout << "  y[N-2] = y[254]      = " << tab.y[254] << "\n";
-    std::cout << "  y[N-1] = y[255]      = " << tab.y[255] << " (should be ~1)\n\n";
+    QTA_LOG_INFO("quantape.test", "  r (tail cutoff)      = {}", quantape_test::num(tab.r));
+    QTA_LOG_INFO("quantape.test", "  v (layer area)       = {}", quantape_test::num(tab.A));
+    QTA_LOG_INFO("quantape.test", "  base width v/y[0]    = {}",
+                 quantape_test::num(tab.A / tab.y[0]));
+    QTA_LOG_INFO("quantape.test", "  x[0] = r             = {}", quantape_test::num(tab.x[0]));
+    QTA_LOG_INFO("quantape.test", "  x[1]                 = {}", quantape_test::num(tab.x[1]));
+    QTA_LOG_INFO("quantape.test", "  x[N-2] = x[254]      = {}", quantape_test::num(tab.x[254]));
+    QTA_LOG_INFO("quantape.test", "  x[N-1] = x[255]      = {} (sentinel, should be 0)",
+                 quantape_test::num(tab.x[255]));
+    QTA_LOG_INFO("quantape.test", "  y[0]                 = {}", quantape_test::num(tab.y[0]));
+    QTA_LOG_INFO("quantape.test", "  y[N-2] = y[254]      = {}", quantape_test::num(tab.y[254]));
+    QTA_LOG_INFO("quantape.test", "  y[N-1] = y[255]      = {} (should be ~1)",
+                 quantape_test::num(tab.y[255]));
 
-    std::cout << "  Verification:\n";
-    std::cout << "    max area rel error = " << v.max_area_error << "\n";
-    std::cout << "    closure error      = " << v.closure_error << "  (|y[N] - 1|)\n";
-    std::cout << "    max f(x) error     = " << v.max_f_error << "\n";
-    std::cout << "    max f^{-1} error   = " << v.max_finv_error << "\n";
-    std::cout << "    monotone x?        = " << (v.monotone_x ? "YES" : "NO") << "\n";
-    std::cout << "    monotone y?        = " << (v.monotone_y ? "YES" : "NO") << "\n\n";
+    QTA_LOG_INFO("quantape.test", "  Verification:");
+    QTA_LOG_INFO("quantape.test", "    max area rel error = {}",
+                 quantape_test::num(v.max_area_error));
+    QTA_LOG_INFO("quantape.test", "    closure error      = {}  (|y[N] - 1|)",
+                 quantape_test::num(v.closure_error));
+    QTA_LOG_INFO("quantape.test", "    max f(x) error     = {}", quantape_test::num(v.max_f_error));
+    QTA_LOG_INFO("quantape.test", "    max f^{{-1}} error   = {}",
+                 quantape_test::num(v.max_finv_error));
+    QTA_LOG_INFO("quantape.test", "    monotone x?        = {}", (v.monotone_x ? "YES" : "NO"));
+    QTA_LOG_INFO("quantape.test", "    monotone y?        = {}", (v.monotone_y ? "YES" : "NO"));
 
     // Pass/fail checks
     bool ok = true;
     if (v.max_area_error > 1e-10) {
-        std::cout << "  ** FAIL: area error too large\n";
+        QTA_LOG_ERROR("quantape.test", "  ** FAIL: area error too large");
         ok = false;
     }
     if (v.closure_error > 1e-10) {
-        std::cout << "  ** FAIL: closure error too large\n";
+        QTA_LOG_ERROR("quantape.test", "  ** FAIL: closure error too large");
         ok = false;
     }
     if (v.max_f_error > 1e-15) {
-        std::cout << "  ** FAIL: f consistency error too large\n";
+        QTA_LOG_ERROR("quantape.test", "  ** FAIL: f consistency error too large");
         ok = false;
     }
     if (!v.monotone_x || !v.monotone_y) {
-        std::cout << "  ** FAIL: monotonicity violated\n";
+        QTA_LOG_ERROR("quantape.test", "  ** FAIL: monotonicity violated");
         ok = false;
     }
     if (ok) {
-        std::cout << "  All table checks PASSED\n";
+        QTA_LOG_INFO("quantape.test", "  All table checks PASSED");
     }
-    std::cout << "\n";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -94,9 +100,9 @@ void testTableGeneration() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void testStatistics() {
-    std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " STATISTICAL TESTS  (N = 10,000,000)\n";
-    std::cout << "═══════════════════════════════════════════════════════════\n\n";
+    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+                                  " STATISTICAL TESTS  (N = 10,000,000)\n"
+                                  "═══════════════════════════════════════════════════════════\n");
 
     constexpr int N = 10'000'000;
     quantape::math::mc::ZigguratNormal zig(12345);
@@ -132,11 +138,10 @@ void testStatistics() {
                    3.0 * mean * mean * mean * mean) /
                   (var * var);
 
-    std::cout << std::setprecision(8);
-    std::cout << "  Mean       = " << std::setw(14) << mean << "   (expected: 0)\n";
-    std::cout << "  Variance   = " << std::setw(14) << var << "   (expected: 1)\n";
-    std::cout << "  Skewness   = " << std::setw(14) << skew << "   (expected: 0)\n";
-    std::cout << "  Kurtosis   = " << std::setw(14) << kurt << "   (expected: 3)\n\n";
+    QTA_LOG_INFO("quantape.test", "  Mean       = {}   (expected: 0)", quantape_test::num(mean, 8));
+    QTA_LOG_INFO("quantape.test", "  Variance   = {}   (expected: 1)", quantape_test::num(var, 8));
+    QTA_LOG_INFO("quantape.test", "  Skewness   = {}   (expected: 0)", quantape_test::num(skew, 8));
+    QTA_LOG_INFO("quantape.test", "  Kurtosis   = {}   (expected: 3)", quantape_test::num(kurt, 8));
 
     // Standard errors (for N=10M)
     double se_mean = 1.0 / std::sqrt(N);
@@ -147,8 +152,8 @@ void testStatistics() {
     auto check = [](const char* name, double val, double expected, double se) {
         double z = std::abs(val - expected) / se;
         bool pass = z < 4.0; // 4-sigma tolerance
-        std::cout << "  " << name << ": z = " << std::setprecision(2) << z << " sigma  "
-                  << (pass ? "PASS" : "** FAIL **") << "\n";
+        QTA_LOG_INFO("quantape.test", "  {}: z = {} sigma  {}", name, quantape_test::num(z, 2),
+                     pass ? "PASS" : "** FAIL **");
         return pass;
     };
 
@@ -159,8 +164,7 @@ void testStatistics() {
     ok &= check("Kurtosis", kurt, 3.0, se_kurt);
 
     if (ok)
-        std::cout << "\n  All statistical tests PASSED\n";
-    std::cout << "\n";
+        QTA_LOG_INFO("quantape.test", "\n  All statistical tests PASSED");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -168,9 +172,9 @@ void testStatistics() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void testTails() {
-    std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " TAIL DISTRIBUTION TEST  (N = 50,000,000)\n";
-    std::cout << "═══════════════════════════════════════════════════════════\n\n";
+    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+                                  " TAIL DISTRIBUTION TEST  (N = 50,000,000)\n"
+                                  "═══════════════════════════════════════════════════════════\n");
 
     constexpr long N = 50'000'000;
     quantape::math::mc::ZigguratNormal zig(67890);
@@ -187,18 +191,16 @@ void testTails() {
         }
     }
 
-    std::cout << std::setprecision(6);
-    std::cout << "  Threshold  Observed     Expected     Ratio\n";
-    std::cout << "  ─────────  ──────────   ──────────   ─────\n";
+    QTA_LOG_INFO("quantape.test", "  Threshold  Observed     Expected     Ratio");
+    QTA_LOG_INFO("quantape.test", "  ─────────  ──────────   ──────────   ─────");
     for (int j = 0; j < 5; ++j) {
         double expected_frac = std::erfc(thresholds[j] / std::sqrt(2.0));
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
-        std::cout << "  " << std::setw(5) << thresholds[j] << " sigma"
-                  << "  " << std::setw(10) << observed_frac << "   " << std::setw(10)
-                  << expected_frac << "   " << std::setw(8) << ratio << "\n";
+        QTA_LOG_INFO("quantape.test", "  {} sigma  {}   {}   {}",
+                     quantape_test::num(thresholds[j], 6), quantape_test::num(observed_frac, 6),
+                     quantape_test::num(expected_frac, 6), quantape_test::num(ratio, 6));
     }
-    std::cout << "\n";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -206,9 +208,9 @@ void testTails() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void benchmark() {
-    std::cout << "═══════════════════════════════════════════════════════════\n";
-    std::cout << " BENCHMARK  (1,000,000 samples each)\n";
-    std::cout << "═══════════════════════════════════════════════════════════\n\n";
+    QTA_LOG_INFO("quantape.test", "\n═══════════════════════════════════════════════════════════\n"
+                                  " BENCHMARK  (1,000,000 samples each)\n"
+                                  "═══════════════════════════════════════════════════════════\n");
 
     quantape::math::mc::ZigguratNormal zig(42);
     std::mt19937_64 mt(42);
@@ -217,16 +219,17 @@ void benchmark() {
     double zig_ns = timeNs([&]() { return zig(); });
     double std_ns = timeNs([&]() { return std_normal(mt); });
 
-    std::cout << std::setprecision(2) << std::fixed;
-    std::cout << "  Ziggurat              : " << zig_ns << " ns/sample\n";
-    std::cout << "  std::normal_distribution: " << std_ns << " ns/sample\n";
-    std::cout << "  Speedup               : " << std_ns / zig_ns << "x\n\n";
+    QTA_LOG_INFO("quantape.test", "  Ziggurat              : {} ns/sample",
+                 quantape_test::num(zig_ns, 2));
+    QTA_LOG_INFO("quantape.test", "  std::normal_distribution: {} ns/sample",
+                 quantape_test::num(std_ns, 2));
+    QTA_LOG_INFO("quantape.test", "  Speedup               : {}x",
+                 quantape_test::num(std_ns / zig_ns, 2));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 
 int main() {
-    std::cout << "\n";
     testTableGeneration();
     testStatistics();
     testTails();

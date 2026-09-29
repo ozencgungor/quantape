@@ -19,13 +19,7 @@
 #include <cstdlib>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::math::BilinearInterpolation;
 using quantape::math::CubicDerivativeApprox;
@@ -96,15 +90,17 @@ Eigen::Matrix<double, -1, -1> hessian2D(double x, double y,
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (std::fabs(got - expected) > tol) {
-        std::fprintf(stderr, "FAIL: %s got=%.15g expected=%.15g err=%.3g\n", label, got, expected,
-                     std::fabs(got - expected));
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} err={}", label,
+                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
+                      quantape_test::num(std::fabs(got - expected), 3));
         std::exit(1);
     }
-    std::printf("  %-46s ok  got=%.12f expected=%.12f\n", label, got, expected);
+    QTA_LOG_INFO("quantape.test", "  {} ok  got={} expected={}", label, quantape_test::num(got, 12),
+                 quantape_test::num(expected, 12));
 }
 
 void testLinear() {
-    std::printf("=== linear evaluation-point AD ===\n");
+    QTA_LOG_INFO("quantape.test", "=== linear evaluation-point AD ===");
     const double x = 1.5;
 
     const auto H =
@@ -122,7 +118,7 @@ void testLinear() {
 }
 
 void testLogLinear() {
-    std::printf("=== log-linear evaluation-point AD ===\n");
+    QTA_LOG_INFO("quantape.test", "=== log-linear evaluation-point AD ===");
     const double x = 1.5;
     const double t = 0.5, dx = 1.0;
     const double L1 = std::log(1.0), L2 = std::log(4.0);
@@ -143,7 +139,7 @@ void testLogLinear() {
 }
 
 void testBilinear() {
-    std::printf("=== bilinear evaluation-point AD ===\n");
+    QTA_LOG_INFO("quantape.test", "=== bilinear evaluation-point AD ===");
     const std::vector<double> bx{0.0, 1.0, 2.0};
     const std::vector<double> by{0.0, 1.0};
     const std::vector<std::vector<double>> z{{1.0, 2.0, 3.0}, {4.0, 6.0, 8.0}};
@@ -165,7 +161,7 @@ void testBilinear() {
 }
 
 void testCubicSplineMixed() {
-    std::printf("=== cubic (Spline) mixed x/y Hessian ===\n");
+    QTA_LOG_INFO("quantape.test", "=== cubic (Spline) mixed x/y Hessian ===");
     const double x = 1.55;
 
     const auto H =
@@ -192,7 +188,7 @@ void testCubicSplineMixed() {
 }
 
 void testEvaluateFixed() {
-    std::printf("=== passive-abscissa policy ===\n");
+    QTA_LOG_INFO("quantape.test", "=== passive-abscissa policy ===");
 
     {
         stan::math::recover_memory();
@@ -227,6 +223,6 @@ int main() {
     testCubicSplineMixed();
     testEvaluateFixed();
     stan::math::recover_memory();
-    std::printf("\ntest_interpolation_xad: all invariants hold\n");
+    QTA_LOG_INFO("quantape.test", "test_interpolation_xad: all invariants hold");
     return 0;
 }

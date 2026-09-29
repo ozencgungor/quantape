@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(generic_MC)
+project(quantape)
+
+# ============================================================================
+# Project settings
+# ============================================================================
 
 # Allow subdirectories with older CMake minimum versions
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
@@ -7,225 +11,101 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ============================================================================
-# Third-party libraries
-# ============================================================================
+option(QUANTAPE_BUILD_EXAMPLES "Build example executables" ON)
+option(QUANTAPE_BUILD_TOOLS "Build command-line tools" ON)
+option(QUANTAPE_BUILD_TESTS "Build test executables" ON)
+option(QUANTAPE_BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(QUANTAPE_ENABLE_LOGGING "Build with quill-based logging (macros become no-ops when OFF)" ON)
+set(QUANTAPE_LOG_COMPILE_LEVEL "" CACHE STRING
+    "Compile-time log level: TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL (default: TRACE in Debug, INFO otherwise)")
 
-# Set third-party directory
-set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third-party)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(Dependencies)
+include(QuantapeTargets)
 
-# ----------------------------------------------------------------------------
-# Eigen (header-only linear algebra library)
-# ----------------------------------------------------------------------------
-set(EIGEN3_INCLUDE_DIR ${THIRD_PARTY_DIR}/eigen)
-include_directories(${EIGEN3_INCLUDE_DIR})
-
-# ----------------------------------------------------------------------------
-# Boost (download to third-party directory if not present)
-# ----------------------------------------------------------------------------
-if(NOT EXISTS ${THIRD_PARTY_DIR}/boost/boost)
-    message(STATUS "Downloading Boost headers to third-party...")
-    include(FetchContent)
-    FetchContent_Declare(
-        Boost
-        URL https://archives.boost.io/release/1.84.0/source/boost_1_84_0.tar.bz2
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-        SOURCE_DIR ${THIRD_PARTY_DIR}/boost
-    )
-    FetchContent_MakeAvailable(Boost)
-else()
-    message(STATUS "Using existing Boost installation in third-party/boost")
-endif()
-set(Boost_INCLUDE_DIRS ${THIRD_PARTY_DIR}/boost)
-
-# ----------------------------------------------------------------------------
-# dlib (machine learning library) - DISABLED due to C++20 compatibility issues
-# ----------------------------------------------------------------------------
-# Uncomment when needed:
-# message(STATUS "Fetching dlib...")
-# FetchContent_Declare(
-#     dlib
-#     GIT_REPOSITORY https://github.com/davisking/dlib.git
-#     GIT_TAG v19.24.4
-#     GIT_SHALLOW TRUE
-#     SOURCE_DIR ${THIRD_PARTY_DIR}/dlib
-# )
-# set(DLIB_NO_GUI_SUPPORT ON CACHE BOOL "Disable dlib GUI support")
-# set(DLIB_USE_CUDA OFF CACHE BOOL "Disable CUDA support")
-# FetchContent_MakeAvailable(dlib)
-
-# ----------------------------------------------------------------------------
-# Intel TBB (Threading Building Blocks, required by Stan Math)
-# Download and build oneTBB from source
-# ----------------------------------------------------------------------------
-# Force TBB to build as a shared library, as recommended for Stan Math
-set(BUILD_SHARED_LIBS ON)
-if(NOT TARGET TBB::tbb)
-    message(STATUS "Downloading and building Intel oneTBB from source...")
-    include(FetchContent)
-
-    # Set minimum CMake policy to allow TBB's older CMake version
-    set(CMAKE_POLICY_DEFAULT_CMP0000 OLD)
-
-    FetchContent_Declare(
-        TBB
-        URL https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.9.0.tar.gz
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    # Configure TBB build options
-    set(TBB_TEST OFF CACHE BOOL "Build TBB tests" FORCE)
-    set(TBB_EXAMPLES OFF CACHE BOOL "Build TBB examples" FORCE)
-    set(TBB_STRICT OFF CACHE BOOL "Treat compiler warnings as errors" FORCE)
-    set(TBB_DISABLE_HWLOC_AUTOMATIC_SEARCH ON CACHE BOOL "Disable hwloc" FORCE)
-
-    FetchContent_MakeAvailable(TBB)
-
-    message(STATUS "TBB built successfully")
-    set(TBB_LIBRARIES TBB::tbb)
-else()
-    message(STATUS "Using existing TBB target")
-endif()
-# Reset BUILD_SHARED_LIBS to default (OFF for this project) after building TBB
-set(BUILD_SHARED_LIBS OFF)
-
-# ----------------------------------------------------------------------------
-# SUNDIALS (SUite of Nonlinear and DIfferential/ALgebraic equation Solvers)
-# Required by Stan Math for ODE solving capabilities
-# ----------------------------------------------------------------------------
-if(NOT TARGET SUNDIALS::generic)
-    message(STATUS "Downloading and building SUNDIALS...")
-    include(FetchContent)
-    FetchContent_Declare(
-        SUNDIALS
-        URL https://github.com/LLNL/sundials/releases/download/v6.6.0/sundials-6.6.0.tar.gz
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    # Configure SUNDIALS build options
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
-    set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
-    set(EXAMPLES_ENABLE_C OFF CACHE BOOL "Build SUNDIALS C examples" FORCE)
-    set(EXAMPLES_INSTALL OFF CACHE BOOL "Install SUNDIALS examples" FORCE)
-    set(BUILD_TESTING OFF CACHE BOOL "Build SUNDIALS tests" FORCE)
-
-    FetchContent_MakeAvailable(SUNDIALS)
-
-    message(STATUS "SUNDIALS built successfully")
-else()
-    message(STATUS "Using existing SUNDIALS target")
-endif()
-
-# ----------------------------------------------------------------------------
-# Stan Math (statistical modeling library, depends on Eigen, Boost, TBB, and SUNDIALS)
-# ----------------------------------------------------------------------------
-set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math/math-4.9.0)
-if(NOT EXISTS "${STAN_MATH_INCLUDE_DIR}/stan/math.hpp")
-    # layout changed: the checkout root is directly under stan-math/
-    set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math)
-endif()
-include_directories(${STAN_MATH_INCLUDE_DIR})
-
-# Include SUNDIALS headers from the build
-if(TARGET SUNDIALS::generic)
-    get_target_property(SUNDIALS_INCLUDE_DIRS SUNDIALS::generic INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(${SUNDIALS_INCLUDE_DIRS})
-    # Also include the source directories
-    include_directories(${CMAKE_BINARY_DIR}/_deps/sundials-src/include)
-    include_directories(${CMAKE_BINARY_DIR}/_deps/sundials-build/include)
-endif()
-
-# ============================================================================
-# Include directories
-# ============================================================================
-
+# Public headers are included as quantape/...
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-# Third-party includes
 include_directories(${Boost_INCLUDE_DIRS})
 
 # ============================================================================
-# Project source files
+# Library
 # ============================================================================
 
-# Library sources and headers (header-heavy; implementations in src/)
 file(GLOB_RECURSE QUANTAPE_HEADERS CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/quantape/*.h)
 file(GLOB_RECURSE QUANTAPE_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+# Logging and formatting are separate small libraries: build-time tools such as
+# sobol_to_binary must be able to use them without linking the full library
+# (which would create a target cycle through the generated Sobol asset).
+list(FILTER QUANTAPE_SOURCES EXCLUDE REGEX "/src/(log|format)/")
 
-# ============================================================================
-# Library target
-# ============================================================================
-
-# Create static library
 add_library(quantape STATIC ${QUANTAPE_SOURCES} ${QUANTAPE_HEADERS})
-
-# Public include interface: consumers (tests, bindings, downstream) see
-# quantape/... with include/, installed as include/
 target_include_directories(quantape PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
     ${Boost_INCLUDE_DIRS}
 )
+quantape_set_warnings(quantape)
 
-# Link third-party libraries
-# target_link_libraries(quantape PUBLIC
-#     Eigen3::Eigen
-#     # dlib::dlib  # Disabled due to C++20 compatibility issues
-# )
+# Infrastructure libraries: logging facade and number formatting. Both are
+# part of the public headers, so quantape links them PUBLIC.
+add_library(quantape_log STATIC src/log/Log.cpp)
+target_include_directories(quantape_log PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+quantape_set_warnings(quantape_log)
 
-# ============================================================================
-# Example executables
-# ============================================================================
+add_library(quantape_format STATIC src/format/Number.cpp)
+target_include_directories(quantape_format PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+quantape_set_warnings(quantape_format)
+target_link_libraries(quantape_format PUBLIC zmij::zmij)
 
-# Create executable for example usage
-add_executable(example_usage examples/example_usage.cpp)
-target_link_libraries(example_usage quantape)
+if(QUANTAPE_ENABLE_LOGGING)
+    target_link_libraries(quantape_log PUBLIC quill::quill)
+    if(QUANTAPE_LOG_COMPILE_LEVEL)
+        string(TOUPPER "${QUANTAPE_LOG_COMPILE_LEVEL}" _qta_level)
+        if(_qta_level STREQUAL "TRACE")
+            set(_qta_quill_level TRACE_L3)
+        elseif(_qta_level STREQUAL "DEBUG")
+            set(_qta_quill_level DEBUG)
+        elseif(_qta_level STREQUAL "INFO")
+            set(_qta_quill_level INFO)
+        elseif(_qta_level STREQUAL "WARN")
+            set(_qta_quill_level WARNING)
+        elseif(_qta_level STREQUAL "ERROR")
+            set(_qta_quill_level ERROR)
+        elseif(_qta_level STREQUAL "CRITICAL")
+            set(_qta_quill_level CRITICAL)
+        else()
+            message(FATAL_ERROR "Unknown QUANTAPE_LOG_COMPILE_LEVEL: ${QUANTAPE_LOG_COMPILE_LEVEL}")
+        endif()
+        target_compile_definitions(quantape_log PUBLIC
+            QUILL_COMPILE_ACTIVE_LOG_LEVEL=QUILL_COMPILE_ACTIVE_LOG_LEVEL_${_qta_quill_level})
+    else()
+        target_compile_definitions(quantape_log PUBLIC
+            $<$<CONFIG:Debug>:QUILL_COMPILE_ACTIVE_LOG_LEVEL=QUILL_COMPILE_ACTIVE_LOG_LEVEL_TRACE_L3>
+            $<$<NOT:$<CONFIG:Debug>>:QUILL_COMPILE_ACTIVE_LOG_LEVEL=QUILL_COMPILE_ACTIVE_LOG_LEVEL_INFO>)
+    endif()
+else()
+    target_compile_definitions(quantape_log PUBLIC QUANTAPE_DISABLE_LOGGING=1)
+endif()
 
-# Create executable for Sobol direction-number extension tool
-# (headers-only, standard library only: no quantape/TBB dependency)
-find_package(Threads REQUIRED)
-add_executable(extend_sobol tools/extend_sobol.cpp)
-target_include_directories(extend_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(extend_sobol PRIVATE Threads::Threads)
-
-# Sobol quality criterion tests (Joe-Kuo 2D t-values, Property A, search)
-add_executable(test_sobol_quality tests/test_sobol_quality.cpp)
-target_include_directories(test_sobol_quality PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(test_sobol_quality PRIVATE Threads::Threads)
-
-# Sobol table verifier (structure, criterion, net exactness, reference cross-check)
-add_executable(verify_sobol tools/verify_sobol.cpp)
-target_include_directories(verify_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(verify_sobol PRIVATE Threads::Threads)
-
-# Broad statistical analysis battery (exactness, discrepancy, integration, GBM)
-add_executable(analyze_sobol tools/analyze_sobol.cpp)
-target_include_directories(analyze_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(analyze_sobol PRIVATE Threads::Threads)
-
-# Sobol generator + SDE engine source tests
-add_executable(test_sobol_generator tests/test_sobol_generator.cpp)
-target_link_libraries(test_sobol_generator PUBLIC
-        quantape
-        TBB::tbb
-)
-
-# Sobol generator benchmark (throughput, memory, engine QMC costs)
-add_executable(bench_sobol benchmarks/bench_sobol.cpp)
-target_link_libraries(bench_sobol PUBLIC
-        quantape
-        TBB::tbb
-)
+target_link_libraries(quantape PUBLIC quantape_log quantape_format)
 
 # ============================================================================
-# Compile-time Sobol table selection (QSB1 binary asset, zero-copy mmap)
+# Generated assets
 #
-# Default: our refined 65,536-dimension table, falling back to the unrefined
-# 65,536 run and then the Joe-Kuo D(7) base table. Override with
+# Sobol direction-number table (QSB1 binary, zero-copy mmap). Default: the
+# refined 65,536-dimension table, falling back to the unrefined run and then
+# the Joe-Kuo D(7) base table. Override with
 #   cmake -DQUANTAPE_SOBOL_TABLE=/path/to/table
 # ============================================================================
+
+add_executable(sobol_to_binary tools/sobol_to_binary.cpp)
+target_link_libraries(sobol_to_binary PRIVATE quantape_log)
+quantape_collect_executables()
+
 set(_sobol_table_candidates
     "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-refined-w256.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-unrefined-w256.txt"
@@ -247,10 +127,6 @@ if(NOT QUANTAPE_SOBOL_TABLE STREQUAL "" AND NOT EXISTS "${QUANTAPE_SOBOL_TABLE}"
             "Joe-Kuo direction-number table baked into the build" FORCE)
     endif()
 endif()
-find_package(Threads REQUIRED)
-add_executable(sobol_to_binary tools/sobol_to_binary.cpp)
-target_include_directories(sobol_to_binary PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(sobol_to_binary PRIVATE Threads::Threads)
 if(EXISTS "${QUANTAPE_SOBOL_TABLE}")
     message(STATUS "Sobol table (compile-time): ${QUANTAPE_SOBOL_TABLE}")
     set(QUANTAPE_SOBOL_ASSET "${CMAKE_BINARY_DIR}/sobol_table.qsb")
@@ -268,782 +144,42 @@ else()
                    "SobolGenerator::fromDefaultTable will be unavailable")
 endif()
 
-# Sobol direction-number refinement (two-sided coordinate descent)
-add_executable(refine_sobol tools/refine_sobol.cpp)
-target_include_directories(refine_sobol PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(refine_sobol PRIVATE Threads::Threads)
+# ============================================================================
+# Executables
+# ============================================================================
 
-# Integration tests for the Sobol tools (extend / refine / verify)
-add_executable(test_sobol_tools tests/test_sobol_tools.cpp)
-target_include_directories(test_sobol_tools PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(test_sobol_tools PRIVATE Threads::Threads)
-target_compile_definitions(test_sobol_tools PRIVATE
-    EXTEND_BIN="$<TARGET_FILE:extend_sobol>"
-    REFINE_BIN="$<TARGET_FILE:refine_sobol>"
-    VERIFY_BIN="$<TARGET_FILE:verify_sobol>")
-add_dependencies(test_sobol_tools extend_sobol refine_sobol verify_sobol)
-
-# Create executable for Math library tests
-add_executable(test_math tests/test_math.cpp)
-target_link_libraries(test_math quantape)
-
-# Create executable for 1-D root solver regression tests
-add_executable(test_solvers tests/test_solvers.cpp)
-target_link_libraries(test_solvers quantape)
-
-# Create executable for Interpolation library tests
-add_executable(test_interpolation tests/test_interpolation.cpp)
-target_link_libraries(test_interpolation quantape)
-
-# Create executable for Markets library tests
-add_executable(test_markets tests/test_markets.cpp)
-target_link_libraries(test_markets quantape)
-
-# Create executable for CIR bridge accuracy tests
-# Create executable for CIR bridge distribution tests
-# Create executable for improved CIR bridge tests
-# Create executable for theoretical bridge variance tests
-# Create executable for asymmetric bridge tests
-# Create executable for analytical bridge variance tests
-# Create executable for GBM bridge tests
-# Create executable for G2++ bridge tests
-# Create executable for analytical bridge tests
-# Create executable for nonlinear correction tests
-# Create executable for explaining effective kappa
-add_executable(explain_effective_kappa interview_prep/explain_effective_kappa.cpp)
-
-# Create executable for C++ references and pointers guide
-add_executable(cpp_references_pointers_guide interview_prep/cpp_references_pointers_guide.cpp)
-
-# Create executable for smart pointers and algorithms implementation
-add_executable(smart_pointers_and_algorithms interview_prep/smart_pointers_and_algorithms.cpp)
-
-# Create executable for special member functions demonstration
-add_executable(special_member_functions interview_prep/special_member_functions.cpp)
-
-# Create executable for new and delete explanation
-add_executable(new_and_delete_explained interview_prep/new_and_delete_explained.cpp)
-
-# Create executable for lambdas and algorithms
-add_executable(lambdas_and_algorithms interview_prep/lambdas_and_algorithms.cpp)
-
-# Create executable for advanced C++ topics
-add_executable(advanced_cpp_topics interview_prep/advanced_cpp_topics.cpp)
-
-# Create executable for numerical methods
-add_executable(numerical_methods interview_prep/numerical_methods.cpp)
-
-# Create executable for numpy patterns demonstration
-add_executable(numpy_patterns interview_prep/numpy_patterns.cpp)
-
-# Create executable for Eigen 3.4+ fancy indexing
-add_executable(eigen_fancy_indexing interview_prep/eigen_fancy_indexing.cpp)
-
-# Create executable for AD (Automatic Differentiation) tests
-add_executable(test_ad tests/test_ad.cpp)
-
-# Link libraries for AD test
-target_link_libraries(test_ad PUBLIC
-    quantape
-    TBB::tbb
-    SUNDIALS::nvecserial
-    SUNDIALS::cvodes
-)
-
-# Configure Stan Math compile definitions for AD test
-target_compile_definitions(test_ad PRIVATE
-    STAN_THREADS=true       # Enable threading via TBB
-    STAN_NO_RANGE_CHECKS
-    _REENTRANT              # Required for thread-safe math functions
-    TBB_INTERFACE_NEW       # Use new oneTBB interface
-)
-
-# Set rpath for TBB on macOS and Linux to ensure it's found at runtime
-if(APPLE OR UNIX)
-    # Set the rpath for the test_ad executable using generator expressions
-    set_target_properties(test_ad PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-    # For Linux, also set the rpath to search relative to the executable
-    if(UNIX AND NOT APPLE)
-        set_target_properties(test_ad PROPERTIES
-            INSTALL_RPATH "$ORIGIN/../lib:$<TARGET_FILE_DIR:TBB::tbb>"
-        )
-    endif()
+if(QUANTAPE_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+if(QUANTAPE_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+if(QUANTAPE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+if(QUANTAPE_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
-# Create executable for Black-Scholes AD benchmark
-add_executable(test_bs_ad_bench benchmarks/test_bs_ad_bench.cpp)
-
-target_link_libraries(test_bs_ad_bench PUBLIC
-    quantape
-    TBB::tbb
-    SUNDIALS::nvecserial
-    SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_bs_ad_bench PRIVATE
-    STAN_THREADS=true
-    STAN_NO_RANGE_CHECKS
-    _REENTRANT
-    TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_bs_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_bs_ad_bench PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
+# Single target depending on every executable (IDE-friendly build target).
+get_property(QUANTAPE_EXECUTABLES GLOBAL PROPERTY QUANTAPE_EXECUTABLE_TARGETS)
+if(QUANTAPE_EXECUTABLES)
+    add_custom_target(build_all DEPENDS ${QUANTAPE_EXECUTABLES})
 endif()
-
-# Create executable for interpolation AD benchmark
-add_executable(test_interp_ad_bench benchmarks/test_interp_ad_bench.cpp)
-
-target_link_libraries(test_interp_ad_bench PUBLIC
-    quantape
-    TBB::tbb
-    SUNDIALS::nvecserial
-    SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_interp_ad_bench PRIVATE
-    STAN_THREADS=true
-    STAN_NO_RANGE_CHECKS
-    _REENTRANT
-    TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_interp_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_interp_ad_bench PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# Create executable for fast exp/log AD benchmark
-add_executable(test_fast_exp_log benchmarks/test_fast_exp_log.cpp)
-
-target_link_libraries(test_fast_exp_log PUBLIC
-    quantape
-    TBB::tbb
-    SUNDIALS::nvecserial
-    SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_fast_exp_log PRIVATE
-    STAN_THREADS=true
-    STAN_NO_RANGE_CHECKS
-    _REENTRANT
-    TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_fast_exp_log PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_fast_exp_log PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# Create executable for bivariate normal CDF AD benchmark
-add_executable(test_bvn_ad_bench benchmarks/test_bvn_ad_bench.cpp)
-
-target_link_libraries(test_bvn_ad_bench PUBLIC
-    quantape
-    TBB::tbb
-    SUNDIALS::nvecserial
-    SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_bvn_ad_bench PRIVATE
-    STAN_THREADS=true
-    STAN_NO_RANGE_CHECKS
-    _REENTRANT
-    TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_bvn_ad_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native -ffast-math)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_bvn_ad_bench PROPERTIES
-        INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-
-add_executable(test_bs_hessian_bench benchmarks/test_bs_hessian_bench.cpp)
-
-target_link_libraries(test_bs_hessian_bench PUBLIC
-        quantape
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_bs_hessian_bench PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_bs_hessian_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_bs_hessian_bench PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# Black-76 analytical Greeks test
-add_executable(test_black76 tests/test_black76.cpp)
-
-target_link_libraries(test_black76 PUBLIC
-        quantape
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_black76 PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_black76 PRIVATE -Wall -Wextra -Wpedantic)
-
-# Cubic interpolation weight-matrix / branch-pinned probe validation
-add_executable(test_cubic_weights tests/test_cubic_weights.cpp)
-
-target_link_libraries(test_cubic_weights PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_cubic_weights PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_cubic_weights PRIVATE -Wall -Wextra -Wpedantic)
-
-# Bicubic interpolation weight-matrix / branch-pinned probe validation
-add_executable(test_bicubic_weights tests/test_bicubic_weights.cpp)
-
-target_link_libraries(test_bicubic_weights PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_bicubic_weights PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_bicubic_weights PRIVATE -Wall -Wextra -Wpedantic)
-
-# Tanh-sinh (double-exponential) quadrature: value + AD gradient/Hessian
-add_executable(test_tanh_sinh tests/test_tanh_sinh.cpp)
-
-target_link_libraries(test_tanh_sinh PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_tanh_sinh PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_tanh_sinh PRIVATE -Wall -Wextra -Wpedantic)
-
-# Integrator AD primitives: all Integrals classes at double/var/fvar<var>
-add_executable(test_integrator_primitives tests/test_integrator_primitives.cpp)
-target_link_libraries(test_integrator_primitives PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_integrator_primitives PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_integrator_primitives PRIVATE -Wall -Wextra -Wpedantic)
-
-# 1-D solver AD dispatch: var IFT gradients + fvar pathwise Hessians
-add_executable(test_solvers_ad tests/test_solvers_ad.cpp)
-
-target_link_libraries(test_solvers_ad PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_solvers_ad PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_solvers_ad PRIVATE -Wall -Wextra -Wpedantic)
-
-# Interpolation evaluation-point AD (Phase 1): analytic dI/dx + mixed Hessians
-add_executable(test_interpolation_xad tests/test_interpolation_xad.cpp)
-
-target_link_libraries(test_interpolation_xad PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_interpolation_xad PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_interpolation_xad PRIVATE -Wall -Wextra -Wpedantic)
-
-# Autodiff primitives: HVP + cross-primitive composition (Phase 3)
-add_executable(test_autodiff_primitives tests/test_autodiff_primitives.cpp)
-
-target_link_libraries(test_autodiff_primitives PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_autodiff_primitives PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_autodiff_primitives PRIVATE -Wall -Wextra -Wpedantic)
-
-# Optimizer building blocks: stop criteria, CRTP base, AD evaluation helpers
-add_executable(test_optimization tests/test_optimization.cpp)
-
-target_link_libraries(test_optimization PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_optimization PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_optimization PRIVATE -Wall -Wextra -Wpedantic)
-
-# IFT sensitivity layer: dp/dm, multiplier sensitivities, var composition
-add_executable(test_ift tests/test_ift.cpp)
-
-target_link_libraries(test_ift PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_ift PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE AD policy: Stan-backed implementations are the defaults/reference
-# (mc/Gradients.h reverse, mc/ForwardStan.h forward, mc/StateDerivatives.h
-# state derivatives). Accelerated self-contained scalar types live under
-# mc/mcfwdrev/ (fixed-size dual, lean reverse tape) and are opt-in, gated
-# in test_sde_gradients against the Stan-backed modes.
-# SDE simulation engine core (Stan-free: Eigen only)
-add_executable(test_sde_simulator tests/test_sde_simulator.cpp)
-
-target_link_libraries(test_sde_simulator PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_options(test_sde_simulator PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE schemes (Milstein uses Stan forward-mode fvar)
-add_executable(test_sde_schemes tests/test_sde_schemes.cpp)
-
-target_link_libraries(test_sde_schemes PUBLIC
-        quantape
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_sde_schemes PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_sde_schemes PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE moment matching (QE) — Stan-free
-add_executable(test_sde_moment_matching tests/test_sde_moment_matching.cpp)
-
-target_link_libraries(test_sde_moment_matching PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_options(test_sde_moment_matching PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE process bundles + Heston QE — Stan-free
-add_executable(test_sde_processes tests/test_sde_processes.cpp)
-
-target_link_libraries(test_sde_processes PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_options(test_sde_processes PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE pathwise gradients (Stan rev-mode nested tapes, S5)
-add_executable(test_sde_gradients tests/test_sde_gradients.cpp)
-
-target_link_libraries(test_sde_gradients PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_sde_gradients PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_sde_gradients PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# Heston model H0: characteristic function, Lewis+BS-CV pricer, CS greeks
-add_executable(test_heston_analytic tests/test_heston_analytic.cpp)
-
-target_link_libraries(test_heston_analytic PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_options(test_heston_analytic PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# Heston Stan callback-var instantiation (var / fvar<var> tape wiring)
-add_executable(test_heston_stan tests/test_heston_stan.cpp)
-
-target_link_libraries(test_heston_stan PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_heston_stan PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_heston_stan PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# Heston calibration strategies (synthetic quotes, weighted LS shoot-out)
-add_executable(test_heston_calibration tests/test_heston_calibration.cpp)
-
-target_link_libraries(test_heston_calibration PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_heston_calibration PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_heston_calibration PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# Heston calibration IFT/KKT hookup through the generic CalibrationProblem layer
-# In-house double-double precision gates
-add_executable(test_precision tests/test_precision.cpp)
-target_include_directories(test_precision PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_compile_options(test_precision PRIVATE -Wall -Wextra -Wpedantic -O2 -fno-fast-math)
-
-# Heston theta-driven QE: prices + pathwise gradients (H5)
-add_executable(test_heston_mc tests/test_heston_mc.cpp)
-
-target_link_libraries(test_heston_mc PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_heston_mc PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_heston_mc PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-add_executable(test_heston_ift tests/test_heston_ift.cpp)
-
-target_link_libraries(test_heston_ift PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_heston_ift PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_heston_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE engine with the Sobol/QMC source
-add_executable(test_sde_qmc tests/test_sde_qmc.cpp)
-
-target_link_libraries(test_sde_qmc PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(test_sde_qmc PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_sde_qmc PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# Market-risk propagation through calibrations (IFT/KKT tie-in, S5d)
-add_executable(test_market_risk_ift tests/test_market_risk_ift.cpp)
-
-target_link_libraries(test_market_risk_ift PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_market_risk_ift PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_market_risk_ift PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-# SDE engine benchmarking harness (sampling profiler target)
-add_executable(bench_sde benchmarks/bench_sde.cpp)
-
-target_link_libraries(bench_sde PUBLIC
-        quantape
-        TBB::tbb
-)
-
-target_compile_definitions(bench_sde PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(bench_sde PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-# Optimizer benchmarking harness (timing + sampling profiler target)
-add_executable(test_optimizers_bench benchmarks/test_optimizers_bench.cpp)
-
-target_link_libraries(test_optimizers_bench PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_optimizers_bench PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_optimizers_bench PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-# Optimizer stress suite: hard problems, edge cases, scale probes
-add_executable(test_optimizers_stress tests/test_optimizers_stress.cpp)
-
-target_link_libraries(test_optimizers_stress PUBLIC
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_optimizers_stress PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_optimizers_stress PRIVATE -Wall -Wextra -Wpedantic -O2)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_black76 PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# Create executable for mixed hessian benchmark
-add_executable(test_mixed_hessian tests/test_mixed_hessian.cpp)
-
-target_link_libraries(test_mixed_hessian PUBLIC
-        quantape
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_mixed_hessian PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_mixed_hessian PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_mixed_hessian PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# precomputed_gradients vs custom vari example
-# Multi-component AD chain example
-# Create executable for pricer hierarchy hessian benchmark
-add_executable(test_pricer_hessian tests/test_pricer_hessian.cpp)
-
-target_link_libraries(test_pricer_hessian PUBLIC
-        quantape
-        TBB::tbb
-        SUNDIALS::nvecserial
-        SUNDIALS::cvodes
-)
-
-target_compile_definitions(test_pricer_hessian PRIVATE
-        STAN_THREADS=true
-        STAN_NO_RANGE_CHECKS
-        _REENTRANT
-        TBB_INTERFACE_NEW
-)
-
-target_compile_options(test_pricer_hessian PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-if(APPLE OR UNIX)
-    set_target_properties(test_pricer_hessian PROPERTIES
-            INSTALL_RPATH "$<TARGET_FILE_DIR:TBB::tbb>"
-            BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# Create executable for ziggurat RNG tests
-add_executable(test_ziggurat tests/test_ziggurat.cpp)
-target_link_libraries(test_ziggurat quantape)
-target_compile_options(test_ziggurat PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
-
-# Create executable for McFarland ziggurat tests
-add_executable(test_mcfarland tests/test_mcfarland.cpp)
-target_link_libraries(test_mcfarland quantape)
-target_compile_options(test_mcfarland PRIVATE -Wall -Wextra -Wpedantic -O3 -march=native)
 
 # ============================================================================
 # Compiler options
 # ============================================================================
 
 # Optimization ONLY in Release builds. Debug stays -O0/-g so lldb shows
-# real locals instead of "optimized out" (moved here from the per-target
-# flags below, which previously applied -O3 to every build type).
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffast-math -Rpass=loop-vectorize")
-
-# Enable warnings
-if(MSVC)
-    target_compile_options(quantape PRIVATE /W4)
-    target_compile_options(example_usage PRIVATE /W4)
-    target_compile_options(test_math PRIVATE /W4)
-    target_compile_options(test_solvers PRIVATE /W4)
-    target_compile_options(test_interpolation PRIVATE /W4)
-    target_compile_options(test_markets PRIVATE /W4)
-    target_compile_options(explain_effective_kappa PRIVATE /W4)
-    target_compile_options(cpp_references_pointers_guide PRIVATE /W4)
-    target_compile_options(smart_pointers_and_algorithms PRIVATE /W4)
-    target_compile_options(special_member_functions PRIVATE /W4)
-    target_compile_options(new_and_delete_explained PRIVATE /W4)
-    target_compile_options(lambdas_and_algorithms PRIVATE /W4)
-    target_compile_options(advanced_cpp_topics PRIVATE /W4)
-    target_compile_options(numerical_methods PRIVATE /W4)
-    target_compile_options(test_ad PRIVATE /W4)
-else()
-    target_compile_options(quantape PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(example_usage PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_math PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_solvers PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_interpolation PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_markets PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(explain_effective_kappa PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(cpp_references_pointers_guide PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(smart_pointers_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(special_member_functions PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(new_and_delete_explained PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(lambdas_and_algorithms PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(advanced_cpp_topics PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(numerical_methods PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(numpy_patterns PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(eigen_fancy_indexing PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(test_ad PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# real locals instead of "optimized out".
+# -ffast-math is deliberately absent: it disables IEEE semantics (NaN/inf,
+# signed zero, reassociation) that the AD stack and no-arbitrage checks rely on.
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -Rpass=loop-vectorize")
 
 # ============================================================================
-# Installation
+# Summary
 # ============================================================================
 
 message(STATUS "===========================================")
@@ -1052,8 +188,14 @@ message(STATUS "  Eigen:      ${EIGEN3_INCLUDE_DIR}")
 message(STATUS "  Boost:      ${Boost_INCLUDE_DIRS}")
 message(STATUS "  TBB:        ${TBB_INCLUDE_DIR}")
 message(STATUS "  SUNDIALS:   ${SUNDIALS_INCLUDE_DIR}")
-message(STATUS "  dlib:       ${THIRD_PARTY_DIR}/dlib")
+message(STATUS "  dlib:       ${THIRD_PARTY_DIR}/dlib (disabled)")
 message(STATUS "  Stan Math:  ${STAN_MATH_INCLUDE_DIR}")
+if(QUANTAPE_ENABLE_LOGGING)
+    message(STATUS "  quill:      ${quill_SOURCE_DIR} (v13.0.0)")
+else()
+    message(STATUS "  quill:      disabled (QUANTAPE_ENABLE_LOGGING=OFF)")
+endif()
+message(STATUS "  zmij:       ${zmij_SOURCE_DIR} (v1.2)")
 message(STATUS "===========================================")
 
 # ============================================================================

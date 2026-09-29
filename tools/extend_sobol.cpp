@@ -36,6 +36,7 @@
  *   ./extend_sobol --local --target=150000 --level=1 --threads=16 --window=128 \
  *       --input=new-joe-kuo-6.21201 --output=joe-kuo-150k.txt
  */
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/CBCSearch.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
@@ -83,14 +84,14 @@ struct PolyInfo {
 void run_local(const std::string& input_file, const std::string& output_file,
                const Options& options) {
     // 1. Load existing Joe-Kuo file
-    fprintf(stderr, "Loading existing direction numbers from: %s\n", input_file.c_str());
+    QTA_LOG_INFO("quantape.tools", "loading existing direction numbers from: {}", input_file);
     auto existing = sobol::load_joe_kuo(input_file);
     int start_dim = (int)existing.size() + 2; // +2 because dim 1 has no entry
-    fprintf(stderr, "  Loaded %zu entries (dims 2-%d)\n", existing.size(), start_dim - 1);
+    QTA_LOG_INFO("quantape.tools", "loaded {} entries (dims 2-{})", existing.size(), start_dim - 1);
 
     if (start_dim > options.target) {
-        fprintf(stderr, "  Already have %d dims, target is %d. Nothing to do.\n", start_dim - 1,
-                options.target);
+        QTA_LOG_INFO("quantape.tools", "already have {} dims, target is {}; nothing to do",
+                     start_dim - 1, options.target);
         return;
     }
 
@@ -105,7 +106,7 @@ void run_local(const std::string& input_file, const std::string& output_file,
     }
     const std::unordered_set<uint64_t> used(used_polys.begin(), used_polys.end());
 
-    fprintf(stderr, "\nEnumerating new primitive polynomials...\n");
+    QTA_LOG_INFO("quantape.tools", "enumerating new primitive polynomials...");
     std::vector<PolyInfo> new_polys;
     const int needed = options.target - start_dim + 1;
     for (int deg = max_existing_degree; (int)new_polys.size() < needed; ++deg) {
@@ -123,13 +124,13 @@ void run_local(const std::string& input_file, const std::string& output_file,
                 ++added;
             }
         }
-        fprintf(stderr, "  degree %d: %zu candidates, added %d (%.1fs)\n", deg, candidates.size(),
-                added, secs);
+        QTA_LOG_INFO("quantape.tools", "degree {}: {} candidates, added {} ({:.1f}s)", deg,
+                     candidates.size(), added, secs);
     }
 
     // 3. Build work items
-    fprintf(stderr, "\nBuilding %d work items (level=%d)...\n", (int)new_polys.size(),
-            (int)options.level);
+    QTA_LOG_INFO("quantape.tools", "building {} work items (level={})", new_polys.size(),
+                 (int)options.level);
 
     std::vector<sobol::WorkItem> work(new_polys.size());
     for (size_t i = 0; i < new_polys.size(); ++i) {
@@ -169,12 +170,13 @@ void run_local(const std::string& input_file, const std::string& output_file,
         std::filesystem::copy_file(input_file, out,
                                    std::filesystem::copy_options::overwrite_existing);
     }
-    fprintf(stderr, "\nSearching for direction numbers (threads=%d, level=%d)\n", options.threads,
-            (int)options.level);
+    QTA_LOG_INFO("quantape.tools", "searching for direction numbers (threads={}, level={})",
+                 options.threads, (int)options.level);
     if (options.level != sobol::SearchLevel::RANDOM) {
-        fprintf(stderr, "  criterion D(%.0f): window=%d m=[%d,%d] weight=%.4g candidates=%s\n",
-                options.exponent, options.window, options.mMin, options.mMax, options.weightBase,
-                options.candidates > 0 ? "fixed" : "auto");
+        QTA_LOG_INFO("quantape.tools",
+                     "criterion D({:.0f}): window={} m=[{},{}] weight={:.4g} candidates={}",
+                     options.exponent, options.window, options.mMin, options.mMax,
+                     options.weightBase, options.candidates > 0 ? "fixed" : "auto");
     }
     const auto t0 = std::chrono::steady_clock::now();
     size_t flushed = 0;
@@ -198,8 +200,8 @@ void run_local(const std::string& input_file, const std::string& output_file,
             const double elapsed = std::chrono::duration<double>(now - t0).count();
             const double rate = done / std::max(elapsed, 1e-9);
             const double eta = (total - done) / std::max(rate, 1e-9);
-            fprintf(stderr, "  %u / %u (%.1f%%)  %.1f dims/s  ETA %.0fs\n", done, total,
-                    100.0 * done / total, rate, eta);
+            QTA_LOG_INFO("quantape.tools", "{}/{} ({:.1f}%) {:.1f} dims/s ETA {:.0f}s", done, total,
+                         100.0 * done / total, rate, eta);
         },
         options.level != sobol::SearchLevel::RANDOM ? onResult : sobol::ResultCallback{});
     if (!pending.empty()) {
@@ -210,7 +212,8 @@ void run_local(const std::string& input_file, const std::string& output_file,
 
     const auto t1 = std::chrono::steady_clock::now();
     const double secs = std::chrono::duration<double>(t1 - t0).count();
-    fprintf(stderr, "\n  Done in %.1fs (%.1f dims/sec)\n", secs, results.size() / secs);
+    QTA_LOG_INFO("quantape.tools", "done in {:.1f}s ({:.1f} dims/sec)", secs,
+                 results.size() / secs);
 
     // 6. Quality summary
     if (options.level != sobol::SearchLevel::RANDOM) {
@@ -229,10 +232,11 @@ void run_local(const std::string& input_file, const std::string& output_file,
             sum += r.score;
             ++scored;
         }
-        fprintf(stderr, "  Quality D(%.0f) score: min=%.4g mean=%.4g max=%.4g\n", options.exponent,
-                minScore, scored > 0 ? sum / scored : 0.0, maxScore);
+        QTA_LOG_INFO("quantape.tools", "quality D({:.0f}) score: min={:.4g} mean={:.4g} max={:.4g}",
+                     options.exponent, minScore, scored > 0 ? sum / scored : 0.0, maxScore);
         if (saturated > 0)
-            fprintf(stderr, "  WARNING: %d dimensions found no Property-A candidate\n", saturated);
+            QTA_LOG_WARN("quantape.tools", "{} dimensions found no Property-A candidate",
+                         saturated);
     }
 
     // 7. Write output (RANDOM level only; CBC entries are already checkpointed)
@@ -244,13 +248,14 @@ void run_local(const std::string& input_file, const std::string& output_file,
             new_entries[i].a = results[i].a_encoded;
             new_entries[i].m = results[i].m;
         }
-        fprintf(stderr, "\n  Writing %zu new entries to: %s\n", new_entries.size(), out.c_str());
+        QTA_LOG_INFO("quantape.tools", "writing {} new entries to: {}", new_entries.size(), out);
         sobol::save_joe_kuo(out, new_entries, true);
     } else {
-        fprintf(stderr, "\n  Checkpointed %zu new entries to: %s\n", flushed, out.c_str());
+        QTA_LOG_INFO("quantape.tools", "checkpointed {} new entries to: {}", flushed, out);
     }
 
-    fprintf(stderr, "  Total dimensions: %d\n\n", (int)(existing.size() + 1 + results.size()));
+    QTA_LOG_INFO("quantape.tools", "total dimensions: {}",
+                 (int)(existing.size() + 1 + results.size()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -306,12 +311,12 @@ void run_dispatch(const std::string& input_file, const std::string& outdir, cons
         snprintf(fname, sizeof(fname), "%s/batch_%04d.txt", outdir.c_str(), b);
         std::ofstream out(fname);
         out << sobol::serialize_work(batch);
-        fprintf(stderr, "  Wrote %s (%d items, dims %u-%u)\n", fname, (int)batch.size(),
-                batch.front().dim, batch.back().dim);
+        QTA_LOG_INFO("quantape.tools", "wrote {} ({} items, dims {}-{})", fname, (int)batch.size(),
+                     batch.front().dim, batch.back().dim);
     }
 
-    fprintf(stderr, "\nTo process each batch (RANDOM level) in a container:\n");
-    fprintf(stderr, "  docker run sobol-worker < batch_XXXX.txt > results_XXXX.txt\n\n");
+    QTA_LOG_INFO("quantape.tools", "to process each batch (RANDOM level) in a container:");
+    QTA_LOG_INFO("quantape.tools", "  docker run sobol-worker < batch_XXXX.txt > results_XXXX.txt");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -322,14 +327,13 @@ void run_worker(int num_threads) {
     std::string input((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
 
     auto items = sobol::deserialize_work(input);
-    fprintf(stderr, "  Worker: received %zu items\n", items.size());
+    QTA_LOG_INFO("quantape.tools", "worker: received {} items", items.size());
 
     sobol::SearchContext context; // empty: worker supports RANDOM level
     auto results =
         sobol::process_batch(items, context, num_threads, [](uint32_t done, uint32_t total) {
-            fprintf(stderr, "\r  Worker: %u / %u", done, total);
+            QTA_LOG_DEBUG("quantape.tools", "worker progress: {}/{}", done, total);
         });
-    fprintf(stderr, "\n");
 
     for (auto& r : results) {
         std::cout << r.dim << "\t" << r.degree << "\t" << r.a_encoded;

@@ -40,13 +40,7 @@
 #include <random>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::math::mc::sobol::Entry;
 using quantape::math::mc::sobol::SobolGenerator;
@@ -73,8 +67,9 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        std::fprintf(stderr, "FAIL: %s got=%.12g expected=%.12g tol=%.3g\n", label, got, expected,
-                     tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
+                      quantape_test::num(tol, 3));
         std::exit(1);
     }
 }
@@ -206,7 +201,8 @@ void testSourceContract() {
     Eigen::MatrixXd block2;
     shifted.fill(3, 5, 7, block2);
     CHECK(!(block.array() == block2.array()).all());
-    std::printf("  [ok] Sobol source contract (blocks, uniforms, replica shifts)\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] Sobol source contract (blocks, uniforms, replica shifts)");
 }
 
 // ── Engine invariants with QMC ──
@@ -243,7 +239,7 @@ void testEngineWithSobol() {
                   blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
         }
     }
-    std::printf("  [ok] Sobol engine invariants (path/block/schedule bitwise)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] Sobol engine invariants (path/block/schedule bitwise)");
 }
 
 // ── Statistical accuracy ──
@@ -302,8 +298,9 @@ void testQmcVarianceReduction() {
     }
     const double mcRms = std::sqrt(mcSq / static_cast<double>(replicas));
     const double qmcRms = std::sqrt(qmcSq / static_cast<double>(replicas));
-    std::printf("  one-step call: MC rmse=%.3e  QMC rmse=%.3e  (ratio %.2f)\n", mcRms, qmcRms,
-                qmcRms / mcRms);
+    QTA_LOG_INFO("quantape.test", "  one-step call: MC rmse={}  QMC rmse={}  (ratio {})",
+                 quantape_test::num(mcRms, 3), quantape_test::num(qmcRms, 3),
+                 quantape_test::num(qmcRms / mcRms, 2));
     CHECK(qmcRms < 0.5 * mcRms);
 
     // multi-step Euler moments: E[S_T] and Var[S_T] are exact for the
@@ -384,7 +381,7 @@ void testQeUniformsWithSobol() {
     CHECK(negatives == 0);
     checkClose("qmc qe mean", mean, exactMean, 5e-4 * exactMean + 1e-5);
     checkClose("qmc qe var", var, exactVar, 1e-3 * exactVar + 1e-5);
-    std::printf("  [ok] QE with Sobol uniforms: exact CIR moments, no negatives\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] QE with Sobol uniforms: exact CIR moments, no negatives");
 }
 
 // ── Pathwise AD with QMC ──
@@ -412,18 +409,18 @@ void testQmcGradients() {
         checkClose("qmc reverse vs forward", reverse.gradient(j), forward.gradient(j),
                    1e-8 * std::max(1.0, std::fabs(forward.gradient(j))));
     }
-    std::printf("  [ok] QMC pathwise AD: reverse == forward on identical points\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] QMC pathwise AD: reverse == forward on identical points");
 }
 
 } // namespace
 
 int main() {
-    std::printf("SDE QMC/Sobol tests\n");
+    QTA_LOG_INFO("quantape.test", "SDE QMC/Sobol tests");
     testSourceContract();
     testEngineWithSobol();
     testQmcVarianceReduction();
     testQeUniformsWithSobol();
     testQmcGradients();
-    std::printf("ALL SDE QMC TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SDE QMC TESTS PASSED");
     return 0;
 }

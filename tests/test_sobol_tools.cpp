@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "TestSupport.h"
 #include <unistd.h>
 
 #ifndef EXTEND_BIN
@@ -33,14 +34,6 @@
 #ifndef VERIFY_BIN
 #define VERIFY_BIN ""
 #endif
-
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -169,7 +162,8 @@ int main() {
         CHECK(resumed.size() == 43 && resumed.back().dim == 44);
         CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + resumedPath.string() + "\" --base=\"" +
                   basePath.string() + "\" --sample=4 --m=12 2>/dev/null") == 0);
-        std::printf("  [ok] extend: structure, net exactness, determinism, resume\n");
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] extend: structure, net exactness, determinism, resume");
     }
 
     // ── refine: objective non-increasing, valid, deterministic, dry-run ──
@@ -220,8 +214,9 @@ int main() {
                                     "--threads=1 2>/dev/null";
         CHECK(run(inplace) != 0);
         CHECK(fileHash(badPath) == beforeHash);
-        std::printf("  [ok] refine: objective %.4g -> %.4g, valid, deterministic, dry-run safe\n",
-                    beforeMax, afterMax);
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] refine: objective {} -> {}, valid, deterministic, dry-run safe",
+                     quantape_test::num(beforeMax, 4), quantape_test::num(afterMax, 4));
 
         // Multi-seed fuzz: refine random tables in dry-run, no crashes, no writes.
         for (std::uint64_t seed = 1; seed <= 5; ++seed) {
@@ -235,7 +230,7 @@ int main() {
             CHECK(run(fuzz) == 0);
             CHECK(fileHash(path) == h);
         }
-        std::printf("  [ok] refine fuzz: 5 seeds, dry-run, no writes\n");
+        QTA_LOG_INFO("quantape.test", "  [ok] refine fuzz: 5 seeds, dry-run, no writes");
     }
 
     // ── verify negative cases ──
@@ -281,10 +276,11 @@ int main() {
             CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + path.string() +
                       "\" --sample=3 --m=10 2>/dev/null") == 0);
         }
-        std::printf("  [ok] verify: 5 negative cases fail, 10 random valid tables pass\n");
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] verify: 5 negative cases fail, 10 random valid tables pass");
     }
 
     std::filesystem::remove_all(tmp);
-    std::printf("ALL SOBOL TOOL TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SOBOL TOOL TESTS PASSED");
     return 0;
 }

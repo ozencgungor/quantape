@@ -32,13 +32,7 @@
 #include <thread>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -88,7 +82,7 @@ int main() {
         CHECK(gen.uniform(3, 1) == 0.75);
         CHECK(gen.uniform(4, 1) == 0.125);
         CHECK(gen.dimensionCount() == 101);
-        std::printf("  [ok] dimension 1 semantics\n");
+        QTA_LOG_INFO("quantape.test", "  [ok] dimension 1 semantics");
     }
 
     // ── 1D bin exactness and 2D digital-net exactness ──
@@ -130,7 +124,7 @@ int main() {
                 CHECK(c == (1 << t));
             }
         }
-        std::printf("  [ok] 1D/2D digital-net exactness through the generator\n");
+        QTA_LOG_INFO("quantape.test", "  [ok] 1D/2D digital-net exactness through the generator");
     }
 
     // ── Digital shifts ──
@@ -160,8 +154,9 @@ int main() {
         }
         const double mean = sum / reps;
         CHECK(std::fabs(mean - reference) < 2e-3);
-        std::printf("  [ok] digital shifts: reproducible, E[exp(sigma Z)]=%.6f vs %.6f\n", mean,
-                    reference);
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] digital shifts: reproducible, E[exp(sigma Z)]={} vs {}",
+                     quantape_test::num(mean, 6), quantape_test::num(reference, 6));
     }
 
     // ── Engine integration: GBM terminal call via Sobol paths ──
@@ -254,9 +249,12 @@ int main() {
         const double bs = 100.0 * normalCdf(d1) - 100.0 * std::exp(-r) * normalCdf(d2);
         CHECK(std::fabs(qmc - iid) < 5.0 * (qmcSe + iidSe) + 0.02);
         CHECK(std::fabs(qmc - bs) < 0.5);
-        std::printf("  [ok] engine: QMC %.4f (+-%.4f) vs iid %.4f (+-%.4f) vs BS %.4f "
-                    "(64-step Euler), bitwise block/schedule invariant\n",
-                    qmc, qmcSe, iid, iidSe, bs);
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] engine: QMC {} (+-{}) vs iid {} (+-{}) vs BS {} "
+                     "(64-step Euler), bitwise block/schedule invariant",
+                     quantape_test::num(qmc, 4), quantape_test::num(qmcSe, 4),
+                     quantape_test::num(iid, 4), quantape_test::num(iidSe, 4),
+                     quantape_test::num(bs, 4));
     }
 
     // ── Layout validation and dimension mapping ──
@@ -283,7 +281,7 @@ int main() {
         Eigen::MatrixXd u(2, 3);
         src.fillUniform(2, 4, 3, 0, 2, u);
         CHECK(u(1, 2) == shared->uniform(6, src.uniformDimension(2, 1)));
-        std::printf("  [ok] layout validation and dimension mapping\n");
+        QTA_LOG_INFO("quantape.test", "  [ok] layout validation and dimension mapping");
     }
 
     // ── Optimization API: replicas, maxBits 32/64, prepared dimensions ──
@@ -333,7 +331,8 @@ int main() {
         s0.fillPath(3, 4, a, 0);
         s1.fillPath(3, 4, b, 0);
         CHECK(a(0, 0) != b(0, 0));
-        std::printf("  [ok] replicas, maxBits 32/64 consistency, prepared dimensions\n");
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] replicas, maxBits 32/64 consistency, prepared dimensions");
     }
 
     // ── RNG contract: jump-ahead (arbitrary point order), seeds, threads ──
@@ -412,8 +411,9 @@ int main() {
             w.join();
         }
         CHECK(seqOut == parOut);
-        std::printf("  [ok] RNG contract: jump-ahead/gray order, seed reproducibility, "
-                    "parallel thread equivalence\n");
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] RNG contract: jump-ahead/gray order, seed reproducibility, "
+                     "parallel thread equivalence");
     }
 
     // ── Optional: the real 65,536-dimension refined table ──
@@ -430,7 +430,8 @@ int main() {
                 const double z = gen.normal(12345, dim);
                 CHECK(std::isfinite(z) && std::fabs(z) < 10.0);
             }
-            std::printf("  [ok] real refined table: 65,536 dims load, high-dim draws finite\n");
+            QTA_LOG_INFO("quantape.test",
+                         "  [ok] real refined table: 65,536 dims load, high-dim draws finite");
             break;
         }
     }
@@ -465,13 +466,14 @@ int main() {
             auto c = SobolGenerator::sharedFromDefaultTable(SobolOptions{7, 1, false});
             CHECK(a.get() == b.get());
             CHECK(a.get() != c.get());
-            std::printf("  [ok] compile-time table: mmap asset == text table, one shared instance "
-                        "per process\n");
+            QTA_LOG_INFO("quantape.test",
+                         "  [ok] compile-time table: mmap asset == text table, one shared instance "
+                         "per process");
         } else {
-            std::printf("  [skip] no compile-time Sobol table configured\n");
+            QTA_LOG_WARN("quantape.test", "  [skip] no compile-time Sobol table configured");
         }
     }
 
-    std::printf("ALL SOBOL GENERATOR TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SOBOL GENERATOR TESTS PASSED");
     return 0;
 }

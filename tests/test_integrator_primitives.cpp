@@ -16,8 +16,13 @@
 // Integrands:
 //   theta0^2 x^2 + theta1 x on [0,1]: I = theta0^2/3 + theta1/2,
 //       dI = (2 theta0/3, 1/2), H00 = 2/3 (exactly integrated by all methods)
-//   x^theta on [0,1]:                 I = 1/(1+theta), dI = -1/(1+theta)^2,
-//       H = 2/(1+theta)^3 (non-polynomial; all methods accurate to << 1e-6)
+//   exp(theta x) on [0,1]:            I = (e^theta - 1)/theta,
+//       dI = (e^theta (theta-1) + 1)/theta^2,
+//       H  = (e^theta (theta^2 - 2 theta + 2) - 2)/theta^3
+//       (non-polynomial; all methods accurate to << 1e-6). x^theta is avoided
+//       deliberately: forward-mode d/dtheta x^theta = x^theta ln x evaluates
+//       to 0 * -inf = NaN at x = 0, which Stan's fvar produces while rev-mode
+//       special-cases the same point.
 //
 // Run: ./test_integrator_primitives
 #include "quantape/math/StanMath.h"
@@ -26,19 +31,17 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <type_traits>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::cerr << "FAIL: " << #cond << " (line " << __LINE__ << ")\n";                      \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+// On failure, flush and skip static teardown: Stan's arena and callback-var
+// lambdas are still live after a failed check, and normal exit-time
+// destruction order can otherwise crash instead of reporting the failure.
+#include "TestSupport.h"
 
 using stan::math::fvar;
 using stan::math::var;
@@ -63,13 +66,14 @@ constexpr double H00_REF = 2.0 / 3.0;
 
 auto integrand = [](auto x, const auto& th) { return th[0] * th[0] * x * x + th[1] * x; };
 
-// ── x^theta integrand ──
+// ── exp(theta x) integrand ──
 constexpr double THETA2 = 2.5;
-constexpr double I2_REF = 1.0 / 3.5;
-constexpr double G2_REF = -1.0 / (3.5 * 3.5);
-constexpr double H2_REF = 2.0 / (3.5 * 3.5 * 3.5);
+const double I2_REF = (std::exp(THETA2) - 1.0) / THETA2;
+const double G2_REF = (std::exp(THETA2) * (THETA2 - 1.0) + 1.0) / (THETA2 * THETA2);
+const double H2_REF =
+    (std::exp(THETA2) * (THETA2 * THETA2 - 2.0 * THETA2 + 2.0) - 2.0) / (THETA2 * THETA2 * THETA2);
 
-auto integrand2 = [](auto x, const auto& th) { return stan::math::pow(x, th[0]); };
+auto integrand2 = [](auto x, const auto& th) { return stan::math::exp(th[0] * x); };
 
 /**
  * @brief Check one integrand against analytic value/gradient/Hessian for all
@@ -161,14 +165,12 @@ void runIntegrator(const char* name, const Factory& factory, double tol_quad, do
         CHECK(close(theta.adj(), 4.0, tol_quad));
     }
 
-    std::cout << "  " << name << ": double/var/fvar<var> vs analytic OK\n";
+    QTA_LOG_INFO("quantape.test", "  {}: double/var/fvar<var> vs analytic OK", name);
 }
 
 } // namespace
 
 int main() {
-    std::cout << std::setprecision(12);
-
     auto trapezoid = [](auto tag) {
         using S = typename decltype(tag)::type;
         return quantape::math::TrapezoidIntegratorDefault<S>(1e-9, MAX_EVALS);
@@ -198,7 +200,7 @@ int main() {
         return quantape::math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
     };
 
-    std::cout << "── analytic value/gradient/Hessian, all scalar types ──\n";
+    QTA_LOG_INFO("quantape.test", "── analytic value/gradient/Hessian, all scalar types ──");
     runIntegrator("trapezoid (default) ", trapezoid, 1e-8, 1e-6);
     runIntegrator("trapezoid (midpoint)", trapezoid_mid, 1e-3, 1e-3);
     runIntegrator("simpson             ", simpson, 1e-8, 1e-6);
@@ -206,6 +208,6 @@ int main() {
     runIntegrator("gauss-legendre (20) ", legendre, 1e-8, 1e-6);
     runIntegrator("tanh-sinh           ", tanh_sinh, 1e-8, 1e-6);
 
-    std::cout << "test_integrator_primitives: all invariants hold\n";
+    QTA_LOG_INFO("quantape.test", "test_integrator_primitives: all invariants hold");
     return 0;
 }

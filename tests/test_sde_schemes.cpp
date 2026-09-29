@@ -26,13 +26,7 @@
 #include <cstring>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -59,8 +53,9 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        std::fprintf(stderr, "FAIL: %s got=%.12g expected=%.12g tol=%.3g\n", label, got, expected,
-                     tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
+                      quantape_test::num(tol, 3));
         std::exit(1);
     }
 }
@@ -179,10 +174,14 @@ void testGbmStrongOrder() {
     }
     const double eulerOrder = strongOrder(levels.front(), eulerErrors);
     const double milsteinOrder = strongOrder(levels.front(), milsteinErrors);
-    std::printf("  Euler errors:    %.5f %.5f %.5f %.5f  (order %.3f)\n", eulerErrors[0],
-                eulerErrors[1], eulerErrors[2], eulerErrors[3], eulerOrder);
-    std::printf("  Milstein errors: %.5f %.5f %.5f %.5f  (order %.3f)\n", milsteinErrors[0],
-                milsteinErrors[1], milsteinErrors[2], milsteinErrors[3], milsteinOrder);
+    QTA_LOG_INFO("quantape.test", "  Euler errors:    {} {} {} {}  (order {})",
+                 quantape_test::num(eulerErrors[0], 5), quantape_test::num(eulerErrors[1], 5),
+                 quantape_test::num(eulerErrors[2], 5), quantape_test::num(eulerErrors[3], 5),
+                 quantape_test::num(eulerOrder, 3));
+    QTA_LOG_INFO("quantape.test", "  Milstein errors: {} {} {} {}  (order {})",
+                 quantape_test::num(milsteinErrors[0], 5), quantape_test::num(milsteinErrors[1], 5),
+                 quantape_test::num(milsteinErrors[2], 5), quantape_test::num(milsteinErrors[3], 5),
+                 quantape_test::num(milsteinOrder, 3));
     CHECK(eulerOrder > 0.35 && eulerOrder < 0.65);
     CHECK(milsteinOrder > 0.80 && milsteinOrder < 1.15);
 }
@@ -207,7 +206,7 @@ void testMilsteinConstantDiffusion() {
         }
     }
     CHECK(maxDiff == 0.0);
-    std::printf("  [ok] Milstein == Euler for constant diffusion (bitwise)\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] Milstein == Euler for constant diffusion (bitwise)");
 }
 
 // ── Predictor-Corrector deterministic order (cubic drift ODE) ──
@@ -240,7 +239,8 @@ void testPredictorCorrectorOrder() {
     }
     const double eulerOrder = eulerOrderSum / 3.0;
     const double pcOrder = pcOrderSum / 3.0;
-    std::printf("  ODE order: Euler %.2f, PredictorCorrector %.2f\n", eulerOrder, pcOrder);
+    QTA_LOG_INFO("quantape.test", "  ODE order: Euler {}, PredictorCorrector {}",
+                 quantape_test::num(eulerOrder, 2), quantape_test::num(pcOrder, 2));
     CHECK(eulerOrder > 0.85 && eulerOrder < 1.15);
     CHECK(pcOrder > 1.75 && pcOrder < 2.25);
 }
@@ -309,7 +309,8 @@ void testCirPositivity() {
     const double exactMean = v0 * std::exp(-kappa * 1.0) + level * (1.0 - std::exp(-kappa * 1.0));
     CHECK(negatives == 0);
     checkClose("CIR full-truncation mean", mean, exactMean, 5.0 * 4.2e-5 + 3e-4);
-    std::printf("  [ok] CIR positivity: negatives=0, mean=%.6f vs %.6f\n", mean, exactMean);
+    QTA_LOG_INFO("quantape.test", "  [ok] CIR positivity: negatives=0, mean={} vs {}",
+                 quantape_test::num(mean, 6), quantape_test::num(exactMean, 6));
 }
 
 } // namespace
@@ -319,6 +320,6 @@ int main() {
     testMilsteinConstantDiffusion();
     testPredictorCorrectorOrder();
     testCirPositivity();
-    std::printf("ALL SDE SCHEME TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SDE SCHEME TESTS PASSED");
     return 0;
 }

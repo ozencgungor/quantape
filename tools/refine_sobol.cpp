@@ -23,6 +23,7 @@
  *
  * Prints score statistics per epoch and ends with "REFINE COMPLETE".
  */
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/CBCSearch.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
@@ -205,17 +206,17 @@ int main(int argc, char** argv) {
                 "                    [--changelog=FILE] [--report-only]\n");
             return 0;
         } else {
-            std::fprintf(stderr, "unknown option: %s\n", arg.c_str());
+            QTA_LOG_ERROR("quantape.tools", "unknown option: {}", arg);
             return 1;
         }
     }
     if (o.input.empty()) {
-        std::fprintf(stderr, "error: --input required\n");
+        QTA_LOG_ERROR("quantape.tools", "--input required");
         return 1;
     }
     if (o.input == o.output && !o.dryRun) {
-        std::fprintf(stderr, "error: refusing to overwrite the input (use --dry-run or a "
-                             "different --output)\n");
+        QTA_LOG_ERROR("quantape.tools",
+                      "refusing to overwrite the input (use --dry-run or a different --output)");
         return 1;
     }
     if (o.threads <= 0) {
@@ -224,7 +225,7 @@ int main(int argc, char** argv) {
 
     auto entries = load_joe_kuo(o.input);
     if (entries.empty()) {
-        std::fprintf(stderr, "error: could not load %s\n", o.input.c_str());
+        QTA_LOG_ERROR("quantape.tools", "could not load {}", o.input);
         return 1;
     }
     std::printf("loaded %zu entries (dims 2..%u)\n", entries.size(), entries.back().dim);
@@ -236,8 +237,8 @@ int main(int argc, char** argv) {
     }
     const std::size_t firstIdx = static_cast<std::size_t>(o.refineFrom) - 1; // matrices index
     if (firstIdx < 2 || matrices.size() < 2 || firstIdx >= matrices.size() - 1) {
-        std::fprintf(stderr, "error: --refine-from=%u out of range (table has %zu dims)\n",
-                     o.refineFrom, entries.size() + 1);
+        QTA_LOG_ERROR("quantape.tools", "--refine-from={} out of range (table has {} dims)",
+                      o.refineFrom, entries.size() + 1);
         return 1;
     }
     // Real dimensions only: matrices index of the last dimension is size-2.
@@ -379,7 +380,7 @@ int main(int argc, char** argv) {
             }
             if (!o.dryRun && o.output.size() > 0 && (s + 1) % 500 == 0) {
                 if (!writeTable(o.output, entries)) {
-                    std::fprintf(stderr, "error: could not write %s\n", o.output.c_str());
+                    QTA_LOG_ERROR("quantape.tools", "could not write {}", o.output);
                     return 1;
                 }
             }
@@ -429,7 +430,7 @@ int main(int argc, char** argv) {
 
     if (!o.dryRun && !o.output.empty()) {
         if (!writeTable(o.output, entries)) {
-            std::fprintf(stderr, "error: could not write %s\n", o.output.c_str());
+            QTA_LOG_ERROR("quantape.tools", "could not write {}", o.output);
             return 1;
         }
         std::printf("wrote refined table: %s\n", o.output.c_str());

@@ -18,6 +18,8 @@
 #include <cstdio>
 #include <type_traits>
 
+#include "TestSupport.h"
+
 namespace {
 
 constexpr int P = quantape::models::HESTON_PARAM_COUNT;
@@ -27,7 +29,8 @@ int failures = 0;
 void check(bool ok, const char* name, double got = 0.0, double tol = 0.0) {
     if (!ok) {
         ++failures;
-        std::printf("FAIL: %s (got=%.3e tol=%.3e)\n", name, got, tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} (got={} tol={})", name, quantape_test::num(got, 3),
+                      quantape_test::num(tol, 3));
     }
 }
 
@@ -90,7 +93,8 @@ void testStanGradientAndHessian() {
         gradErr = std::max(gradErr, std::fabs(grad(i) - g(i)));
     }
     check(gradErr < 1e-9, "stan adjoint == fullGradient", gradErr, 1e-9);
-    std::printf("  [ok] var adjoint == fullGradient (max err %.2e, 1-node tape)\n", gradErr);
+    QTA_LOG_INFO("quantape.test", "  [ok] var adjoint == fullGradient (max err {}, 1-node tape)",
+                 quantape_test::num(gradErr, 2));
 
     double fx2 = 0.0;
     Eigen::VectorXd grad2(P);
@@ -103,7 +107,9 @@ void testStanGradientAndHessian() {
         }
     }
     check(hessErr < 1e-9, "stan fvar<var> Hessian == fullHessian", hessErr, 1e-9);
-    std::printf("  [ok] fvar<var> Hessian == fullHessian (max err %.2e, 2-node tape)\n", hessErr);
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
+                 quantape_test::num(hessErr, 2));
 
     // Independent FD of the re-evaluated gradient for three representative entries
     const double h = 1e-4;
@@ -121,7 +127,7 @@ void testStanGradientAndHessian() {
                   "fullHessian column vs FD(gradient)", std::fabs(fd - H(i, idx[k])), 1e-5);
         }
     }
-    std::printf("  [ok] fullHessian columns vs central FD of fullGradient\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] fullHessian columns vs central FD of fullGradient");
 }
 
 void testPrimalCache() {
@@ -160,7 +166,8 @@ void testPrimalCache() {
         }
     }
     check(hessErr < 1e-12, "cached fvar<var> Hessian == fullHessian", hessErr, 1e-12);
-    std::printf("  [ok] cached price: hessian err %.2e, rebuilds=%zu\n", hessErr, cache.rebuilds());
+    QTA_LOG_INFO("quantape.test", "  [ok] cached price: hessian err {}, rebuilds={}",
+                 quantape_test::num(hessErr, 2), cache.rebuilds());
 
     // timing: cached vs uncached hessian
     HestonStanFunctor functor{&model, 1.0};
@@ -182,8 +189,9 @@ void testPrimalCache() {
         t1 = now();
         cached += us(t0, t1);
     }
-    std::printf("  timings: stan hessian plain %.1f us, primal-cached %.1f us (%.1fx)\n",
-                plain / reps, cached / reps, plain / cached);
+    QTA_LOG_INFO("quantape.test", "  timings: stan hessian plain {} us, primal-cached {} us ({}x)",
+                 quantape_test::num(plain / reps, 1), quantape_test::num(cached / reps, 1),
+                 quantape_test::num(plain / cached, 1));
 }
 
 void testTiming() {
@@ -216,22 +224,23 @@ void testTiming() {
         t1 = now();
         hessUs += us(t0, t1);
     }
-    std::printf("  timings: stan gradient (var, value+grad build) %.1f us, "
-                "stan hessian (fvar<var>, value+grad+hess build) %.1f us\n",
-                gradUs / reps, hessUs / reps);
+    QTA_LOG_INFO("quantape.test",
+                 "  timings: stan gradient (var, value+grad build) {} us, "
+                 "stan hessian (fvar<var>, value+grad+hess build) {} us",
+                 quantape_test::num(gradUs / reps, 1), quantape_test::num(hessUs / reps, 1));
 }
 
 } // namespace
 
 int main() {
-    std::printf("Heston Stan callback-var tests\n");
+    QTA_LOG_INFO("quantape.test", "Heston Stan callback-var tests");
     testStanGradientAndHessian();
     testPrimalCache();
     testTiming();
     if (failures == 0) {
-        std::printf("ALL HESTON STAN TESTS PASSED\n");
+        QTA_LOG_INFO("quantape.test", "ALL HESTON STAN TESTS PASSED");
         return 0;
     }
-    std::printf("%d FAILURES\n", failures);
+    QTA_LOG_ERROR("quantape.test", "{} FAILURES", failures);
     return 1;
 }

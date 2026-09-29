@@ -8,6 +8,7 @@
  *
  * Usage: sobol_to_binary [--bits=32|64] input.txt output.qsb
  */
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
 
@@ -35,19 +36,20 @@ int main(int argc, char** argv) {
         }
     }
     if (input.empty() || output.empty() || bits < 1 || bits > 64) {
-        std::fprintf(stderr, "usage: sobol_to_binary [--bits=32|64] input.txt output.qsb\n");
+        QTA_LOG_ERROR("quantape.tools",
+                      "usage: sobol_to_binary [--bits=32|64] input.txt output.qsb");
         return 1;
     }
     const auto entries = load_joe_kuo(input);
     if (entries.empty()) {
-        std::fprintf(stderr, "error: cannot load %s\n", input.c_str());
+        QTA_LOG_ERROR("quantape.tools", "cannot load {}", input);
         return 1;
     }
     const std::uint32_t dims = entries.back().dim;
     const std::uint32_t wordBytes = (bits <= 32) ? 4 : 8;
     std::FILE* out = std::fopen(output.c_str(), "wb");
     if (out == nullptr) {
-        std::fprintf(stderr, "error: cannot write %s\n", output.c_str());
+        QTA_LOG_ERROR("quantape.tools", "cannot write {}", output);
         return 1;
     }
     std::fwrite("QSB1", 1, 4, out);

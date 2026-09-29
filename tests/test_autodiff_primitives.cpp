@@ -22,13 +22,7 @@
 #include <cstdlib>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using stan::math::var;
 
@@ -36,15 +30,16 @@ namespace {
 
 void checkClose(const char* label, double got, double expected, double tol) {
     if (std::fabs(got - expected) > tol) {
-        std::fprintf(stderr, "FAIL: %s got=%.15g expected=%.15g err=%.3g\n", label, got, expected,
-                     std::fabs(got - expected));
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={:.15g} expected={:.15g} err={:.3g}", label,
+                      got, expected, std::fabs(got - expected));
         std::exit(1);
     }
-    std::printf("  %-46s ok  got=%.12f expected=%.12f\n", label, got, expected);
+    QTA_LOG_INFO("quantape.test", "  {:<46} ok  got={:.12f} expected={:.12f}", label, got,
+                 expected);
 }
 
 void testHvp() {
-    std::printf("=== Hessian-vector product ===\n");
+    QTA_LOG_INFO("quantape.test", "=== Hessian-vector product ===");
     stan::math::recover_memory();
 
     auto f = [](const auto& x) { return x * x * x * x - 3.0 * x * x + 2.0 * x; };
@@ -82,7 +77,7 @@ double fdSolveInterpPipeline(const std::vector<double>& theta, double h, int per
 }
 
 void testSolveInterp() {
-    std::printf("=== solve(interp): objective evaluates an interpolant ===\n");
+    QTA_LOG_INFO("quantape.test", "=== solve(interp): objective evaluates an interpolant ===");
     stan::math::recover_memory();
 
     // knots k_i = sqrt(theta_i), theta = {1,4,9,16} -> knots {1,2,3,4};
@@ -122,7 +117,7 @@ void testSolveInterp() {
 }
 
 void testIntegrateInterp() {
-    std::printf("=== integrate(interp): integral over an interpolated curve ===\n");
+    QTA_LOG_INFO("quantape.test", "=== integrate(interp): integral over an interpolated curve ===");
     stan::math::recover_memory();
 
     std::vector<var> knots{1.0, 2.0, 3.0, 4.0};
@@ -151,7 +146,7 @@ void testIntegrateInterp() {
 }
 
 void testNestedSolve() {
-    std::printf("=== nested solve: outer objective calls an inner solve ===\n");
+    QTA_LOG_INFO("quantape.test", "=== nested solve: outer objective calls an inner solve ===");
     stan::math::recover_memory();
 
     // inner: y = sqrt(theta); outer: x solves x^2 = y -> x = theta^{1/4}
@@ -181,6 +176,6 @@ int main() {
     testIntegrateInterp();
     testNestedSolve();
     stan::math::recover_memory();
-    std::printf("\ntest_autodiff_primitives: all invariants hold\n");
+    QTA_LOG_INFO("quantape.test", "\ntest_autodiff_primitives: all invariants hold");
     return 0;
 }

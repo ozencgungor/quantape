@@ -29,13 +29,7 @@
 #include <cstring>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -62,8 +56,9 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        std::fprintf(stderr, "FAIL: %s got=%.12g expected=%.12g tol=%.3g\n", label, got, expected,
-                     tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
+                      quantape_test::num(tol, 3));
         std::exit(1);
     }
 }
@@ -109,7 +104,8 @@ void testGbmBundle() {
                            (s0 * 0.5 * std::erfc(-d1 * M_SQRT1_2) -
                             k * std::exp(-model.mu * tMax) * 0.5 * std::erfc(-d2 * M_SQRT1_2));
     checkClose("GBM bundle call", call, callRef, 0.01 * callRef);
-    std::printf("  [ok] GBM bundle: Euler mean exact, call %.4f vs %.4f\n", call, callRef);
+    QTA_LOG_INFO("quantape.test", "  [ok] GBM bundle: Euler mean exact, call {} vs {}",
+                 quantape_test::num(call, 4), quantape_test::num(callRef, 4));
 }
 
 // ── CIR bundle with MomentMatching1D: exact moments ──
@@ -152,8 +148,9 @@ void testCirBundleQe() {
     checkClose("CIR bundle QE var", var, exactVar,
                6.0 * exactVar * std::sqrt(2.0 / static_cast<double>(nPaths)));
     CHECK(negatives == 0);
-    std::printf("  [ok] CIR bundle + QE: mean=%.6f var=%.3e (exact %.6f / %.3e)\n", mean, var,
-                exactMean, exactVar);
+    QTA_LOG_INFO("quantape.test", "  [ok] CIR bundle + QE: mean={} var={} (exact {} / {})",
+                 quantape_test::num(mean, 6), quantape_test::num(var, 3),
+                 quantape_test::num(exactMean, 6), quantape_test::num(exactVar, 3));
 }
 
 // ── Heston QE ──
@@ -236,9 +233,12 @@ void testHestonQeProcess() {
     const HestonStats coarseEuler = runHeston(Euler{}, model, 100.0, 64, nPaths, 606);
     const double qeErr = std::fabs(qe.callPrice - reference.callPrice);
     const double eulerErr = std::fabs(coarseEuler.callPrice - reference.callPrice);
-    std::printf("  Heston call: QE=%.4f (+/-%.4f)  Euler64=%.4f  Euler2048=%.4f\n", qe.callPrice,
-                qe.callStdError, coarseEuler.callPrice, reference.callPrice);
-    std::printf("               |err| QE=%.5f  Euler64=%.5f\n", qeErr, eulerErr);
+    QTA_LOG_INFO("quantape.test", "  Heston call: QE={} (+/-{})  Euler64={}  Euler2048={}",
+                 quantape_test::num(qe.callPrice, 4), quantape_test::num(qe.callStdError, 4),
+                 quantape_test::num(coarseEuler.callPrice, 4),
+                 quantape_test::num(reference.callPrice, 4));
+    QTA_LOG_INFO("quantape.test", "               |err| QE={}  Euler64={}",
+                 quantape_test::num(qeErr, 5), quantape_test::num(eulerErr, 5));
     CHECK(qeErr <= 4.0 * qe.callStdError + 4.0 * reference.callStdError + 0.01);
     CHECK(qeErr <= eulerErr + 4.0 * qe.callStdError);
 
@@ -246,7 +246,8 @@ void testHestonQeProcess() {
     const HestonStats qeOtm =
         runHeston(HestonQeProcess<HestonProcess>{model}, model, 140.0, 64, nPaths, 707);
     const HestonStats refOtm = runHeston(Euler{}, model, 140.0, 2048, nPaths, 707);
-    std::printf("  Heston deep-OTM call: QE=%.5f vs ref=%.5f\n", qeOtm.callPrice, refOtm.callPrice);
+    QTA_LOG_INFO("quantape.test", "  Heston deep-OTM call: QE={} vs ref={}",
+                 quantape_test::num(qeOtm.callPrice, 5), quantape_test::num(refOtm.callPrice, 5));
     CHECK(std::fabs(qeOtm.callPrice - refOtm.callPrice) <=
           4.0 * qeOtm.callStdError + 4.0 * refOtm.callStdError + 0.005);
 
@@ -256,8 +257,8 @@ void testHestonQeProcess() {
     const HestonStats hard =
         runHeston(HestonQeProcess<HestonProcess>{violating}, violating, 100.0, 64, nPaths, 808);
     CHECK(hard.negatives == 0 && hard.nonFinite == 0);
-    std::printf(
-        "  [ok] Heston QE: exact V moments, call within reference, Feller-violating safe\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] Heston QE: exact V moments, call within reference, Feller-violating safe");
 }
 
 } // namespace
@@ -266,6 +267,6 @@ int main() {
     testGbmBundle();
     testCirBundleQe();
     testHestonQeProcess();
-    std::printf("ALL SDE PROCESS TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SDE PROCESS TESTS PASSED");
     return 0;
 }

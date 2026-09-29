@@ -22,6 +22,7 @@
  *   analyze_sobol --input=TABLE [--base=BASE] [--sample=8] [--m=12]
  *                 [--dims-log2=12] [--shifts=16] [--threads=0] [--jobs=all]
  */
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
 #include "quantape/math/Random/Sobol/SobolQuality.h"
@@ -396,17 +397,17 @@ int main(int argc, char** argv) {
                         "[--shifts=R] [--seed=S]\n");
             return 0;
         } else {
-            std::fprintf(stderr, "unknown option: %s\n", arg.c_str());
+            QTA_LOG_ERROR("quantape.tools", "unknown option: {}", arg);
             return 1;
         }
     }
     if (input.empty()) {
-        std::fprintf(stderr, "error: --input required\n");
+        QTA_LOG_ERROR("quantape.tools", "--input required");
         return 1;
     }
     const auto entries = load_joe_kuo(input);
     if (entries.empty()) {
-        std::fprintf(stderr, "error: cannot load %s\n", input.c_str());
+        QTA_LOG_ERROR("quantape.tools", "cannot load {}", input);
         return 1;
     }
     const auto prefix = base.empty() ? std::vector<Entry>{} : load_joe_kuo(base);
@@ -479,11 +480,13 @@ int main(int argc, char** argv) {
                 ++tested;
                 if (!exactGridS(X, b, 1u << t, &worst)) {
                     ++failed;
-                    std::fprintf(stderr, "  exactness FAIL dims");
+                    std::string dimsText;
                     for (std::size_t i : idxs) {
-                        std::fprintf(stderr, " %zu", i + 1);
+                        dimsText += " " + std::to_string(i + 1);
                     }
-                    std::fprintf(stderr, " t=%d worst=%u expected=%u\n", t, worst, 1u << t);
+                    QTA_LOG_WARN("quantape.tools",
+                                 "exactness FAIL dims{} t={} worst={} expected={}", dimsText, t,
+                                 worst, 1u << t);
                 }
             }
         }

@@ -26,13 +26,7 @@
 #include <cstring>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL: %s (line %d)\n", #cond, __LINE__);                         \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using quantape::mc::IidGaussianSource;
 using quantape::mc::MomentMatching1D;
@@ -52,8 +46,9 @@ bool isFiniteBitwise(double x) {
 void checkClose(const char* label, double got, double expected, double tol) {
     if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
         !(std::fabs(got - expected) <= tol)) {
-        std::fprintf(stderr, "FAIL: %s got=%.12g expected=%.12g tol=%.3g\n", label, got, expected,
-                     tol);
+        QTA_LOG_ERROR("quantape.test", "FAIL: {} got={} expected={} tol={}", label,
+                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
+                      quantape_test::num(tol, 3));
         std::exit(1);
     }
 }
@@ -99,7 +94,7 @@ void testQeSamplerMoments() {
         checkClose(c.tag, var, c.s2, 6.0 * c.s2 * std::sqrt(2.0 / static_cast<double>(n)));
         CHECK(negatives == 0);
     }
-    std::printf("  [ok] qeSample: exact moments + positivity across psi regimes\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] qeSample: exact moments + positivity across psi regimes");
 }
 
 void testUniformStreamContract() {
@@ -123,7 +118,7 @@ void testUniformStreamContract() {
         }
     }
     CHECK(allDifferent);
-    std::printf("  [ok] fillUniform: block contract, [0,1), disjoint streams\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] fillUniform: block contract, [0,1), disjoint streams");
 }
 
 // ── CIR with moment matching: exact terminal moments at any resolution ──
@@ -233,8 +228,10 @@ void testCirMomentMatching() {
             }
         }
         CHECK(diff == 0.0);
-        std::printf("  [ok] CIR QE nSteps=%zu: mean=%.6f var=%.3e (exact %.6f / %.3e), neg=0\n",
-                    nSteps, mean, var, exactMean, exactVar);
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] CIR QE nSteps={}: mean={} var={} (exact {} / {}), neg=0", nSteps,
+                     quantape_test::num(mean, 6), quantape_test::num(var, 3),
+                     quantape_test::num(exactMean, 6), quantape_test::num(exactVar, 3));
     }
 }
 
@@ -244,6 +241,6 @@ int main() {
     testQeSamplerMoments();
     testUniformStreamContract();
     testCirMomentMatching();
-    std::printf("ALL SDE MOMENT-MATCHING TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SDE MOMENT-MATCHING TESTS PASSED");
     return 0;
 }

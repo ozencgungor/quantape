@@ -18,13 +18,7 @@
 #include <random>
 #include <vector>
 
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
-            std::exit(1);                                                                          \
-        }                                                                                          \
-    } while (0)
+#include "TestSupport.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -166,7 +160,8 @@ int main() {
             CHECK(tValue2D(matrices[j - 1], matrices[d - 1], 12) == table21[d][j - 1]);
         }
     }
-    std::printf("  [ok] tValue2D == brute force (%d checks), Table 2.1 values match\n", checked);
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] tValue2D == brute force ({} checks), Table 2.1 values match", checked);
 
     // Property A: incremental checker agrees with an independent determinant.
     PropertyAChecker checker(64);
@@ -178,7 +173,7 @@ int main() {
     for (int d = 1; d <= static_cast<int>(entries.size()) + 1; ++d) {
         CHECK(brutePropertyA(entries, d));
     }
-    std::printf("  [ok] Property A checker matches independent determinant\n");
+    QTA_LOG_INFO("quantape.test", "  [ok] Property A checker matches independent determinant");
 
     // Search: finite deterministic score; the pick is optimal among the
     // evaluated candidates (seed pass plus pruned pass with a tiny budget).
@@ -223,7 +218,8 @@ int main() {
             CHECK(resA[0].score <= score);
         }
     }
-    std::printf("  [ok] search: deterministic, finite score, optimal among candidates\n");
+    QTA_LOG_INFO("quantape.test",
+                 "  [ok] search: deterministic, finite score, optimal among candidates");
 
     // Fuzz: fast t-value == brute force and symmetric for random valid direction
     // sets (degrees 1..12) and the high-degree fixtures, all m = 1..31.
@@ -260,9 +256,10 @@ int main() {
                 ++checks;
             }
         }
-        std::printf("  [ok] fuzz: %ld checks fast==brute and symmetric (degrees 1-18)\n", checks);
+        QTA_LOG_INFO("quantape.test",
+                     "  [ok] fuzz: {} checks fast==brute and symmetric (degrees 1-18)", checks);
     }
 
-    std::printf("ALL SOBOL QUALITY TESTS PASSED\n");
+    QTA_LOG_INFO("quantape.test", "ALL SOBOL QUALITY TESTS PASSED");
     return 0;
 }

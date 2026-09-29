@@ -14,6 +14,7 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 
@@ -827,7 +828,7 @@ int main() {
         std::cout << "  All benchmarks complete.\n";
         std::cout << std::string(65, '=') << "\n";
     } catch (const std::exception& e) {
-        std::cerr << "ERROR: " << e.what() << "\n";
+        QTA_LOG_ERROR("quantape.bench", "ERROR: {}", e.what());
         return 1;
     }
 

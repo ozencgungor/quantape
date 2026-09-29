@@ -25,6 +25,7 @@
  *       [--window 256] [--sample 16] [--m 16] \
  *       [--sobol-cc build/sobol_ref] [--all]
  */
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
 #include "quantape/math/Random/Sobol/SobolQuality.h"
@@ -172,19 +173,19 @@ int main(int argc, char** argv) {
                         "[--all]\n");
             return 0;
         } else {
-            std::fprintf(stderr, "unknown option: %s\n", arg.c_str());
+            QTA_LOG_ERROR("quantape.tools", "unknown option: {}", arg);
             return 1;
         }
     }
     if (input.empty()) {
-        std::fprintf(stderr, "error: --input required\n");
+        QTA_LOG_ERROR("quantape.tools", "--input required");
         return 1;
     }
 
     int failures = 0;
     const auto entries = load_joe_kuo(input);
     if (entries.empty()) {
-        std::fprintf(stderr, "error: could not load %s\n", input.c_str());
+        QTA_LOG_ERROR("quantape.tools", "could not load {}", input);
         return 1;
     }
     std::printf("loaded %zu entries (dims 2..%u)\n", entries.size(), entries.back().dim);
@@ -197,32 +198,32 @@ int main(int argc, char** argv) {
             const Entry& e = entries[i];
             if (e.dim != i + 2) {
                 if (bad++ < 5)
-                    std::fprintf(stderr, "  dim discontinuity at index %zu: dim=%u\n", i, e.dim);
+                    QTA_LOG_WARN("quantape.tools", "dim discontinuity at index {}: dim={}", i,
+                                 e.dim);
                 continue;
             }
             if (e.m.size() != e.s) {
                 if (bad++ < 5)
-                    std::fprintf(stderr, "  dim %u: m count %zu != degree %u\n", e.dim, e.m.size(),
-                                 e.s);
+                    QTA_LOG_WARN("quantape.tools", "dim {}: m count {} != degree {}", e.dim,
+                                 e.m.size(), e.s);
                 continue;
             }
             for (std::uint32_t k = 1; k <= e.s; ++k) {
                 const std::uint64_t mk = e.m[k - 1];
                 if ((mk & 1u) == 0 || mk >= (1ULL << k)) {
                     if (bad++ < 5)
-                        std::fprintf(stderr, "  dim %u: m_%u=%llu invalid\n", e.dim, k,
-                                     (unsigned long long)mk);
+                        QTA_LOG_WARN("quantape.tools", "dim {}: m_{}={} invalid", e.dim, k, mk);
                     break;
                 }
             }
             const std::uint64_t poly = gf2::decode_poly(static_cast<int>(e.s), e.a);
             if (!polys.insert(poly).second) {
                 if (bad++ < 5)
-                    std::fprintf(stderr, "  duplicate polynomial at dim %u\n", e.dim);
+                    QTA_LOG_WARN("quantape.tools", "duplicate polynomial at dim {}", e.dim);
             }
             if (!gf2::is_primitive(poly, static_cast<int>(e.s))) {
                 if (bad++ < 5)
-                    std::fprintf(stderr, "  non-primitive polynomial at dim %u\n", e.dim);
+                    QTA_LOG_WARN("quantape.tools", "non-primitive polynomial at dim {}", e.dim);
             }
         }
         std::printf("structure: %s (%d violations)\n", bad ? "FAIL" : "ok", bad);
@@ -389,9 +390,9 @@ int main(int argc, char** argv) {
                 if (!exactGrid(x, y, b1, b2, expected, &worst)) {
                     ++pairsFailed;
                     if (pairsFailed <= 5)
-                        std::fprintf(stderr,
-                                     "  net exactness FAIL (d=%u, j=%u, t=%d, %dx%d grid, "
-                                     "expected %u, worst cell %u)\n",
+                        QTA_LOG_WARN("quantape.tools",
+                                     "net exactness FAIL (d={}, j={}, t={}, {}x{} grid, "
+                                     "expected {}, worst cell {})",
                                      d, dj, t, 1 << b1, 1 << b2, expected, worst);
                 }
             }
@@ -412,7 +413,7 @@ int main(int argc, char** argv) {
                                 " " + input + " > " + out + " 2>/dev/null";
         std::printf("running reference generator: %s\n", cmd.c_str());
         if (std::system(cmd.c_str()) != 0) {
-            std::fprintf(stderr, "  reference generator failed\n");
+            QTA_LOG_ERROR("quantape.tools", "reference generator failed");
             ++failures;
         } else {
             std::ifstream in(out);
