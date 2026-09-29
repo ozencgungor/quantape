@@ -41,7 +41,8 @@
 // On failure, flush and skip static teardown: Stan's arena and callback-var
 // lambdas are still live after a failed check, and normal exit-time
 // destruction order can otherwise crash instead of reporting the failure.
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using stan::math::fvar;
 using stan::math::var;

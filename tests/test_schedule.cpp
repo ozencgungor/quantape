@@ -1,5 +1,6 @@
 // test_schedule.cpp — schedule generation, ICMA/BUS252, time conversion
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include "quantape/datetime/Schedule.h"
 #include "quantape/datetime/TimeConversion.h"
 

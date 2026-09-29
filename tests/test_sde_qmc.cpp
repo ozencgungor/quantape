@@ -40,7 +40,10 @@
 #include <random>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::math::mc::sobol::Entry;
 using quantape::math::mc::sobol::SobolGenerator;
@@ -58,21 +61,7 @@ static_assert(quantape::mc::UniformRandomSource<SobolSource>);
 
 namespace {
 
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 // ── A valid (not quality-optimised) direction-number fixture ──
 
@@ -299,8 +288,8 @@ void testQmcVarianceReduction() {
     const double mcRms = std::sqrt(mcSq / static_cast<double>(replicas));
     const double qmcRms = std::sqrt(qmcSq / static_cast<double>(replicas));
     QTA_LOG_INFO("test", "  one-step call: MC rmse={}  QMC rmse={}  (ratio {})",
-                 quantape_test::num(mcRms, 3), quantape_test::num(qmcRms, 3),
-                 quantape_test::num(qmcRms / mcRms, 2));
+                 quantape::util::num(mcRms, 3), quantape::util::num(qmcRms, 3),
+                 quantape::util::num(qmcRms / mcRms, 2));
     CHECK(qmcRms < 0.5 * mcRms);
 
     // multi-step Euler moments: E[S_T] and Var[S_T] are exact for the

@@ -26,7 +26,10 @@
 #include <cstring>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -44,21 +47,7 @@ namespace {
 // Bitwise finiteness guard: under -ffast-math the compiler folds
 // isnan/isfinite to constants, so NaN/Inf silently pass `<=` comparisons.
 // Inspecting the exponent bits cannot be optimized away.
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 // ── Models ──
 
@@ -175,13 +164,13 @@ void testGbmStrongOrder() {
     const double eulerOrder = strongOrder(levels.front(), eulerErrors);
     const double milsteinOrder = strongOrder(levels.front(), milsteinErrors);
     QTA_LOG_INFO("test", "  Euler errors:    {} {} {} {}  (order {})",
-                 quantape_test::num(eulerErrors[0], 5), quantape_test::num(eulerErrors[1], 5),
-                 quantape_test::num(eulerErrors[2], 5), quantape_test::num(eulerErrors[3], 5),
-                 quantape_test::num(eulerOrder, 3));
+                 quantape::util::num(eulerErrors[0], 5), quantape::util::num(eulerErrors[1], 5),
+                 quantape::util::num(eulerErrors[2], 5), quantape::util::num(eulerErrors[3], 5),
+                 quantape::util::num(eulerOrder, 3));
     QTA_LOG_INFO("test", "  Milstein errors: {} {} {} {}  (order {})",
-                 quantape_test::num(milsteinErrors[0], 5), quantape_test::num(milsteinErrors[1], 5),
-                 quantape_test::num(milsteinErrors[2], 5), quantape_test::num(milsteinErrors[3], 5),
-                 quantape_test::num(milsteinOrder, 3));
+                 quantape::util::num(milsteinErrors[0], 5), quantape::util::num(milsteinErrors[1], 5),
+                 quantape::util::num(milsteinErrors[2], 5), quantape::util::num(milsteinErrors[3], 5),
+                 quantape::util::num(milsteinOrder, 3));
     CHECK(eulerOrder > 0.35 && eulerOrder < 0.65);
     CHECK(milsteinOrder > 0.80 && milsteinOrder < 1.15);
 }
@@ -240,7 +229,7 @@ void testPredictorCorrectorOrder() {
     const double eulerOrder = eulerOrderSum / 3.0;
     const double pcOrder = pcOrderSum / 3.0;
     QTA_LOG_INFO("test", "  ODE order: Euler {}, PredictorCorrector {}",
-                 quantape_test::num(eulerOrder, 2), quantape_test::num(pcOrder, 2));
+                 quantape::util::num(eulerOrder, 2), quantape::util::num(pcOrder, 2));
     CHECK(eulerOrder > 0.85 && eulerOrder < 1.15);
     CHECK(pcOrder > 1.75 && pcOrder < 2.25);
 }
@@ -310,7 +299,7 @@ void testCirPositivity() {
     CHECK(negatives == 0);
     checkClose("CIR full-truncation mean", mean, exactMean, 5.0 * 4.2e-5 + 3e-4);
     QTA_LOG_INFO("test", "  [ok] CIR positivity: negatives=0, mean={} vs {}",
-                 quantape_test::num(mean, 6), quantape_test::num(exactMean, 6));
+                 quantape::util::num(mean, 6), quantape::util::num(exactMean, 6));
 }
 
 } // namespace

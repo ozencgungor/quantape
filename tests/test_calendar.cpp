@@ -1,5 +1,6 @@
 // test_calendar.cpp — holiday rules, adjustments, advance, joint calendars
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include "quantape/datetime/Calendar.h"
 
 using namespace quantape::datetime;

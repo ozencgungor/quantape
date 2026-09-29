@@ -35,7 +35,10 @@
 #include <type_traits>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -53,11 +56,6 @@ using quantape::processes::HestonQeProcess;
 
 namespace {
 
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
 bool bitwiseEqual(double a, double b) {
     std::uint64_t ba = 0;
@@ -67,15 +65,6 @@ bool bitwiseEqual(double a, double b) {
     return ba == bb;
 }
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 /// Terminal call on the Heston (lnS, V) state.
 struct HestonCallPayoff {
@@ -196,7 +185,7 @@ void testQmcPricesVsAnalytic() {
     // QMC noise + the documented QE scheme discretization bias.
     checkClose("catalog QE vs analytic", worst, 0.0, 5e-3);
     QTA_LOG_INFO("test", "  [ok] catalog QE+Sobol vs analytic (worst |err| {})",
-                 quantape_test::num(worst, 2));
+                 quantape::util::num(worst, 2));
 }
 
 // ── 3. pathwise QE gradients vs analytic ──
@@ -245,9 +234,9 @@ void testPathwiseGradientsVsAnalytic() {
     const double exactPrice = model.call(params, market);
 
     QTA_LOG_INFO("test", "  pathwise QE value {} vs analytic {} (err {}, mc se {})",
-                 quantape_test::num(ad.value, 6), quantape_test::num(exactPrice, 6),
-                 quantape_test::num(ad.value - exactPrice, 2),
-                 quantape_test::num(ad.valueStdError, 2));
+                 quantape::util::num(ad.value, 6), quantape::util::num(exactPrice, 6),
+                 quantape::util::num(ad.value - exactPrice, 2),
+                 quantape::util::num(ad.valueStdError, 2));
     checkClose("pathwise value vs analytic", ad.value, exactPrice, 5e-3 + 4.0 * ad.valueStdError);
 
     const char* names[7] = {"lnS0", "v0", "mu", "kappa", "level", "eta", "rho"};
@@ -258,11 +247,11 @@ void testPathwiseGradientsVsAnalytic() {
                                           std::max(1e-12, std::fabs(exact(i))));
         checkClose(names[i], ad.gradient(i), exact(i), tol);
         QTA_LOG_INFO("test", "    d/d {} pathwise {}  analytic {}  err {}", names[i],
-                     quantape_test::num(ad.gradient(i), 6), quantape_test::num(exact(i), 6),
-                     quantape_test::num(ad.gradient(i) - exact(i), 2));
+                     quantape::util::num(ad.gradient(i), 6), quantape::util::num(exact(i), 6),
+                     quantape::util::num(ad.gradient(i) - exact(i), 2));
     }
     QTA_LOG_INFO("test", "  [ok] pathwise QE gradients vs analytic (worst rel {})",
-                 quantape_test::num(worstRel, 2));
+                 quantape::util::num(worstRel, 2));
 
     // Engine central-FD cross-check on the same discretization (tight).
     auto engineValue = [&](const std::vector<double>& th, const Eigen::VectorXd& x) {
@@ -394,7 +383,7 @@ void testFlagshipSdeToIft() {
             std::string stepLine = "    steps=" + std::to_string(steps) + ":";
             for (int i = 0; i < 5; ++i) {
                 stepLine += " " + std::string(names[i]) + " err " +
-                            quantape_test::num(block(i) - gex(0, idx[i]), 2);
+                            quantape::util::num(block(i) - gex(0, idx[i]), 2);
             }
             QTA_LOG_INFO("test", "{}", stepLine);
             if (steps == 64) {
@@ -409,7 +398,7 @@ void testFlagshipSdeToIft() {
             ge(i) = gex(0, idx[i]);
         }
         QTA_LOG_INFO("test", "    Richardson(64,128) err: {} (max)",
-                     quantape_test::num((gExtrap - ge).cwiseAbs().maxCoeff(), 2));
+                     quantape::util::num((gExtrap - ge).cwiseAbs().maxCoeff(), 2));
     }
     // -------------------------------------------------------------------
     const Eigen::VectorXd mcRisk = dVdb.transpose() * ift.dbda;
@@ -439,11 +428,11 @@ void testFlagshipSdeToIft() {
     QTA_LOG_INFO("test",
                  "  flagship: MC dV/db through db/da ({}x{}); worst |diff|/(2% + 4 sigma) = {}",
                  static_cast<long>(ift.dbda.rows()), static_cast<long>(ift.dbda.cols()),
-                 quantape_test::num(worstRatio, 2));
+                 quantape::util::num(worstRatio, 2));
     checkClose("flagship MC+IFT risk vs analytic", worstRatio, 0.0, 1.0);
     QTA_LOG_INFO("test",
                  "  [ok] SDE -> calibration IFT -> market risk chain (worst ratio {})",
-                 quantape_test::num(worstRatio, 2));
+                 quantape::util::num(worstRatio, 2));
 }
 
 // QE step-convergence: the scheme (Andersen 2008, verified branch-for-branch)
@@ -507,7 +496,7 @@ void testQeStepConvergence() {
     const double bias256 = priceAt(process, x0, theta, 2.0, 256, 1.0, 999) - exact;
     QTA_LOG_INFO("test",
                  "  extreme corner (sigma=0.75, T=2): bias 64 steps {}, 256 steps {}",
-                 quantape_test::num(bias64, 2), quantape_test::num(bias256, 2));
+                 quantape::util::num(bias64, 2), quantape::util::num(bias256, 2));
     CHECK(bias64 < 0.0 && bias256 < 0.0);
     CHECK(std::fabs(bias256) < 0.75 * std::fabs(bias64));
     CHECK(std::fabs(bias256) < 2e-2);
@@ -520,7 +509,7 @@ void testQeStepConvergence() {
     const double biasModerate =
         priceAt(procM, y0, thetaOf(procM), 1.0, 64, 1.0, 555) - model.call(moderate, market1);
     QTA_LOG_INFO("test", "  moderate (sigma=0.30, T=1): bias at 64 steps {}",
-                 quantape_test::num(biasModerate, 2));
+                 quantape::util::num(biasModerate, 2));
     CHECK(std::fabs(biasModerate) < 2e-3);
     QTA_LOG_INFO("test",
                  "  [ok] QE step convergence (first order; large constant only in the "

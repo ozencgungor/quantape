@@ -1,5 +1,6 @@
 // test_date.cpp — Date conversions, arithmetic, parsing; naive reference sweep
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/Period.h"
 

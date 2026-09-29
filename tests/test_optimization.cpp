@@ -29,21 +29,15 @@
 #include <utility>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
 
 using stan::math::fvar;
 using stan::math::var;
 
 namespace {
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
-                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
-                      quantape_test::num(std::fabs(got - expected), 3));
-        std::exit(1);
-    }
-}
 
 /// f(x) = sum_i w_i (x_i - c_i)^2, grad_i = 2 w_i (x_i - c_i), H = diag(2 w_i)
 struct Quadratic {
@@ -957,8 +951,8 @@ void testTNewton() {
         const double f = Himmelblau{}(x);
         CHECK(f < 1e-12);
         QTA_LOG_INFO("test", "  tnewton himmelblau(0,0): x=({}, {}) f={}",
-                     quantape_test::num(x[0], 4), quantape_test::num(x[1], 4),
-                     quantape_test::num(f, 2));
+                     quantape::util::num(x[0], 4), quantape::util::num(x[1], 4),
+                     quantape::util::num(f, 2));
     }
     // maxeval exit
     {

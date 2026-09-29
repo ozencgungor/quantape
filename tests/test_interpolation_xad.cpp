@@ -19,7 +19,9 @@
 #include <cstdlib>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
 
 using quantape::math::BilinearInterpolation;
 using quantape::math::CubicDerivativeApprox;
@@ -88,16 +90,6 @@ Eigen::Matrix<double, -1, -1> hessian2D(double x, double y,
     return H;
 }
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
-                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
-                      quantape_test::num(std::fabs(got - expected), 3));
-        std::exit(1);
-    }
-    QTA_LOG_INFO("test", "  {} ok  got={} expected={}", label, quantape_test::num(got, 12),
-                 quantape_test::num(expected, 12));
-}
 
 void testLinear() {
     QTA_LOG_INFO("test", "=== linear evaluation-point AD ===");

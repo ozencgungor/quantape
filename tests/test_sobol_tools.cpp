@@ -22,7 +22,8 @@
 #include <string>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include <unistd.h>
 
 #ifndef EXTEND_BIN
@@ -216,7 +217,7 @@ int main() {
         CHECK(fileHash(badPath) == beforeHash);
         QTA_LOG_INFO("test",
                      "  [ok] refine: objective {} -> {}, valid, deterministic, dry-run safe",
-                     quantape_test::num(beforeMax, 4), quantape_test::num(afterMax, 4));
+                     quantape::util::num(beforeMax, 4), quantape::util::num(afterMax, 4));
 
         // Multi-seed fuzz: refine random tables in dry-run, no crashes, no writes.
         for (std::uint64_t seed = 1; seed <= 5; ++seed) {

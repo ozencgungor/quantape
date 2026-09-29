@@ -20,7 +20,8 @@
 #include <iostream>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using quantape::math::BicubicInterpolation;
 using quantape::math::CubicDerivativeApprox;
@@ -201,9 +202,9 @@ int main() {
                     QTA_LOG_ERROR(
                         "test",
                         "value mismatch: {} smooth={} (x,y)=({},{}) ref={} var={} diff={}",
-                        methodName(method), smooth, quantape_test::num(x), quantape_test::num(y),
-                        quantape_test::num(ref), quantape_test::num(v.val()),
-                        quantape_test::num(diff));
+                        methodName(method), smooth, quantape::util::num(x), quantape::util::num(y),
+                        quantape::util::num(ref), quantape::util::num(v.val()),
+                        quantape::util::num(diff));
                     CHECK(false);
                 }
             }
@@ -218,9 +219,9 @@ int main() {
                         QTA_LOG_ERROR("test",
                                       "gradient mismatch: {} smooth={} (x,y)=({},{}) k={} fd={} "
                                       "ad={}",
-                                      methodName(method), smooth, quantape_test::num(x),
-                                      quantape_test::num(y), k, quantape_test::num(fd[k]),
-                                      quantape_test::num(ad[k]));
+                                      methodName(method), smooth, quantape::util::num(x),
+                                      quantape::util::num(y), k, quantape::util::num(fd[k]),
+                                      quantape::util::num(ad[k]));
                         CHECK(false);
                     }
                 }
@@ -239,8 +240,8 @@ int main() {
                         if (h > 1e-7) {
                             QTA_LOG_ERROR("test",
                                           "hessian not zero: {} (x,y)=({},{}) max|H|={}",
-                                          methodName(method), quantape_test::num(x),
-                                          quantape_test::num(y), quantape_test::num(h));
+                                          methodName(method), quantape::util::num(x),
+                                          quantape::util::num(y), quantape::util::num(h));
                             CHECK(false);
                         }
                     } else {
@@ -256,9 +257,9 @@ int main() {
                         if (maxdiff > 5e-3 * (1.0 + maxref)) {
                             QTA_LOG_ERROR("test",
                                           "hessian mismatch: {} (x,y)=({},{}) maxdiff={} maxref={}",
-                                          methodName(method), quantape_test::num(x),
-                                          quantape_test::num(y), quantape_test::num(maxdiff),
-                                          quantape_test::num(maxref));
+                                          methodName(method), quantape::util::num(x),
+                                          quantape::util::num(y), quantape::util::num(maxdiff),
+                                          quantape::util::num(maxref));
                             CHECK(false);
                         }
                     }

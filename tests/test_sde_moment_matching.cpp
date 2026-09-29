@@ -26,7 +26,10 @@
 #include <cstring>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::mc::IidGaussianSource;
 using quantape::mc::MomentMatching1D;
@@ -37,21 +40,7 @@ using quantape::mc::TimeGrid;
 
 namespace {
 
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 // ── qeSample moment checks across psi regimes ──
 
@@ -230,8 +219,8 @@ void testCirMomentMatching() {
         CHECK(diff == 0.0);
         QTA_LOG_INFO("test",
                      "  [ok] CIR QE nSteps={}: mean={} var={} (exact {} / {}), neg=0", nSteps,
-                     quantape_test::num(mean, 6), quantape_test::num(var, 3),
-                     quantape_test::num(exactMean, 6), quantape_test::num(exactVar, 3));
+                     quantape::util::num(mean, 6), quantape::util::num(var, 3),
+                     quantape::util::num(exactMean, 6), quantape::util::num(exactVar, 3));
     }
 }
 

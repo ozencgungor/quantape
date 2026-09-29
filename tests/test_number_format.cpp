@@ -10,7 +10,8 @@
 #include <random>
 #include <string>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using quantape::format::FloatFormat;
 

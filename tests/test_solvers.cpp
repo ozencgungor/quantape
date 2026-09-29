@@ -5,7 +5,8 @@
 #include <cstdio>
 #include <stdexcept>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using namespace quantape::math;
 
@@ -16,12 +17,12 @@ int failures = 0;
 void report(const char* label, bool ok, double got, double expected, double err) {
     if (ok) {
         QTA_LOG_INFO("test", "  {} ok  got={} expected={} err={}", label,
-                     quantape_test::num(got, 15), quantape_test::num(expected, 15),
-                     quantape_test::num(err, 3));
+                     quantape::util::num(got, 15), quantape::util::num(expected, 15),
+                     quantape::util::num(err, 3));
     } else {
         QTA_LOG_ERROR("test", "  {} FAIL  got={} expected={} err={}", label,
-                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
-                      quantape_test::num(err, 3));
+                      quantape::util::num(got, 15), quantape::util::num(expected, 15),
+                      quantape::util::num(err, 3));
     }
     if (!ok) {
         ++failures;

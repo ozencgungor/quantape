@@ -34,7 +34,10 @@
 #include <cstring>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -54,11 +57,6 @@ namespace {
 
 // ── Small check helpers (bitwise finiteness under -ffast-math) ──
 
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
 bool bitwiseEqual(double a, double b) {
     std::uint64_t ba = 0;
@@ -68,28 +66,7 @@ bool bitwiseEqual(double a, double b) {
     return ba == bb;
 }
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
-void checkClose(const Eigen::VectorXd& got, const Eigen::VectorXd& expected, double tol,
-                const char* label) {
-    CHECK(got.size() == expected.size());
-    for (Eigen::Index i = 0; i < got.size(); ++i) {
-        if (!(std::fabs(got(i) - expected(i)) <= tol)) {
-            QTA_LOG_ERROR("test", "FAIL: {} [{}] got={} expected={} tol={}", label,
-                          static_cast<long long>(i), quantape_test::num(got(i), 12),
-                          quantape_test::num(expected(i), 12), quantape_test::num(tol, 3));
-            std::exit(1);
-        }
-    }
-}
 
 double normalCdf(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);
@@ -316,7 +293,7 @@ void testFdConsistency() {
         const double tol = 1e-6 * std::max(1.0, std::fabs(ad));
         checkClose("fd consistency", ad, fd, tol);
         QTA_LOG_INFO("test", "  [ok] fd param {}: ad={} fd={}", j,
-                     quantape_test::num(ad, 12), quantape_test::num(fd, 12));
+                     quantape::util::num(ad, 12), quantape::util::num(fd, 12));
     }
 
     // Same gate for a smoothed digital (proves the indicator is
@@ -383,12 +360,12 @@ void testGbmBlackScholes() {
                              source, payoff, nPaths, Schedule::Parallel);
         QTA_LOG_INFO("test",
                      "  milstein: d={} (bs {}, se {}) v={} (bs {}, se {}) r={} (bs {}, se {})",
-                     quantape_test::num(estimate.gradient(0), 6), quantape_test::num(delta, 6),
-                     quantape_test::num(estimate.stdErrors(0), 2),
-                     quantape_test::num(estimate.gradient(2), 6), quantape_test::num(vega, 6),
-                     quantape_test::num(estimate.stdErrors(2), 2),
-                     quantape_test::num(estimate.gradient(1), 6), quantape_test::num(rho, 6),
-                     quantape_test::num(estimate.stdErrors(1), 2));
+                     quantape::util::num(estimate.gradient(0), 6), quantape::util::num(delta, 6),
+                     quantape::util::num(estimate.stdErrors(0), 2),
+                     quantape::util::num(estimate.gradient(2), 6), quantape::util::num(vega, 6),
+                     quantape::util::num(estimate.stdErrors(2), 2),
+                     quantape::util::num(estimate.gradient(1), 6), quantape::util::num(rho, 6),
+                     quantape::util::num(estimate.stdErrors(1), 2));
         checkClose("gbm call value", estimate.value, value,
                    0.015 * value + 5.0 * estimate.valueStdError);
         checkClose("gbm delta", estimate.gradient(0), delta,
@@ -414,8 +391,8 @@ void testGbmBlackScholes() {
                              source, payoff, nPaths, Schedule::Parallel);
         const double vegaError = estimate.gradient(2) - vega;
         QTA_LOG_INFO("test", "  euler {} steps: vega err={} (se {}) [reported]", steps[i],
-                     quantape_test::num(vegaError, 6),
-                     quantape_test::num(estimate.stdErrors(2), 2));
+                     quantape::util::num(vegaError, 6),
+                     quantape::util::num(estimate.stdErrors(2), 2));
         checkClose("euler vega sanity", estimate.gradient(2), vega,
                    0.05 * std::fabs(vega) + 5.0 * estimate.stdErrors(2));
     }
@@ -455,10 +432,10 @@ void testOuExactGradient() {
     const double exactMean = level + (xInit - level) * an;
 
     QTA_LOG_INFO("test", "  ou: dx0={} ({}) dk={} ({} se {}) dlevel={} ({})",
-                 quantape_test::num(estimate.gradient(0), 12), quantape_test::num(exactX0, 12),
-                 quantape_test::num(estimate.gradient(1), 6), quantape_test::num(exactKappa, 6),
-                 quantape_test::num(estimate.stdErrors(1), 2),
-                 quantape_test::num(estimate.gradient(2), 12), quantape_test::num(exactLevel, 12));
+                 quantape::util::num(estimate.gradient(0), 12), quantape::util::num(exactX0, 12),
+                 quantape::util::num(estimate.gradient(1), 6), quantape::util::num(exactKappa, 6),
+                 quantape::util::num(estimate.stdErrors(1), 2),
+                 quantape::util::num(estimate.gradient(2), 12), quantape::util::num(exactLevel, 12));
     checkClose("ou dx0", estimate.gradient(0), exactX0, 1e-10);
     checkClose("ou dkappa", estimate.gradient(1), exactKappa,
                0.001 * std::fabs(exactKappa) + 5.0 * estimate.stdErrors(1));
@@ -500,9 +477,9 @@ void testCirQeGradient() {
     const double exactKappa = (level - v0) * tMax * decay;
 
     QTA_LOG_INFO("test", "  cir qe: dx0={} ({}) dk={} ({}) dlevel={} ({})",
-                 quantape_test::num(estimate.gradient(0), 6), quantape_test::num(exactX0, 6),
-                 quantape_test::num(estimate.gradient(1), 6), quantape_test::num(exactKappa, 6),
-                 quantape_test::num(estimate.gradient(2), 6), quantape_test::num(exactLevel, 6));
+                 quantape::util::num(estimate.gradient(0), 6), quantape::util::num(exactX0, 6),
+                 quantape::util::num(estimate.gradient(1), 6), quantape::util::num(exactKappa, 6),
+                 quantape::util::num(estimate.gradient(2), 6), quantape::util::num(exactLevel, 6));
     checkClose("cir mean value", estimate.value, exactMean, 1e-3 + 5.0 * estimate.valueStdError);
     checkClose("cir dx0", estimate.gradient(0), exactX0, 1e-3 + 5.0 * estimate.stdErrors(0));
     checkClose("cir dkappa", estimate.gradient(1), exactKappa,
@@ -624,8 +601,8 @@ void testParityAndDeterminism() {
     // parity is tight-relative, not bitwise (schedules *are* bitwise).
     const double parityDiff = std::fabs(seq.value - reference);
     QTA_LOG_INFO("test", "  parity: value={}, |ad-double|={} (rel {}), schedules bitwise",
-                 quantape_test::num(seq.value, 12), quantape_test::num(parityDiff, 3),
-                 quantape_test::num(parityDiff / std::max(1.0, std::fabs(reference)), 3));
+                 quantape::util::num(seq.value, 12), quantape::util::num(parityDiff, 3),
+                 quantape::util::num(parityDiff / std::max(1.0, std::fabs(reference)), 3));
     CHECK(parityDiff <= 1e-12 * std::max(1.0, std::fabs(reference)));
 }
 
@@ -685,8 +662,8 @@ void testForwardMode() {
         checkClose("fwd milstein rho", fwd.gradient(1), rho,
                    0.015 * std::fabs(rho) + 5.0 * fwd.stdErrors(1));
         QTA_LOG_INFO("test", "  [ok] forward: Milstein BS greeks (d={} v={} r={})",
-                     quantape_test::num(fwd.gradient(0), 4), quantape_test::num(fwd.gradient(2), 4),
-                     quantape_test::num(fwd.gradient(1), 4));
+                     quantape::util::num(fwd.gradient(0), 4), quantape::util::num(fwd.gradient(2), 4),
+                     quantape::util::num(fwd.gradient(1), 4));
     }
 
     // 3. CIR QE via forward mode: exact-moment derivatives (N = 4)

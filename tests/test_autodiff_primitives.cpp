@@ -22,21 +22,14 @@
 #include <cstdlib>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
 
 using stan::math::var;
 
 namespace {
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={:.15g} expected={:.15g} err={:.3g}", label,
-                      got, expected, std::fabs(got - expected));
-        std::exit(1);
-    }
-    QTA_LOG_INFO("test", "  {:<46} ok  got={:.12f} expected={:.12f}", label, got,
-                 expected);
-}
 
 void testHvp() {
     QTA_LOG_INFO("test", "=== Hessian-vector product ===");

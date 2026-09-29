@@ -32,7 +32,8 @@
 #include <thread>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -156,7 +157,7 @@ int main() {
         CHECK(std::fabs(mean - reference) < 2e-3);
         QTA_LOG_INFO("test",
                      "  [ok] digital shifts: reproducible, E[exp(sigma Z)]={} vs {}",
-                     quantape_test::num(mean, 6), quantape_test::num(reference, 6));
+                     quantape::util::num(mean, 6), quantape::util::num(reference, 6));
     }
 
     // ── Engine integration: GBM terminal call via Sobol paths ──
@@ -252,9 +253,9 @@ int main() {
         QTA_LOG_INFO("test",
                      "  [ok] engine: QMC {} (+-{}) vs iid {} (+-{}) vs BS {} "
                      "(64-step Euler), bitwise block/schedule invariant",
-                     quantape_test::num(qmc, 4), quantape_test::num(qmcSe, 4),
-                     quantape_test::num(iid, 4), quantape_test::num(iidSe, 4),
-                     quantape_test::num(bs, 4));
+                     quantape::util::num(qmc, 4), quantape::util::num(qmcSe, 4),
+                     quantape::util::num(iid, 4), quantape::util::num(iidSe, 4),
+                     quantape::util::num(bs, 4));
     }
 
     // ── Layout validation and dimension mapping ──

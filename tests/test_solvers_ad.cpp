@@ -26,7 +26,8 @@
 #include <cstdio>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using stan::math::var;
 
@@ -38,12 +39,12 @@ void check(const char* label, double got, double expected, double tol) {
     const bool ok = std::fabs(got - expected) <= tol;
     if (ok) {
         QTA_LOG_INFO("test", "  {} ok  got={} expected={} err={}", label,
-                     quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                     quantape_test::num(std::fabs(got - expected), 3));
+                     quantape::util::num(got, 12), quantape::util::num(expected, 12),
+                     quantape::util::num(std::fabs(got - expected), 3));
     } else {
         QTA_LOG_ERROR("test", "  {} FAIL  got={} expected={} err={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(std::fabs(got - expected), 3));
+                      quantape::util::num(got, 12), quantape::util::num(expected, 12),
+                      quantape::util::num(std::fabs(got - expected), 3));
     }
     if (!ok) {
         ++failures;

@@ -37,7 +37,8 @@
 #include <sstream>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using stan::math::fvar;
 using stan::math::var;
@@ -446,11 +447,11 @@ int main() {
 
     stan::math::hessian(linear_functor, x, fx, grad, H);
 
-    QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fx, 6));
+    QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fx, 6));
 
     std::ostringstream grad_row;
     for (int i = 0; i < N_PILLARS; ++i)
-        grad_row << quantape_test::num(grad(i), 4) << ' ';
+        grad_row << quantape::util::num(grad(i), 4) << ' ';
     QTA_LOG_INFO("test", "  Gradient (∂PV/∂r_i):\n    {}", grad_row.str());
 
     // Show Hessian (only the non-zero block)
@@ -460,7 +461,7 @@ int main() {
         for (int j = 0; j < N_PILLARS; ++j) {
             row += ' ';
             if (std::abs(H(i, j)) > 1e-10)
-                row += quantape_test::num(H(i, j), 2);
+                row += quantape::util::num(H(i, j), 2);
             else
                 row += '.';
         }
@@ -494,7 +495,7 @@ int main() {
         }
     }
     QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
-                 quantape_test::num((H - H_fd).cwiseAbs().maxCoeff(), 2));
+                 quantape::util::num((H - H_fd).cwiseAbs().maxCoeff(), 2));
 
     // ── 2. Cubic spline chain ──
     QTA_LOG_INFO("test", "\n── Chain: Cubic Spline → BS ──\n");
@@ -509,18 +510,18 @@ int main() {
 
     stan::math::hessian(spline_functor, x, fx2, grad2, H2);
 
-    QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fx2, 6));
+    QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fx2, 6));
 
     std::ostringstream grad2_row;
     for (int i = 0; i < N_PILLARS; ++i)
-        grad2_row << quantape_test::num(grad2(i), 4) << ' ';
+        grad2_row << quantape::util::num(grad2(i), 4) << ' ';
     QTA_LOG_INFO("test", "  Gradient:\n    {}", grad2_row.str());
 
     QTA_LOG_INFO("test", "  Hessian (∂²PV/∂r_i∂r_j):");
     for (int i = 0; i < N_PILLARS; ++i) {
         std::string row = "    [";
         for (int j = 0; j < N_PILLARS; ++j)
-            row += ' ' + quantape_test::num(H2(i, j), 2);
+            row += ' ' + quantape::util::num(H2(i, j), 2);
         row += " ]";
         QTA_LOG_INFO("test", "{}", row);
     }
@@ -550,7 +551,7 @@ int main() {
         }
     }
     QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
-                 quantape_test::num((H2 - H2_fd).cwiseAbs().maxCoeff(), 2));
+                 quantape::util::num((H2 - H2_fd).cwiseAbs().maxCoeff(), 2));
 
     // ── 3. Timing comparison ──
     QTA_LOG_INFO("test", "\n── Performance ──\n");
@@ -591,14 +592,14 @@ int main() {
     Eigen::MatrixXd H_naive(N_PILLARS, N_PILLARS);
     stan::math::hessian(naive_functor, x, fx_naive, g_naive, H_naive);
     QTA_LOG_INFO("test", "  Max |H_naive - H_mixed|: {}\n",
-                 quantape_test::num((H_naive - H).cwiseAbs().maxCoeff(), 2));
+                 quantape::util::num((H_naive - H).cwiseAbs().maxCoeff(), 2));
 
     QTA_LOG_INFO("test", "  {:<35}{:>10}{:>12}", "Approach", "us/call", "vs Naive");
     QTA_LOG_INFO("test", "  {}", std::string(57, '-'));
 
     auto row = [&](const char* name, double t) {
-        QTA_LOG_INFO("test", "  {:<35}{:>10}{:>10}x", name, quantape_test::num(t, 3),
-                     quantape_test::num(t_naive / t, 2));
+        QTA_LOG_INFO("test", "  {:<35}{:>10}{:>10}x", name, quantape::util::num(t, 3),
+                     quantape::util::num(t_naive / t, 2));
     };
 
     row("Naive (all fvar<var>)", t_naive);

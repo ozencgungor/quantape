@@ -16,7 +16,8 @@
 #include <cstdlib>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using stan::math::var;
 
@@ -37,11 +38,11 @@ void checkClose(const char* label, double got, double expected, double tol) {
     const bool ok = std::fabs(got - expected) <= tol;
     if (!ok) {
         QTA_LOG_ERROR("test", "  {} FAIL got={} expected={}", label,
-                      quantape_test::num(got, 10), quantape_test::num(expected, 10));
+                      quantape::util::num(got, 10), quantape::util::num(expected, 10));
         ++failures;
     } else {
-        QTA_LOG_INFO("test", "  {} ok  got={} err={}", label, quantape_test::num(got, 10),
-                     quantape_test::num(std::fabs(got - expected), 2));
+        QTA_LOG_INFO("test", "  {} ok  got={} err={}", label, quantape::util::num(got, 10),
+                     quantape::util::num(std::fabs(got - expected), 2));
     }
 }
 
@@ -202,7 +203,7 @@ void stressLbfgs() {
         });
         const double f_final = Rosenbrock{}(x);
         QTA_LOG_INFO("test", "  rosenbrock50: evals={} iters={} f={} ({} us)", state.evals,
-                     state.iterations, quantape_test::num(f_final, 3), quantape_test::num(us));
+                     state.iterations, quantape::util::num(f_final, 3), quantape::util::num(us));
         check("rosenbrock50 f < 1e-4", f_final < 1e-4);
     }
     // Beale
@@ -250,8 +251,8 @@ void stressLbfgs() {
             return static_cast<double>(state.evals);
         });
         QTA_LOG_INFO("test", "  illcond1e16: evals={} iters={} x0={} x4={} ({} us)",
-                     state.evals, state.iterations, quantape_test::num(x[0], 6),
-                     quantape_test::num(x[4], 6), quantape_test::num(us));
+                     state.evals, state.iterations, quantape::util::num(x[0], 6),
+                     quantape::util::num(x[4], 6), quantape::util::num(us));
         checkClose("illcond1e16 x4", x[4], 1.0, 1e-6);
         // x0 stays near its start on this 1e16 multi-scale problem (global
         // gamma limitation, same as NLopt which fails outright) -- informational.
@@ -362,7 +363,7 @@ void stressConstrained() {
         }
         check("many-bounds x == 1", all_one);
         QTA_LOG_INFO("test", "  many-bounds n=100: evals={} iters={} ({} us)", state.evals,
-                     state.iterations, quantape_test::num(us));
+                     state.iterations, quantape::util::num(us));
     }
     // Monotone + butterfly on a 20-point curve (arbitrage-like)
     {
@@ -387,7 +388,7 @@ void stressConstrained() {
         }
         check("curve arbitrage feasible", feasible);
         QTA_LOG_INFO("test", "  curve-arb n=20: evals={} iters={} ({} us)", state.evals,
-                     state.iterations, quantape_test::num(us));
+                     state.iterations, quantape::util::num(us));
     }
     // AUGLAG on the mixed-constraint problem
     {
@@ -423,7 +424,7 @@ void stressConstrained() {
         }
         check("auglag curve arbitrage feasible", feasible);
         QTA_LOG_INFO("test", "  auglag curve-arb n=20: evals={} iters={} ({} us)",
-                     state.evals, state.iterations, quantape_test::num(us));
+                     state.evals, state.iterations, quantape::util::num(us));
     }
 }
 

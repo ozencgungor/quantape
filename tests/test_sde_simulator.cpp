@@ -27,7 +27,10 @@
 #include <stdexcept>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -53,21 +56,7 @@ bool bitwiseEqual(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b) {
 
 // Bitwise finiteness guard: under -ffast-math the compiler folds
 // isnan/isfinite to constants, so NaN/Inf silently pass `<=` comparisons.
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 double bsCall(double s0, double k, double r, double sigma, double t) {
     const double sqrtT = std::sqrt(t);
@@ -299,7 +288,7 @@ void testGbmPrice() {
     const double reference = std::exp(mu * t) * bsCall(s0, k, mu, sigma, t);
     checkClose("GBM undiscounted call", call, reference, 0.01 * reference);
     QTA_LOG_INFO("test", "  [ok] GBM: Euler mean exact, E[call] = {} vs analytic {}",
-                 quantape_test::num(call, 4), quantape_test::num(reference, 4));
+                 quantape::util::num(call, 4), quantape::util::num(reference, 4));
 }
 
 void testCirMean() {
@@ -414,8 +403,8 @@ void testEstimator() {
     const double reference = bsCall(s0, k, 0.0, sigma, t); // drift 0 => undiscounted
     CHECK(std::fabs(call.mean - reference) <= 5.0 * call.stdError + 0.01 * reference);
     QTA_LOG_INFO("test", "  [ok] estimator: call = {} +/- {} vs BS {}",
-                 quantape_test::num(call.mean, 4), quantape_test::num(call.stdError, 4),
-                 quantape_test::num(reference, 4));
+                 quantape::util::num(call.mean, 4), quantape::util::num(call.stdError, 4),
+                 quantape::util::num(reference, 4));
 }
 
 } // namespace

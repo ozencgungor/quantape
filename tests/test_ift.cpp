@@ -24,7 +24,9 @@
 #include <cstdlib>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
 
 using stan::math::var;
 
@@ -35,14 +37,6 @@ static bool converged(quantape::math::OptimizeResult r) {
            r == quantape::math::OptimizeResult::XtolReached;
 }
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (std::fabs(got - expected) > tol) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={}", label,
-                      quantape_test::num(got, 15), quantape_test::num(expected, 15),
-                      quantape_test::num(std::fabs(got - expected), 3));
-        std::exit(1);
-    }
-}
 
 // ============================================================================
 // Fixture 1: linear least squares (unconstrained)
@@ -133,7 +127,7 @@ void testUnconstrainedLsq() {
     }
     QTA_LOG_INFO("test",
                  "  [ok] unconstrained LSQ: IFT vs analytic 1e-10, vs FD 1e-6, cond={}",
-                 quantape_test::num(ift.condition_number, 3));
+                 quantape::util::num(ift.condition_number, 3));
 }
 
 // ============================================================================
@@ -507,7 +501,7 @@ void testConditionNumber() {
     CHECK(!ift.regularized);
     checkClose("ill-cond dp/dm diagonal", dp_dm[0], 1.0, 1e-12);
     QTA_LOG_INFO("test", "  [ok] condition number reporting: cond = {}",
-                 quantape_test::num(ift.condition_number, 2));
+                 quantape::util::num(ift.condition_number, 2));
 }
 
 // ============================================================================
@@ -673,7 +667,7 @@ void testRidgeEscalation() {
     CHECK(ift.ridge_used > 0.0);
     CHECK(std::isfinite(dp_dm[0]));
     QTA_LOG_INFO("test", "  [ok] ridge escalation: indefinite H regularized (ridge={})",
-                 quantape_test::num(ift.ridge_used, 2));
+                 quantape::util::num(ift.ridge_used, 2));
 
     // Near-flat but positive definite: no ridge needed, exact answer
     const auto flat = [](const auto& x, const auto& m) {
@@ -689,7 +683,7 @@ void testRidgeEscalation() {
     checkClose("flat-PD dp0/dm0", dp2[0], 1.0, 1e-12);
     checkClose("flat-PD dp1/dm1", dp2[3], 1.0, 1e-12);
     QTA_LOG_INFO("test", "  [ok] near-flat PD Hessian: no ridge, exact dp/dm (cond={})",
-                 quantape_test::num(ift2.condition_number, 1));
+                 quantape::util::num(ift2.condition_number, 1));
 }
 
 // ============================================================================

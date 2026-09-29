@@ -8,7 +8,8 @@
 #include <iterator>
 #include <string>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 int main() {
     namespace fs = std::filesystem;

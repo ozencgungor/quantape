@@ -18,7 +18,8 @@
 #include <random>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;

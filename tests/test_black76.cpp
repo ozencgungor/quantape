@@ -13,7 +13,8 @@
 #include <iomanip>
 #include <iostream>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using quantape::pricing::Black76;
 using quantape::pricing::black76Analytical;
@@ -68,8 +69,8 @@ void checkB76Greeks2_FD(double DF, double F, double K, double vol, double T, Opt
     QTA_LOG_INFO("test", "  2nd-order Greeks vs FD:");
     auto row = [](const char* name, double anal, double fd) {
         QTA_LOG_INFO("test", "    {}  anal={}  FD={}  err={}", name,
-                     quantape_test::num(anal), quantape_test::num(fd),
-                     quantape_test::num(std::abs(anal - fd), 2));
+                     quantape::util::num(anal), quantape::util::num(fd),
+                     quantape::util::num(std::abs(anal - fd), 2));
     };
     row("d2V/dD_dF", res.g2.d2V_dDF_dF, (g1_Dp.dV_dF - g1_Dm.dV_dF) / (2 * eps));
     row("d2V/dD_dK", res.g2.d2V_dDF_dK, (g1_Dp.dV_dK - g1_Dm.dV_dK) / (2 * eps));
@@ -92,8 +93,8 @@ void checkB76StanVar(double DF0, double F0, double K0, double vol0, double T, Op
     QTA_LOG_INFO("test", "  Stan var vs analytical:");
     auto row = [](const char* name, double ad, double anal) {
         QTA_LOG_INFO("test", "    {}  AD={}  anal={}  err={}", name,
-                     quantape_test::num(ad), quantape_test::num(anal),
-                     quantape_test::num(std::abs(ad - anal), 2));
+                     quantape::util::num(ad), quantape::util::num(anal),
+                     quantape::util::num(std::abs(ad - anal), 2));
     };
     row("price", price.val(), res.price);
     row("dV/dDF", DF.adj(), res.g1.dV_dDF);
@@ -141,8 +142,8 @@ void checkB76StanHessian(double DF0, double F0, double K0, double vol0, double T
         grad_err = std::max(grad_err, std::abs(grad(i) - anal_grad[i]));
 
     QTA_LOG_INFO("test", "  Stan hessian: price_err={}  grad_err={}  hess_err={}",
-                 quantape_test::num(std::abs(fx - res.price), 2), quantape_test::num(grad_err, 2),
-                 quantape_test::num(hess_err, 2));
+                 quantape::util::num(std::abs(fx - res.price), 2), quantape::util::num(grad_err, 2),
+                 quantape::util::num(hess_err, 2));
 }
 
 // ============================================================================
@@ -156,8 +157,8 @@ void checkGBSEquivalence(double S, double K, double r_disc, double b, double vol
     double b76_price = Black76<double>{DF, F, K, vol, T, type}.price();
     double gbs_price = GBS<double>{S, K, r_disc, b, vol, T, type}.price();
     QTA_LOG_INFO("test", "  GBS vs B76: b76={}  gbs={}  err={}",
-                 quantape_test::num(b76_price), quantape_test::num(gbs_price),
-                 quantape_test::num(std::abs(b76_price - gbs_price), 2));
+                 quantape::util::num(b76_price), quantape::util::num(gbs_price),
+                 quantape::util::num(std::abs(b76_price - gbs_price), 2));
 }
 
 void checkGBSStanVar(double S0, double K0, double r0, double b0, double vol0, double T,
@@ -182,8 +183,8 @@ void checkGBSStanVar(double S0, double K0, double r0, double b0, double vol0, do
 
     QTA_LOG_INFO("test", "  GBS Stan var vs FD:");
     auto row = [](const char* name, double ad, double fd) {
-        QTA_LOG_INFO("test", "    {}  AD={}  FD={}  err={}", name, quantape_test::num(ad),
-                     quantape_test::num(fd), quantape_test::num(std::abs(ad - fd), 2));
+        QTA_LOG_INFO("test", "    {}  AD={}  FD={}  err={}", name, quantape::util::num(ad),
+                     quantape::util::num(fd), quantape::util::num(std::abs(ad - fd), 2));
     };
     row("dV/dS", ad_dS, fd_dS);
     row("dV/dK", ad_dK, fd_dK);
@@ -246,8 +247,8 @@ void checkGBSStanHessian(double S0, double K0, double r0, double b0, double vol0
     double hess_err = (H - H_fd).cwiseAbs().maxCoeff();
 
     QTA_LOG_INFO("test", "  GBS hessian: price_err={}  grad_err={}  hess_err={}",
-                 quantape_test::num(std::abs(fx - p(S0, K0, r0, b0, vol0)), 2),
-                 quantape_test::num(grad_err, 2), quantape_test::num(hess_err, 2));
+                 quantape::util::num(std::abs(fx - p(S0, K0, r0, b0, vol0)), 2),
+                 quantape::util::num(grad_err, 2), quantape::util::num(hess_err, 2));
 
     const char* names[] = {"S", "K", "r_disc", "b", "vol"};
     QTA_LOG_INFO("test", "    Hessian (AD):");
@@ -317,12 +318,21 @@ int main() {
 
     for (const auto& tc : gbs_cases) {
         QTA_LOG_INFO("test", "-- {} (S={} K={} r_disc={} b={} vol={} T={}) --", tc.label,
-                     quantape_test::num(tc.S), quantape_test::num(tc.K),
-                     quantape_test::num(tc.r_disc), quantape_test::num(tc.b),
-                     quantape_test::num(tc.vol), quantape_test::num(tc.T));
+                     quantape::util::num(tc.S), quantape::util::num(tc.K),
+                     quantape::util::num(tc.r_disc), quantape::util::num(tc.b),
+                     quantape::util::num(tc.vol), quantape::util::num(tc.T));
         checkGBSEquivalence(tc.S, tc.K, tc.r_disc, tc.b, tc.vol, tc.T, tc.type);
         checkGBSStanVar(tc.S, tc.K, tc.r_disc, tc.b, tc.vol, tc.T, tc.type);
         checkGBSStanHessian(tc.S, tc.K, tc.r_disc, tc.b, tc.vol, tc.T, tc.type);
+    }
+
+    // util::checkClose AD-scalar overload: checks value and adjoint together.
+    {
+        var x = 2.0;
+        var y = 2.0;
+        x.vi_->adj_ = 0.5;
+        y.vi_->adj_ = 0.5;
+        quantape::util::checkClose("util var value+adj", x, y, 0.0);
     }
 
     return 0;

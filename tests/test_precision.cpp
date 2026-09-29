@@ -15,7 +15,8 @@
 #include <cstdlib>
 #include <initializer_list>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using quantape::math::DoubleDouble;
 
@@ -27,9 +28,9 @@ void checkRel(const char* label, const DoubleDouble& got, const DoubleDouble& ex
     const double err = std::fabs((got - expected).value()) / denom;
     if (!(err <= tol)) {
         QTA_LOG_ERROR("test", "FAIL: {} rel err {} tol {} (got {} expected {})", label,
-                      quantape_test::num(err, 3), quantape_test::num(tol, 3),
-                      quantape_test::num(got.value(), 20),
-                      quantape_test::num(expected.value(), 20));
+                      quantape::util::num(err, 3), quantape::util::num(tol, 3),
+                      quantape::util::num(got.value(), 20),
+                      quantape::util::num(expected.value(), 20));
         std::exit(1);
     }
 }
@@ -151,7 +152,7 @@ void testOscillatoryExactMoment() {
     CHECK(worst < 1e-10);
     QTA_LOG_INFO("test",
                  "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
-                 quantape_test::num(worst, 2));
+                 quantape::util::num(worst, 2));
 }
 
 } // namespace

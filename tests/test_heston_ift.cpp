@@ -39,7 +39,9 @@
 #include <cstdlib>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
 
 using quantape::math::Bounds;
 using quantape::math::CalibrationInequalityConstraint;
@@ -53,14 +55,6 @@ using quantape::models::HestonModel;
 
 namespace {
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 double impliedVol(double price, double S, double K, double r, double q, double T) {
     double lo = 1e-6;
@@ -374,8 +368,8 @@ void testHestonUnconstrained() {
     quantape::math::CalibrationIftOptions options;
     const auto ift = quantape::math::calibrationIft(fx.problem, bHat, fx.a, {}, options);
     QTA_LOG_INFO("test", "  condition = {}, ridge = {}",
-                 quantape_test::num(ift.diagnostics.condition, 3),
-                 quantape_test::num(ift.diagnostics.ridge, 2));
+                 quantape::util::num(ift.diagnostics.condition, 3),
+                 quantape::util::num(ift.diagnostics.ridge, 2));
 
     const auto recalibrate = [&](const Eigen::VectorXd& a, const std::vector<double>& s) {
         return calibrateUnconstrained(fx.problem, a, s);
@@ -386,9 +380,9 @@ void testHestonUnconstrained() {
     for (Eigen::Index i = 0; i < ift.dbda.rows(); ++i) {
         std::string row = "    [";
         for (Eigen::Index j = 0; j < ift.dbda.cols(); ++j) {
-            row += quantape_test::num(ift.dbda(i, j), 6) + " ";
+            row += quantape::util::num(ift.dbda(i, j), 6) + " ";
         }
-        row += "] err vs FD = " + quantape_test::num((ift.dbda.row(i) - fd.row(i)).norm(), 2);
+        row += "] err vs FD = " + quantape::util::num((ift.dbda.row(i) - fd.row(i)).norm(), 2);
         QTA_LOG_INFO("test", "{}", row);
     }
     const double rel = (ift.dbda - fd).norm() / std::max(1e-12, fd.norm());
@@ -414,9 +408,9 @@ void testHestonUnconstrained() {
         return out;
     });
     QTA_LOG_INFO("test", "  product dV/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
-                 quantape_test::num(dVda(0), 6), quantape_test::num(dVda(1), 6),
-                 quantape_test::num(dVda(2), 6), quantape_test::num(dVdaFd(0, 0), 6),
-                 quantape_test::num(dVdaFd(0, 1), 6), quantape_test::num(dVdaFd(0, 2), 6));
+                 quantape::util::num(dVda(0), 6), quantape::util::num(dVda(1), 6),
+                 quantape::util::num(dVda(2), 6), quantape::util::num(dVdaFd(0, 0), 6),
+                 quantape::util::num(dVdaFd(0, 1), 6), quantape::util::num(dVdaFd(0, 2), 6));
     checkClose("product dV/da vs bump-recalibrate", (dVda - dVdaFd.row(0).transpose()).norm(), 0.0,
                1e-4 * std::max(1.0, dVdaFd.norm()));
 
@@ -425,11 +419,11 @@ void testHestonUnconstrained() {
     const auto jac = quantape::math::calibrationJacobiansFromAssembled(assembled);
     const auto inst = quantape::math::instrumentCalibrationJacobian(jac);
     QTA_LOG_INFO("test", "  instrument route: rank={} cond={}", inst.rank,
-                 quantape_test::num(inst.condition, 3));
+                 quantape::util::num(inst.condition, 3));
     for (Eigen::Index i = 0; i < inst.dbda.rows(); ++i) {
         std::string row = "    [";
         for (Eigen::Index j = 0; j < inst.dbda.cols(); ++j) {
-            row += quantape_test::num(inst.dbda(i, j), 6) + " ";
+            row += quantape::util::num(inst.dbda(i, j), 6) + " ";
         }
         row += "]";
         QTA_LOG_INFO("test", "{}", row);
@@ -453,8 +447,8 @@ void testHestonFellerConstrained() {
     const auto lambda =
         quantape::math::recoverActiveMultipliers(fx.problem, bHat, assembled.gradientB);
     QTA_LOG_INFO("test", "  g = {}, recovered lambda = {} (calibrator exported {})",
-                 quantape_test::num(g(0), 3), quantape_test::num(lambda[0], 6),
-                 quantape_test::num(exported.empty() ? 0.0 : exported[0], 6));
+                 quantape::util::num(g(0), 3), quantape::util::num(lambda[0], 6),
+                 quantape::util::num(exported.empty() ? 0.0 : exported[0], 6));
     CHECK(g(0) <= 1e-7);
     CHECK(lambda[0] > 1e-6);
 
@@ -472,7 +466,7 @@ void testHestonFellerConstrained() {
     // agreement is limited to a few percent. The chain itself is exact given
     // the point and multipliers.
     QTA_LOG_INFO("test", "  db/da KKT vs FD: rel err = {} (reference precision limited)",
-                 quantape_test::num(rel, 3));
+                 quantape::util::num(rel, 3));
     checkClose("constrained db/da vs bump-recalibrate", rel, 0.0, 5e-2);
 
     // dlambda/da vs FD of the AUGLAG multiplier
@@ -487,10 +481,10 @@ void testHestonFellerConstrained() {
     });
     const double dlRel = (ift.dlambdaDa - dlambdaFd).norm() / std::max(1e-12, dlambdaFd.norm());
     QTA_LOG_INFO("test", "  dlambda/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
-                 quantape_test::num(ift.dlambdaDa(0, 0), 6),
-                 quantape_test::num(ift.dlambdaDa(0, 1), 6),
-                 quantape_test::num(ift.dlambdaDa(0, 2), 6), quantape_test::num(dlambdaFd(0, 0), 6),
-                 quantape_test::num(dlambdaFd(0, 1), 6), quantape_test::num(dlambdaFd(0, 2), 6));
+                 quantape::util::num(ift.dlambdaDa(0, 0), 6),
+                 quantape::util::num(ift.dlambdaDa(0, 1), 6),
+                 quantape::util::num(ift.dlambdaDa(0, 2), 6), quantape::util::num(dlambdaFd(0, 0), 6),
+                 quantape::util::num(dlambdaFd(0, 1), 6), quantape::util::num(dlambdaFd(0, 2), 6));
     checkClose("dlambda/da vs bump-recalibrate", dlRel, 0.0, 5e-2);
     // Independent boundary reference: sigma = sqrt(2 kappa theta), 4 free
     // parameters; Richardson FD of that well-conditioned optimum avoids the
@@ -527,7 +521,7 @@ void testHestonFellerConstrained() {
         const double relBoundary =
             (ift.dbda - fdBoundary).norm() / std::max(1e-12, fdBoundary.norm());
         QTA_LOG_INFO("test", "  boundary-reference db/da: rel err = {} (cond ~ 1e3)",
-                     quantape_test::num(relBoundary, 3));
+                     quantape::util::num(relBoundary, 3));
         checkClose("constrained db/da vs boundary FD", relBoundary, 0.0, 1e-3);
     }
 
@@ -567,9 +561,9 @@ void testBlackScholesGenericity() {
     };
     const Eigen::MatrixXd fd = richardsonJacobian(a, fit);
     QTA_LOG_INFO("test", "  dvol/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
-                 quantape_test::num(ift.dbda(0, 0), 6), quantape_test::num(ift.dbda(0, 1), 6),
-                 quantape_test::num(ift.dbda(0, 2), 6), quantape_test::num(fd(0, 0), 6),
-                 quantape_test::num(fd(0, 1), 6), quantape_test::num(fd(0, 2), 6));
+                 quantape::util::num(ift.dbda(0, 0), 6), quantape::util::num(ift.dbda(0, 1), 6),
+                 quantape::util::num(ift.dbda(0, 2), 6), quantape::util::num(fd(0, 0), 6),
+                 quantape::util::num(fd(0, 1), 6), quantape::util::num(fd(0, 2), 6));
     const double rel = (ift.dbda - fd).norm() / std::max(1e-12, fd.norm());
     checkClose("BS dvol/da vs bump-recalibrate", rel, 0.0, 1e-4);
     QTA_LOG_INFO("test", "  [ok] same assemble/IFT calls, second model");
@@ -605,7 +599,7 @@ void testStanInterop() {
         CHECK(result != quantape::math::OptimizeResult::Failure);
         const Eigen::VectorXd bVar = owning(x);
         QTA_LOG_INFO("test", "  LBFGS<var> optimum vs double path: {} (evals={})",
-                     quantape_test::num((bVar - bHat).norm(), 2), state.evals);
+                     quantape::util::num((bVar - bHat).norm(), 2), state.evals);
         checkClose("var optimum == double optimum", (bVar - bHat).norm(), 0.0, 1e-6);
 
         // analytic chain at the var optimum agrees with the double chain
@@ -648,8 +642,8 @@ void testStanInterop() {
         const auto [x9, us9] = solve(objective, start);
         QTA_LOG_INFO("test",
                      "  AD solve: 5-param {} us, 9-param {} us ({}x), optimum diff {}",
-                     quantape_test::num(usF, 1), quantape_test::num(us9, 1),
-                     quantape_test::num(us9 / usF, 2), quantape_test::num((xF - x9).norm(), 2));
+                     quantape::util::num(usF, 1), quantape::util::num(us9, 1),
+                     quantape::util::num(us9 / usF, 2), quantape::util::num((xF - x9).norm(), 2));
         checkClose("fixed-market AD optimum == 9-param", (xF - x9).norm(), 0.0, 1e-6);
     }
 
@@ -667,7 +661,7 @@ void testStanInterop() {
         const auto t1 = std::chrono::steady_clock::now();
         QTA_LOG_INFO(
             "test", "  AD IFT wall: {} us (primal cache)",
-            quantape_test::num(std::chrono::duration<double, std::micro>(t1 - t0).count(), 1));
+            quantape::util::num(std::chrono::duration<double, std::micro>(t1 - t0).count(), 1));
         CHECK(result != quantape::math::OptimizeResult::Failure);
         Eigen::MatrixXd adDbda(5, 3);
         for (int i = 0; i < 5; ++i) {
@@ -680,7 +674,7 @@ void testStanInterop() {
         const double rel = (adDbda - ift.dbda).norm() / std::max(1.0, ift.dbda.norm());
         QTA_LOG_INFO("test",
                      "  AD IFT (minimizeDifferential) vs analytic chain: rel err = {}",
-                     quantape_test::num(rel, 2));
+                     quantape::util::num(rel, 2));
         checkClose("AD IFT == analytic chain", rel, 0.0, 1e-6);
 
         // 3. constrained AD IFT: Feller via the scalar-generic writer
@@ -722,13 +716,13 @@ void testStanInterop() {
         const double relC = (adC - iftC.dbda).norm() / std::max(1.0, iftC.dbda.norm());
         QTA_LOG_INFO("test",
                      "  constrained AD IFT vs analytic chain: rel err = {} (active rows={})",
-                     quantape_test::num(relC, 2), iftC.diagnostics.activeInequalities.size());
+                     quantape::util::num(relC, 2), iftC.diagnostics.activeInequalities.size());
         checkClose("constrained AD IFT == analytic chain", relC, 0.0, 1e-5);
         QTA_LOG_INFO("test", "  dlambda/dm (AD) = [{}, {}, {}], analytic = [{}, {}, {}]",
-                     quantape_test::num(dlamC[0], 6), quantape_test::num(dlamC[1], 6),
-                     quantape_test::num(dlamC[2], 6), quantape_test::num(iftC.dlambdaDa(0, 0), 6),
-                     quantape_test::num(iftC.dlambdaDa(0, 1), 6),
-                     quantape_test::num(iftC.dlambdaDa(0, 2), 6));
+                     quantape::util::num(dlamC[0], 6), quantape::util::num(dlamC[1], 6),
+                     quantape::util::num(dlamC[2], 6), quantape::util::num(iftC.dlambdaDa(0, 0), 6),
+                     quantape::util::num(iftC.dlambdaDa(0, 1), 6),
+                     quantape::util::num(iftC.dlambdaDa(0, 2), 6));
         for (int j = 0; j < 3; ++j) {
             checkClose("dlambda/dm AD == analytic", dlamC[static_cast<std::size_t>(j)],
                        iftC.dlambdaDa(0, j), 1e-3 * std::max(1.0, std::fabs(iftC.dlambdaDa(0, j))));

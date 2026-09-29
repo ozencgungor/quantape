@@ -18,7 +18,8 @@
 #include <cstdio>
 #include <type_traits>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 namespace {
 
@@ -29,8 +30,8 @@ int failures = 0;
 void check(bool ok, const char* name, double got = 0.0, double tol = 0.0) {
     if (!ok) {
         ++failures;
-        QTA_LOG_ERROR("test", "FAIL: {} (got={} tol={})", name, quantape_test::num(got, 3),
-                      quantape_test::num(tol, 3));
+        QTA_LOG_ERROR("test", "FAIL: {} (got={} tol={})", name, quantape::util::num(got, 3),
+                      quantape::util::num(tol, 3));
     }
 }
 
@@ -94,7 +95,7 @@ void testStanGradientAndHessian() {
     }
     check(gradErr < 1e-9, "stan adjoint == fullGradient", gradErr, 1e-9);
     QTA_LOG_INFO("test", "  [ok] var adjoint == fullGradient (max err {}, 1-node tape)",
-                 quantape_test::num(gradErr, 2));
+                 quantape::util::num(gradErr, 2));
 
     double fx2 = 0.0;
     Eigen::VectorXd grad2(P);
@@ -109,7 +110,7 @@ void testStanGradientAndHessian() {
     check(hessErr < 1e-9, "stan fvar<var> Hessian == fullHessian", hessErr, 1e-9);
     QTA_LOG_INFO("test",
                  "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
-                 quantape_test::num(hessErr, 2));
+                 quantape::util::num(hessErr, 2));
 
     // Independent FD of the re-evaluated gradient for three representative entries
     const double h = 1e-4;
@@ -167,7 +168,7 @@ void testPrimalCache() {
     }
     check(hessErr < 1e-12, "cached fvar<var> Hessian == fullHessian", hessErr, 1e-12);
     QTA_LOG_INFO("test", "  [ok] cached price: hessian err {}, rebuilds={}",
-                 quantape_test::num(hessErr, 2), cache.rebuilds());
+                 quantape::util::num(hessErr, 2), cache.rebuilds());
 
     // timing: cached vs uncached hessian
     HestonStanFunctor functor{&model, 1.0};
@@ -190,8 +191,8 @@ void testPrimalCache() {
         cached += us(t0, t1);
     }
     QTA_LOG_INFO("test", "  timings: stan hessian plain {} us, primal-cached {} us ({}x)",
-                 quantape_test::num(plain / reps, 1), quantape_test::num(cached / reps, 1),
-                 quantape_test::num(plain / cached, 1));
+                 quantape::util::num(plain / reps, 1), quantape::util::num(cached / reps, 1),
+                 quantape::util::num(plain / cached, 1));
 }
 
 void testTiming() {
@@ -227,7 +228,7 @@ void testTiming() {
     QTA_LOG_INFO("test",
                  "  timings: stan gradient (var, value+grad build) {} us, "
                  "stan hessian (fvar<var>, value+grad+hess build) {} us",
-                 quantape_test::num(gradUs / reps, 1), quantape_test::num(hessUs / reps, 1));
+                 quantape::util::num(gradUs / reps, 1), quantape::util::num(hessUs / reps, 1));
 }
 
 } // namespace

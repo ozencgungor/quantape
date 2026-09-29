@@ -1,5 +1,6 @@
 // test_daycount.cpp — convention values and the day-count cache contract
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include "quantape/datetime/DayCounter.h"
 
 #include <cmath>

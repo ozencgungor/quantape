@@ -38,7 +38,8 @@
 #include <string>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 using stan::math::fvar;
 using stan::math::var;
@@ -553,13 +554,13 @@ int main() {
 
         // First order
         auto fo = tp.computeGreeks(*pricer, market_data, n_rates, n_vols);
-        QTA_LOG_INFO("test", "  PV = {}", quantape_test::num(fo.pv, 6));
+        QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fo.pv, 6));
 
         std::string greeks;
         for (int i = 0; i < fo.greeks.size(); ++i) {
             if (i)
                 greeks += ", ";
-            greeks += quantape_test::num(fo.greeks(i), 6);
+            greeks += quantape::util::num(fo.greeks(i), 6);
         }
         QTA_LOG_INFO("test", "  Greeks: [{}]", greeks);
 
@@ -569,7 +570,7 @@ int main() {
         for (int i = 0; i < so.hessian.rows(); ++i) {
             std::string row = "    [";
             for (int j = 0; j < so.hessian.cols(); ++j)
-                row += ' ' + quantape_test::num(so.hessian(i, j), 4);
+                row += ' ' + quantape::util::num(so.hessian(i, j), 4);
             row += " ]";
             QTA_LOG_INFO("test", "{}", row);
         }
@@ -577,12 +578,12 @@ int main() {
         // Verify gradient consistency
         double max_grad_diff = (fo.greeks - so.greeks).cwiseAbs().maxCoeff();
         QTA_LOG_INFO("test", "  Max |gradient_1st - gradient_2nd|: {}",
-                     quantape_test::num(max_grad_diff, 2));
+                     quantape::util::num(max_grad_diff, 2));
 
         // Verify Hessian symmetry
         double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
         QTA_LOG_INFO("test", "  Hessian symmetry check: {}\n",
-                     quantape_test::num(max_sym, 2));
+                     quantape::util::num(max_sym, 2));
     }
 
     // ── Timing comparison ──
@@ -599,8 +600,8 @@ int main() {
         auto t2 = bench_us([&]() { tp.computeHessian(*pricer, market_data, n_rates, n_vols); }, N);
 
         QTA_LOG_INFO("test", "  {:<35}{:>10} us{:>10} us{:>8}x", pricer->name,
-                     quantape_test::num(t1, 3), quantape_test::num(t2, 3),
-                     quantape_test::num(t2 / t1, 1));
+                     quantape::util::num(t1, 3), quantape::util::num(t2, 3),
+                     quantape::util::num(t2 / t1, 1));
     }
 
     // ── Sparse Hessian demo ──
@@ -611,13 +612,13 @@ int main() {
     for (int i = 0; i < sparse.hessian.rows(); ++i) {
         std::string row = "    [";
         for (int j = 0; j < sparse.hessian.cols(); ++j)
-            row += ' ' + quantape_test::num(sparse.hessian(i, j), 4);
+            row += ' ' + quantape::util::num(sparse.hessian(i, j), 4);
         row += " ]";
         QTA_LOG_INFO("test", "{}", row);
     }
     QTA_LOG_INFO(
         "test", "  (Saves {}% of Hessian columns)",
-        quantape_test::num((1 - (double)rate_indices.size() / market_data.size()) * 100, 4));
+        quantape::util::num((1 - (double)rate_indices.size() / market_data.size()) * 100, 4));
 
     // ── Architecture diagram ──
     QTA_LOG_INFO("test", "\n── Architecture ──\n");

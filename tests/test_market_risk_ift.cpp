@@ -29,7 +29,10 @@
 #include <stdexcept>
 #include <vector>
 
-#include "TestSupport.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+using quantape::util::checkClose;
+using quantape::util::isFiniteBitwise;
 
 using quantape::math::Bounds;
 using quantape::math::CalibrationJacobians;
@@ -39,21 +42,7 @@ using quantape::math::StopCriteria;
 
 namespace {
 
-bool isFiniteBitwise(double x) {
-    std::uint64_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(double));
-    return ((bits >> 52) & 0x7FFULL) != 0x7FFULL;
-}
 
-void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isFiniteBitwise(got) || !isFiniteBitwise(expected) ||
-        !(std::fabs(got - expected) <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} got={} expected={} err={} tol={}", label,
-                      quantape_test::num(got, 12), quantape_test::num(expected, 12),
-                      quantape_test::num(std::fabs(got - expected), 3), quantape_test::num(tol, 3));
-        std::exit(1);
-    }
-}
 
 // ── Scalar-generic undiscounted Black-Scholes call (drift mu as r) ──
 
@@ -229,7 +218,7 @@ void testSingleQuoteChain() {
     checkClose("single-quote IFT vs bump-recalibrate", risk(0), fd, 1e-6);
     QTA_LOG_INFO("test",
                  "  [ok] single quote: KKT/inst agree, instrument exact, vs FD ({} vs {})",
-                 quantape_test::num(risk(0), 9), quantape_test::num(fd, 9));
+                 quantape::util::num(risk(0), 9), quantape::util::num(fd, 9));
 }
 
 // ── Gate 12: two-quote chain (S0 and sigma) ──
@@ -349,8 +338,8 @@ void testBestFitWeighted() {
     QTA_LOG_INFO("test",
                  "  [ok] best fit (3 quotes, weights): max |KKT-FD|={}, |inst-FD|={}; "
                  "timing warm KKT {} us vs instrument {} us (m=2, nI=3)",
-                 quantape_test::num(maxKktErr, 3), quantape_test::num(maxInstErr, 3),
-                 quantape_test::num(kktUs), quantape_test::num(instUs));
+                 quantape::util::num(maxKktErr, 3), quantape::util::num(maxInstErr, 3),
+                 quantape::util::num(kktUs), quantape::util::num(instUs));
 }
 
 // ── End-to-end: SDE gradient (S5) -> IFT chain (S5d) ──
@@ -415,8 +404,8 @@ void testSdeChain() {
     const double tol = 0.02 * std::fabs(analytic) + 5.0 * estimate.stdErrors(2) / vega1;
     checkClose("SDE -> IFT chain", risk(0), analytic, tol);
     QTA_LOG_INFO("test", "  [ok] SDE gradient -> IFT: dV/da={} (analytic {}, se {})",
-                 quantape_test::num(risk(0), 6), quantape_test::num(analytic, 6),
-                 quantape_test::num(estimate.stdErrors(2) / vega1, 2));
+                 quantape::util::num(risk(0), 6), quantape::util::num(analytic, 6),
+                 quantape::util::num(estimate.stdErrors(2) / vega1, 2));
 }
 
 } // namespace
