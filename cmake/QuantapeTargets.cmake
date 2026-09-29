@@ -48,7 +48,18 @@ function(quantape_enable_stan target)
 endfunction()
 
 # Register a test executable with CTest (executables remain runnable directly).
+#
+# Tests are numerical loops and run far too slowly unoptimized, so they are
+# built with -O2 in every configuration (uniformly, via this helper). The
+# library, tools and examples follow the build configuration exactly.
 function(quantape_register_test target)
+    if(QUANTAPE_TEST_OPTIMIZATION)
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /O2)
+        else()
+            target_compile_options(${target} PRIVATE -O2)
+        endif()
+    endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
 

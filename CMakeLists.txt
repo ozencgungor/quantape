@@ -11,10 +11,31 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ----------------------------------------------------------------------------
+# Build types: Debug (default) and Release are the supported configurations.
+# Debug: -g, no optimization (debugger-friendly). Release: -O3 -DNDEBUG plus
+# -march=native below. -ffast-math is deliberately absent: it breaks the IEEE
+# semantics (NaN/inf, signed zero, reassociation) the AD stack relies on.
+# ----------------------------------------------------------------------------
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+add_compile_options($<$<CONFIG:Release>:-march=native>)
+
 option(QUANTAPE_BUILD_EXAMPLES "Build example executables" ON)
 option(QUANTAPE_BUILD_TOOLS "Build command-line tools" ON)
 option(QUANTAPE_BUILD_TESTS "Build test executables" ON)
-option(QUANTAPE_BUILD_BENCHMARKS "Build benchmark executables" ON)
+# Benchmarks measure optimized code, so they default ON only for Release.
+if(NOT DEFINED QUANTAPE_BUILD_BENCHMARKS)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(QUANTAPE_BUILD_BENCHMARKS ON CACHE BOOL "Build benchmark executables")
+    else()
+        set(QUANTAPE_BUILD_BENCHMARKS OFF CACHE BOOL "Build benchmark executables")
+    endif()
+endif()
+option(QUANTAPE_TEST_OPTIMIZATION
+       "Build tests with -O2 in every configuration (numerical loops)" ON)
 option(QUANTAPE_ENABLE_LOGGING "Build with quill-based logging (macros become no-ops when OFF)" ON)
 set(QUANTAPE_LOG_COMPILE_LEVEL "" CACHE STRING
     "Compile-time log level: TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL (default: TRACE in Debug, INFO otherwise)")
@@ -170,13 +191,12 @@ endif()
 
 # ============================================================================
 # Compiler options
+#
+# Debug and Release are the supported configurations (defined at the top of
+# this file); a target's optimization follows its configuration. Tests are the
+# single documented exception: quantape_register_test adds a uniform -O2 in
+# every configuration because the numerical test loops are impractical at -O0.
 # ============================================================================
-
-# Optimization ONLY in Release builds. Debug stays -O0/-g so lldb shows
-# real locals instead of "optimized out".
-# -ffast-math is deliberately absent: it disables IEEE semantics (NaN/inf,
-# signed zero, reassociation) that the AD stack and no-arbitrage checks rely on.
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -Rpass=loop-vectorize")
 
 # ============================================================================
 # Summary
