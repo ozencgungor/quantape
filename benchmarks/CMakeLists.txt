@@ -5,6 +5,10 @@
 add_executable(bench_sobol bench_sobol.cpp)
 target_link_libraries(bench_sobol PRIVATE quantape TBB::tbb)
 
+add_executable(bench_daycount bench_daycount.cpp)
+target_link_libraries(bench_daycount PRIVATE quantape_log quantape_format)
+quantape_set_warnings(bench_daycount)
+
 add_executable(bench_sde bench_sde.cpp)
 target_link_libraries(bench_sde PRIVATE quantape TBB::tbb)
 quantape_enable_stan_defs(bench_sde)

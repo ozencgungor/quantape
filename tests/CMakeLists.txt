@@ -36,6 +36,14 @@ target_link_libraries(test_number_format PRIVATE quantape)
 quantape_set_warnings(test_number_format)
 quantape_register_test(test_number_format)
 
+# --- Time --------------------------------------------------------------------
+foreach(_test test_date test_daycount test_calendar test_schedule)
+    add_executable(${_test} ${_test}.cpp)
+    target_link_libraries(${_test} PRIVATE quantape_log quantape_format)
+    quantape_set_warnings(${_test})
+    quantape_register_test(${_test})
+endforeach()
+
 # --- Core library ------------------------------------------------------------
 foreach(_test test_math test_solvers test_interpolation test_markets)
     add_executable(${_test} ${_test}.cpp)
