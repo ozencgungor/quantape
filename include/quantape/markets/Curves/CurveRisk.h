@@ -29,10 +29,10 @@ namespace quantape::markets {
  * per-curve partial transform (parents frozen); the full stack derivative
  * adds the tree pass implemented in `StackRisk`.
  *
- * Capability notes: in-range risk weights are unavailable for MonotoneCubic
- * and HymanSpline (they throw); extrapolated and stencil-based queries fall
- * back to finite differences, and cross-currency rows are finite-difference
- * based.
+ * Capability notes: in-range risk weights are analytic for Linear, Akima,
+ * TensionSpline and MixedLinearCubic, while MonotoneCubic and HymanSpline
+ * throw. Extrapolated weights are analytic for every scheme. Cross-currency
+ * rows are finite-difference based.
  */
 
 namespace detail {

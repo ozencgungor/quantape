@@ -1,7 +1,9 @@
 #ifndef CUBIC_INTERPOLATION_H
 #define CUBIC_INTERPOLATION_H
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -344,6 +346,22 @@ private:
         return smooth ? smoothAbs(x) : absImpl(x);
     }
 
+    /// Secant gap for the Akima weights with a scale-aware round-off floor:
+    /// mathematically tied secants can still differ by a few ulps, and the
+    /// `abs` kink there would pin the AD adjoint to one side of the kink.
+    /// Snapping the gap to an exact zero (with no derivative) makes near-ties
+    /// follow the same tie rule as exact ties on every scalar path.
+    template <typename T>
+    static T secantGap(const T& lhs, const T& rhs) {
+        const double a = primalOf(lhs);
+        const double b = primalOf(rhs);
+        const double scale = std::max(std::max(std::abs(a), std::abs(b)), 1.0);
+        if (std::abs(a - b) <= 64.0 * std::numeric_limits<double>::epsilon() * scale) {
+            return T(0.0);
+        }
+        return lhs - rhs;
+    }
+
     // ── Derivative approximation schemes (static, scalar-generic) ──
     // All five run for double, DoubleT (coefficient path), and ProbeDual
     // (branch-pinned linearization). Branch conditions always use primalOf.
@@ -441,63 +459,67 @@ private:
             return computeParabolicDerivatives(n, dx, S, smooth);
         }
 
+        // Standard Akima weights are absolute secant differences. The two
+        // one-sided end stencils extend the secant sequence with
+        //   s_{-1} = 2 s_0 - s_1,      s_{-2} = 3 s_0 - 2 s_1,
+        //   s_{m}  = 2 s_{m-1} - s_{m-2}, s_{m+1} = 3 s_{m-1} - 2 s_{m-2},
+        // where m = n - 1 is the secant count. Tied adjacent secants make
+        // both weights vanish; the tie fallback averages the two node
+        // secants, which keeps the primal value and the AD adjoint finite.
+        // All branch decisions read the primal only, so the AD paths stay
+        // primal-pinned for var and fvar<var>.
         std::vector<T> deriv(n);
 
-        T w1 = weightAbs(S[1] - S[0], smooth);
-        T w2 = weightAbs(2.0 * S[0] * S[1] - 4.0 * S[0] * S[0] * S[1], smooth);
-        if (primalOf(w1 + w2) == 0.0) {
-            deriv[0] = S[0];
-        } else {
-            deriv[0] = (w1 * 2.0 * S[0] * S[1] + w2 * S[0]) / (w1 + w2);
-        }
-
-        w1 = weightAbs(S[2] - S[1], smooth);
-        w2 = weightAbs(S[0] - 2.0 * S[0] * S[1], smooth);
-        if (primalOf(w1 + w2) == 0.0) {
-            deriv[1] = S[1];
-        } else {
-            deriv[1] = (w1 * S[0] + w2 * S[1]) / (w1 + w2);
-        }
-
-        for (size_t i = 2; i < n - 2; ++i) {
-            double si_m2 = primalOf(S[i - 2]);
-            double si_m1 = primalOf(S[i - 1]);
-            double si = primalOf(S[i]);
-            double si_p1 = primalOf(S[i + 1]);
-
-            if ((si_m2 == si_m1) && (si != si_p1)) {
-                deriv[i] = S[i - 1];
-            } else if ((si_m2 != si_m1) && (si == si_p1)) {
-                deriv[i] = S[i];
-            } else if (si == si_m1) {
-                deriv[i] = S[i];
-            } else if ((si_m2 == si_m1) && (si_m1 != si) && (si == si_p1)) {
-                deriv[i] = (S[i - 1] + S[i]) / 2.0;
+        {
+            const T s0 = S[0];
+            const T s1 = S[1];
+            const T sLeft = T(2.0) * s0 - s1;              // s_{-1}
+            const T sLeftLeft = T(3.0) * s0 - T(2.0) * s1; // s_{-2}
+            T w1 = weightAbs(secantGap(s1, s0), smooth);
+            T w2 = weightAbs(secantGap(sLeft, sLeftLeft), smooth);
+            if (primalOf(w1 + w2) == 0.0) {
+                deriv[0] = (sLeft + s0) / 2.0;
             } else {
-                w1 = weightAbs(S[i + 1] - S[i], smooth);
-                w2 = weightAbs(S[i - 1] - S[i - 2], smooth);
-                if (primalOf(w1 + w2) == 0.0) {
-                    deriv[i] = (S[i - 1] + S[i]) / 2.0;
-                } else {
-                    deriv[i] = (w1 * S[i - 1] + w2 * S[i]) / (w1 + w2);
-                }
+                deriv[0] = (w1 * sLeft + w2 * s0) / (w1 + w2);
+            }
+            w1 = weightAbs(secantGap(S[2], s1), smooth);
+            w2 = weightAbs(secantGap(s0, sLeft), smooth);
+            if (primalOf(w1 + w2) == 0.0) {
+                deriv[1] = (s0 + s1) / 2.0;
+            } else {
+                deriv[1] = (w1 * s0 + w2 * s1) / (w1 + w2);
             }
         }
 
-        w1 = weightAbs(2.0 * S[n - 2] * S[n - 3] - S[n - 2], smooth);
-        w2 = weightAbs(S[n - 3] - S[n - 4], smooth);
-        if (primalOf(w1 + w2) == 0.0) {
-            deriv[n - 2] = S[n - 2];
-        } else {
-            deriv[n - 2] = (w1 * S[n - 3] + w2 * S[n - 2]) / (w1 + w2);
+        for (size_t i = 2; i + 2 < n; ++i) {
+            T w1 = weightAbs(secantGap(S[i + 1], S[i]), smooth);
+            T w2 = weightAbs(secantGap(S[i - 1], S[i - 2]), smooth);
+            if (primalOf(w1 + w2) == 0.0) {
+                deriv[i] = (S[i - 1] + S[i]) / 2.0;
+            } else {
+                deriv[i] = (w1 * S[i - 1] + w2 * S[i]) / (w1 + w2);
+            }
         }
 
-        w1 = weightAbs(4.0 * S[n - 2] * S[n - 2] * S[n - 3] - 2.0 * S[n - 2] * S[n - 3], smooth);
-        w2 = weightAbs(S[n - 2] - S[n - 3], smooth);
-        if (primalOf(w1 + w2) == 0.0) {
-            deriv[n - 1] = S[n - 2];
-        } else {
-            deriv[n - 1] = (w1 * S[n - 2] + w2 * 2.0 * S[n - 2] * S[n - 3]) / (w1 + w2);
+        {
+            const T sLast = S[n - 2];
+            const T sPrev = S[n - 3];
+            const T sRight = T(2.0) * sLast - sPrev;               // s_{m}
+            const T sRightRight = T(3.0) * sLast - T(2.0) * sPrev; // s_{m+1}
+            T w1 = weightAbs(secantGap(sRight, sLast), smooth);
+            T w2 = weightAbs(secantGap(sPrev, S[n - 4]), smooth);
+            if (primalOf(w1 + w2) == 0.0) {
+                deriv[n - 2] = (sPrev + sLast) / 2.0;
+            } else {
+                deriv[n - 2] = (w1 * sPrev + w2 * sLast) / (w1 + w2);
+            }
+            w1 = weightAbs(secantGap(sRightRight, sRight), smooth);
+            w2 = weightAbs(secantGap(sLast, sPrev), smooth);
+            if (primalOf(w1 + w2) == 0.0) {
+                deriv[n - 1] = (sLast + sRight) / 2.0;
+            } else {
+                deriv[n - 1] = (w1 * sLast + w2 * sRight) / (w1 + w2);
+            }
         }
 
         return deriv;

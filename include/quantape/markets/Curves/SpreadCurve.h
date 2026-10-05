@@ -21,8 +21,24 @@ namespace quantape::markets {
  * @tparam DoubleT Numeric type (`double` or an AD scalar).
  * @tparam ParentT Parent curve type (`DiscountCurve` or another `SpreadCurve`).
  */
+
+namespace detail {
+
+/// Scalar gate for the spread parent: the parent's declared zero-rate scalar
+/// type must equal the child's. `SpreadCurve` asserts this so a mixed-scalar
+/// parent fails at class instantiation with a direct message instead of
+/// inside `zero()`.
+template <typename DoubleT, typename ParentT>
+concept SpreadParentScalar =
+    std::same_as<std::decay_t<decltype(std::declval<const ParentT&>().zero(0.0))>, DoubleT>;
+
+} // namespace detail
+
 template <typename DoubleT, typename ParentT = DiscountCurve<DoubleT>>
 class SpreadCurve {
+    static_assert(detail::SpreadParentScalar<DoubleT, ParentT>,
+                  "SpreadCurve: parent zero(0.0) scalar type must equal DoubleT");
+
 public:
     SpreadCurve(std::shared_ptr<const ParentT> parent, std::vector<double> times,
                 std::vector<DoubleT> spreads,
@@ -85,8 +101,10 @@ private:
 };
 
 /// Curves usable by pricing code (deterministic providers): both satisfy it.
-/// The decayed return type must equal `DoubleT` exactly, so a double-valued
-/// curve cannot silently drop the tape inside a `var` context.
+/// The check is signature-only: the declared decayed return types must equal
+/// `DoubleT` exactly. A class whose declared scalar is `DoubleT` but whose
+/// body mixes scalars still satisfies this concept and guards itself instead
+/// (see the `SpreadCurve` parent-scalar `static_assert`).
 template <typename P, typename DoubleT>
 concept CurveProvider = requires(const P& provider, double t1, double t2) {
     requires std::same_as<std::decay_t<decltype(provider.zero(t1))>, DoubleT>;

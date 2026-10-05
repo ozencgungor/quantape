@@ -47,7 +47,8 @@ auto hullWhiteFuturesAdjustment(const SigmaT& sigma, const MeanReversionT& meanR
         throw std::invalid_argument("hullWhiteFuturesAdjustment: negative expiry time");
     }
     using std::expm1;
-    using DoubleT = std::decay_t<decltype(startOverEndDiscount / accrual * sigma * sigma)>;
+    using DoubleT =
+        std::decay_t<decltype(startOverEndDiscount / accrual * sigma * sigma * meanReversion)>;
     const DoubleT scale = startOverEndDiscount / accrual;
     if (!(sigma > 0.0)) {
         return scale * DoubleT(0.0);

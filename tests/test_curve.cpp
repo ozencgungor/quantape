@@ -166,37 +166,46 @@ void testSpreadCurve() {
 }
 
 void testMultiCurveSet() {
-    auto usd = std::make_shared<DiscountCurve<double>>(makeLogDiscountCurve());
-    auto eur = std::make_shared<DiscountCurve<double>>(
+    auto usd = std::make_shared<const DiscountCurve<double>>(makeLogDiscountCurve());
+    auto eur = std::make_shared<const DiscountCurve<double>>(
         std::vector<double>{0.0, 1.0, 2.0}, std::vector<double>{0.0, 0.02, 0.025},
         InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
-    markets::MultiCurveSet<double> set;
     const markets::CurveKey usdKey{"USD", markets::CurveRole::Discount,
                                    datetime::Period(1, datetime::TimeUnit::Days), "USD"};
-    set.add(usdKey, usd);
-    set.add(markets::CurveKey{"EUR", markets::CurveRole::Discount,
-                              datetime::Period(1, datetime::TimeUnit::Days), "EUR"},
-            eur);
+    const markets::CurveKey eurKey{"EUR", markets::CurveRole::Discount,
+                                   datetime::Period(1, datetime::TimeUnit::Days), "EUR"};
+    const markets::CurveHandle::Ptr usdHandle = markets::CurveHandle::make(usd);
+    const markets::CurveHandle::Ptr eurHandle = markets::CurveHandle::make(eur);
+    markets::MultiCurveSet set = markets::MultiCurveSet::fromBuiltCurves(
+        {markets::BuiltCurve{usdKey, markets::CurveRole::Discount, usdHandle},
+         markets::BuiltCurve{eurKey, markets::CurveRole::Discount, eurHandle}});
     CHECK(set.size() == 2);
-    CHECK(set.discountCurve("USD").get() == usd.get());
-    CHECK(set.discountCurve("EUR").get() == eur.get());
+    CHECK(set.discountCurve("USD").get() == usdHandle.get());
+    CHECK(set.discountCurve("EUR").get() == eurHandle.get());
+
+    // The full key, including role and collateral, resolves the entry.
+    const markets::BuiltCurve& usdEntry = set.find(usdKey);
+    CHECK(usdEntry.key == usdKey);
+    CHECK(usdEntry.role == markets::CurveRole::Discount);
+    CHECK(usdEntry.curve.get() == usdHandle.get());
 
     // Lookups hand out references into stable storage: hold them across adds.
-    const markets::MultiCurveSet<double>::CurveEntry& usdEntry = set.find(usdKey);
     const auto& usdCurveRef = set.discountCurve("USD");
 
-    auto usdEurCollateral = std::make_shared<DiscountCurve<double>>(
+    auto usdEurCollateral = std::make_shared<const DiscountCurve<double>>(
         std::vector<double>{0.0, 1.0, 2.0}, std::vector<double>{0.0, 0.015, 0.02},
         InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
-    set.add(markets::CurveKey{"USD", markets::CurveRole::Discount,
-                              datetime::Period(1, datetime::TimeUnit::Days), "EUR"},
-            usdEurCollateral);
+    const markets::CurveHandle::Ptr usdEurHandle = markets::CurveHandle::make(usdEurCollateral);
+    set.add(
+        markets::BuiltCurve{markets::CurveKey{"USD", markets::CurveRole::Discount,
+                                              datetime::Period(1, datetime::TimeUnit::Days), "EUR"},
+                            markets::CurveRole::Discount, usdEurHandle});
     CHECK(set.size() == 3);
 
     // References captured before the insert still address the same entries.
     CHECK(&set.find(usdKey) == &usdEntry);
     CHECK(&set.discountCurve("USD", "USD") == &usdCurveRef);
-    CHECK(usdEntry.discount.get() == usd.get());
+    CHECK(usdEntry.curve.get() == usdHandle.get());
 
     // The one-argument lookup is ambiguous now that USD has two discount curves.
     bool threw = false;
@@ -208,13 +217,13 @@ void testMultiCurveSet() {
     CHECK(threw);
 
     // Collateral selects the exact curve.
-    CHECK(set.discountCurve("USD", "USD").get() == usd.get());
-    CHECK(set.discountCurve("USD", "EUR").get() == usdEurCollateral.get());
-    CHECK(set.discountCurve("EUR", "EUR").get() == eur.get());
+    CHECK(set.discountCurve("USD", "USD").get() == usdHandle.get());
+    CHECK(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
+    CHECK(set.discountCurve("EUR", "EUR").get() == eurHandle.get());
 
     threw = false;
     try {
-        set.add(usdKey, usd);
+        set.add(markets::BuiltCurve{usdKey, markets::CurveRole::Discount, usdHandle});
     } catch (const std::invalid_argument&) {
         threw = true;
     }
@@ -232,6 +241,26 @@ void testMultiCurveSet() {
     try {
         (void)set.discountCurve("USD", "JPY");
     } catch (const std::out_of_range&) {
+        threw = true;
+    }
+    CHECK(threw);
+
+    // A forecast entry with the same currency is not mistaken for a discount
+    // curve because the role is part of the lookup.
+    auto forecast = std::make_shared<const markets::SpreadCurve<double>>(
+        usd, std::vector<double>{0.0, 1.0, 2.0, 3.0}, std::vector<double>{0.0, 1e-4, 2e-4, 3e-4});
+    const markets::CurveKey forecastKey{"USD", markets::CurveRole::Forecast,
+                                        datetime::Period(3, datetime::TimeUnit::Months), "USD"};
+    set.add(markets::BuiltCurve{forecastKey, markets::CurveRole::Forecast,
+                                markets::CurveHandle::make(forecast)});
+    CHECK(set.find(forecastKey).role == markets::CurveRole::Forecast);
+    CHECK(set.discountCurve("USD", "USD").get() == usdHandle.get());
+    CHECK(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
+
+    threw = false;
+    try {
+        set.add(markets::BuiltCurve{forecastKey, markets::CurveRole::Forecast, nullptr});
+    } catch (const std::invalid_argument&) {
         threw = true;
     }
     CHECK(threw);
@@ -389,6 +418,81 @@ void testMixedLinearCubic() {
     }
 }
 
+/// Extrapolated node weights must be the scheme-consistent terminal-slope
+/// derivative, checked against a central-difference reconstruction for every
+/// scheme (including the pinned Hermite schemes).
+void testExtrapolatedRiskWeights() {
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
+    const std::vector<double> zeros{0.0, 0.03, 0.0335, 0.036, 0.04};
+    const double t = 4.0 + 2.0 / 365.0;
+    const struct {
+        InterpolationSpace space;
+        InterpolationScheme scheme;
+        double tension;
+        int switchIndex;
+    } cases[] = {
+        {InterpolationSpace::Zero, InterpolationScheme::Linear, 0.0, 1},
+        {InterpolationSpace::Zero, InterpolationScheme::Akima, 0.0, 1},
+        {InterpolationSpace::Zero, InterpolationScheme::TensionSpline, 8.0, 1},
+        {InterpolationSpace::Zero, InterpolationScheme::MonotoneCubic, 0.0, 1},
+        {InterpolationSpace::Zero, InterpolationScheme::HymanSpline, 0.0, 1},
+        {InterpolationSpace::Zero, InterpolationScheme::MixedLinearCubic, 0.0, 2},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::Linear, 0.0, 1},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::Akima, 0.0, 1},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::TensionSpline, 8.0, 1},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::MonotoneCubic, 0.0, 1},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::HymanSpline, 0.0, 1},
+        {InterpolationSpace::LogDiscount, InterpolationScheme::MixedLinearCubic, 0.0, 3},
+    };
+    for (const auto& c : cases) {
+        const DiscountCurve<double> curve(times, zeros, c.space, c.scheme, c.tension,
+                                          c.switchIndex);
+        std::vector<double> weights;
+        curve.zeroNodeWeights(t, weights);
+        const double epsilon = 1e-6;
+        for (std::size_t j = 1; j < zeros.size(); ++j) {
+            std::vector<double> plus = zeros;
+            std::vector<double> minus = zeros;
+            plus[j] += epsilon;
+            minus[j] -= epsilon;
+            const DiscountCurve<double> up(times, plus, c.space, c.scheme, c.tension,
+                                           c.switchIndex);
+            const DiscountCurve<double> down(times, minus, c.space, c.scheme, c.tension,
+                                             c.switchIndex);
+            const double fd = (up.zero(t) - down.zero(t)) / (2.0 * epsilon);
+            util::checkClose("extrapolated risk weight", weights[j], fd, 1e-7);
+        }
+    }
+}
+
+/// Tied adjacent secants must not inflate the analytic in-range risk weights:
+/// the coefficient Jacobian uses the same standard Akima weights as the
+/// primal, so `zeroNodeWeights` matches central differences on a near-flat
+/// Zero-space node set. The difference step stays small because it straddles
+/// the tie kink, which adds an O(step) term.
+void testTiedSecantRiskWeights() {
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
+    const std::vector<double> zeros{0.0, 0.030, 0.033, 0.036};
+    for (const auto scheme : {InterpolationScheme::Akima, InterpolationScheme::MixedLinearCubic}) {
+        const DiscountCurve<double> curve(times, zeros, InterpolationSpace::Zero, scheme);
+        const double epsilon = 1e-8;
+        for (const double t : {0.5, 1.5, 2.5}) {
+            std::vector<double> weights;
+            curve.zeroNodeWeights(t, weights);
+            for (std::size_t j = 1; j < zeros.size(); ++j) {
+                std::vector<double> plus = zeros;
+                std::vector<double> minus = zeros;
+                plus[j] += epsilon;
+                minus[j] -= epsilon;
+                const DiscountCurve<double> up(times, plus, InterpolationSpace::Zero, scheme);
+                const DiscountCurve<double> down(times, minus, InterpolationSpace::Zero, scheme);
+                const double fd = (up.zero(t) - down.zero(t)) / (2.0 * epsilon);
+                util::checkClose("tied-secant risk weight", weights[j], fd, 1e-6);
+            }
+        }
+    }
+}
+
 void testTurnOverlay() {
     static_assert(markets::CurveProvider<markets::TurnOverlay<double>, double>);
     auto base = std::make_shared<DiscountCurve<double>>(
@@ -414,6 +518,99 @@ void testTurnOverlay() {
         threw = true;
     }
     CHECK(threw);
+}
+
+void testTurnOverlayNodeProvider() {
+    static_assert(markets::CurveNodeProvider<markets::TurnOverlay<double>>);
+    static_assert(
+        markets::CurveNodeProvider<markets::TurnOverlay<double, markets::SpreadCurve<double>>>);
+
+    auto base = std::make_shared<const DiscountCurve<double>>(makeLogDiscountCurve());
+    const std::vector<markets::TurnOverlay<double>::Turn> turns{{0.5, 4.0e-4}, {2.0, 1.0e-3}};
+    const std::vector<markets::TurnOverlay<double>::Bump> bumps{{1.0, 1.25, 5.0e-4}};
+    const markets::TurnOverlay<double> overlay(base, turns, bumps);
+
+    // Native grid: reserved fixed origin, then turn amplitudes, then bumps.
+    CHECK(overlay.size() == 4);
+    CHECK(overlay.times() == std::vector<double>({0.0, 0.5, 2.0, 1.0}));
+    CHECK(overlay.zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
+
+    // The analytic weights are the amplitude sensitivities: check them against
+    // central differences at points before, inside and after every parameter.
+    const auto shiftedZero = [&](std::size_t node, double delta, double t) {
+        std::vector<markets::TurnOverlay<double>::Turn> shiftedTurns = turns;
+        std::vector<markets::TurnOverlay<double>::Bump> shiftedBumps = bumps;
+        if (node < 1 + turns.size()) {
+            shiftedTurns[node - 1].second += delta;
+        } else {
+            shiftedBumps[node - 1 - turns.size()].amplitude += delta;
+        }
+        const markets::TurnOverlay<double> shifted(base, shiftedTurns, shiftedBumps);
+        return shifted.zero(t);
+    };
+    const double step = 1e-7;
+    for (const double t : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 2.0, 2.5, 4.0}) {
+        std::vector<double> weights;
+        overlay.zeroNodeWeights(t, weights);
+        CHECK(weights.size() == overlay.size());
+        CHECK(weights[0] == 0.0);
+        for (std::size_t node = 1; node < weights.size(); ++node) {
+            const double fd =
+                (shiftedZero(node, step, t) - shiftedZero(node, -step, t)) / (2.0 * step);
+            util::checkClose("turn overlay amplitude weight", weights[node], fd, 1e-6);
+        }
+    }
+
+    // The type-erased handle path (`buildStack`'s parent resolution) exposes
+    // the same parameter grid and its own pricing surface.
+    const markets::CurveHandle::Ptr handle =
+        markets::CurveHandle::make(std::make_shared<const markets::TurnOverlay<double>>(overlay));
+    CHECK(handle->size() == overlay.size());
+    CHECK(handle->times() == overlay.times());
+    CHECK(handle->zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
+    std::vector<double> handleWeights;
+    std::vector<double> overlayWeights;
+    handle->zeroNodeWeights(1.1, handleWeights);
+    overlay.zeroNodeWeights(1.1, overlayWeights);
+    CHECK(handleWeights == overlayWeights);
+
+    // A forecast curve bootstrapped over the overlay as its parent provider
+    // reprices its synthetic FRA exactly.
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::DayCounter act360(datetime::DayCount::Actual360);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const DiscountCurve<double> dateBase(reference,
+                                         {reference.plusMonths(6), reference.plusYears(1),
+                                          reference.plusYears(2), reference.plusYears(3)},
+                                         zeroDc, {0.02, 0.025, 0.03, 0.035},
+                                         InterpolationSpace::LogDiscount,
+                                         InterpolationScheme::Linear);
+    const auto dateBaseShared = std::make_shared<const DiscountCurve<double>>(dateBase);
+    const double turnTime = datetime::yearFraction(reference, reference.plusYears(1), zeroDc);
+    const double windowBegin = datetime::yearFraction(reference, reference.plusMonths(11), zeroDc);
+    const double windowEnd = datetime::yearFraction(reference, reference.plusMonths(13), zeroDc);
+    const auto pricedOverlay = std::make_shared<const markets::TurnOverlay<double>>(
+        dateBaseShared, std::vector<markets::TurnOverlay<double>::Turn>{{turnTime, 1.0e-3}},
+        std::vector<markets::TurnOverlay<double>::Bump>{{windowBegin, windowEnd, 5.0e-4}});
+
+    markets::ForecastPillar pillar;
+    pillar.kind = markets::ForecastPillar::Kind::Fra;
+    pillar.start = reference.plusMonths(10);
+    pillar.maturity = reference.plusMonths(14);
+    pillar.calendar = calendar;
+    pillar.quoteDayCounter = act360;
+    const double startTime = datetime::yearFraction(reference, pillar.start, zeroDc);
+    const double endTime = datetime::yearFraction(reference, pillar.maturity, zeroDc);
+    const double tau = datetime::yearFraction(pillar.start, pillar.maturity, act360);
+    pillar.quote =
+        (pricedOverlay->discount(startTime) / pricedOverlay->discount(endTime) - 1.0) / tau;
+    const markets::SpreadCurve<double, markets::TurnOverlay<double>> forecast =
+        markets::bootstrapForecastCurve(pricedOverlay, nullptr, reference, zeroDc,
+                                        markets::InterpolationScheme::Linear, {pillar});
+    util::checkClose("overlay parent bootstrap reprice",
+                     markets::impliedSimpleForward(forecast, pillar, reference, zeroDc),
+                     pillar.quote, 1e-10);
 }
 
 void testNonAct365ZeroClock() {
@@ -770,7 +967,10 @@ int main() {
     testMonotoneCubic();
     testParametricCurve();
     testMixedLinearCubic();
+    testExtrapolatedRiskWeights();
+    testTiedSecantRiskWeights();
     testTurnOverlay();
+    testTurnOverlayNodeProvider();
     testNonAct365ZeroClock();
     testSchemeSpaceMatrix();
     testErrors();

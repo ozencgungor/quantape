@@ -150,6 +150,31 @@ void testGradients() {
                  meanReversionAdjoint);
 }
 
+/// A `var` mean reversion with a double sigma and bond ratio must promote the
+/// returned scalar to AD and differentiate the mean-reversion branch.
+void testMeanReversionOnlyGradient() {
+    stan::math::recover_memory();
+    const double sigma = 0.012;
+    var meanReversion = 0.045;
+    const double expiry = 2.0;
+    const double accrual = 0.25;
+    const double ratio = std::exp(0.02 * accrual);
+    var adjustment =
+        markets::hullWhiteFuturesAdjustment(sigma, meanReversion, expiry, accrual, ratio);
+    stan::math::grad(adjustment.vi_);
+    const auto primal = [&](double meanReversionValue) {
+        return markets::hullWhiteFuturesAdjustment(sigma, meanReversionValue, expiry, accrual,
+                                                   ratio);
+    };
+    const double epsilon = 1e-6;
+    const double fd =
+        (primal(meanReversion.val() + epsilon) - primal(meanReversion.val() - epsilon)) /
+        (2.0 * epsilon);
+    util::checkClose("hw mean-reversion-only gradient", meanReversion.adj(), fd, 1e-6);
+    QTA_LOG_INFO("test", "hw mean-reversion-only gradient={} fd={}", meanReversion.adj(), fd);
+    stan::math::recover_memory();
+}
+
 } // namespace
 
 int main() {
@@ -157,6 +182,7 @@ int main() {
     testZeroVolatility();
     testSeriesContinuity();
     testGradients();
+    testMeanReversionOnlyGradient();
     QTA_LOG_INFO("test", "test_hull_white_convexity: ok");
     return 0;
 }

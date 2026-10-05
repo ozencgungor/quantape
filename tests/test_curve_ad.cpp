@@ -21,7 +21,9 @@
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/StackRisk.h"
 #include "quantape/markets/Curves/TurnOverlay.h"
+#include "quantape/markets/Curves/TurnOverlayRisk.h"
 #include "quantape/math/Interpolations/HymanSplineInterpolation.h"
+#include "quantape/math/Interpolations/MonotoneCubicInterpolation.h"
 #include "quantape/math/Solvers/BrentSolver.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
 #include "quantape/util/Check.h"
@@ -48,6 +50,12 @@ using markets::DiscountCurve;
 using markets::InterpolationScheme;
 using markets::InterpolationSpace;
 using stan::math::var;
+
+// Mixed-scalar spread parents are refused by the class guard; the predicate
+// behind that static_assert must report the mismatch at compile time.
+static_assert(markets::detail::SpreadParentScalar<var, DiscountCurve<var>>);
+static_assert(markets::detail::SpreadParentScalar<double, DiscountCurve<double>>);
+static_assert(!markets::detail::SpreadParentScalar<double, DiscountCurve<var>>);
 
 /// Deterministic net quote delta of the portfolio risk table, asserted after
 /// the table is written. The 1M curve now carries the 2Y-60Y long end and the
@@ -95,6 +103,50 @@ void testMonotoneCubicVarValue() {
                                           InterpolationScheme::MonotoneCubic);
     util::checkClose("monotone var value", curve.discount(1.5).val(), reference.discount(1.5),
                      1e-12);
+}
+
+/// The risk weights of an AD curve stay primal-pinned: the coefficient
+/// Jacobian is built once from the primal node values, so the AD curve returns
+/// the same weights as the double curve.
+void testVarRiskWeightsMatchDouble() {
+    stan::math::recover_memory();
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
+    const std::vector<double> nodeZeros{0.0, 0.03, 0.0335, 0.036, 0.04};
+    const struct {
+        InterpolationScheme scheme;
+        double tension;
+        int switchIndex;
+    } cases[] = {
+        {InterpolationScheme::Linear, 0.0, 1},
+        {InterpolationScheme::Akima, 0.0, 1},
+        {InterpolationScheme::TensionSpline, 8.0, 1},
+        {InterpolationScheme::MixedLinearCubic, 0.0, 2},
+    };
+    for (const auto& c : cases) {
+        std::vector<var> zeros(nodeZeros.begin(), nodeZeros.end());
+        const DiscountCurve<var> adCurve(times, zeros, InterpolationSpace::LogDiscount, c.scheme,
+                                         c.tension, c.switchIndex);
+        const DiscountCurve<double> doubleCurve(times, nodeZeros, InterpolationSpace::LogDiscount,
+                                                c.scheme, c.tension, c.switchIndex);
+        for (const double t : {0.37, 1.5, 3.6}) {
+            std::vector<double> adWeights;
+            std::vector<double> doubleWeights;
+            adCurve.spaceValueWeights(t, adWeights);
+            doubleCurve.spaceValueWeights(t, doubleWeights);
+            for (std::size_t i = 0; i < adWeights.size(); ++i) {
+                util::checkClose("ad/double space weights", adWeights[i], doubleWeights[i], 1e-15);
+            }
+        }
+        std::vector<double> adWeights;
+        std::vector<double> doubleWeights;
+        adCurve.zeroNodeWeights(5.3, adWeights);
+        doubleCurve.zeroNodeWeights(5.3, doubleWeights);
+        for (std::size_t i = 0; i < adWeights.size(); ++i) {
+            util::checkClose("ad/double extrapolated weights", adWeights[i], doubleWeights[i],
+                             1e-15);
+        }
+    }
+    stan::math::recover_memory();
 }
 
 void testHymanSplineCurveVar() {
@@ -235,6 +287,136 @@ void testSpreadCurveVarGradient() {
     }
 }
 
+/// The Steffen node slopes are pinned from the primal values, so the
+/// reverse-mode gradient must match central differences of the Hermite basis
+/// evaluated with those pinned slopes.
+void testMonotoneCubicPinnedGradient() {
+    stan::math::recover_memory();
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
+    const std::vector<double> baseZeros{0.0, 0.028, 0.033, 0.036, 0.04};
+    const double horizon = 2.3;
+    std::vector<var> zeros(baseZeros.begin(), baseZeros.end());
+    var objective = 0.0;
+    {
+        const DiscountCurve<var> curve(times, zeros, InterpolationSpace::LogDiscount,
+                                       InterpolationScheme::MonotoneCubic);
+        objective = curve.discount(horizon) + curve.zero(horizon) + curve.forward(1.0, horizon);
+    }
+    objective.grad();
+
+    std::vector<double> baseValues(times.size());
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        baseValues[i] = baseZeros[i] * times[i];
+    }
+    const math::MonotoneCubicInterpolation<double> pinned(times, baseValues);
+    const std::vector<double>& slopes = pinned.slopes();
+    const auto pinnedSpaceValue = [&](const std::vector<double>& values, double t) {
+        std::size_t i = 0;
+        while (i + 2 < times.size() && t >= times[i + 1]) {
+            ++i;
+        }
+        const double h = times[i + 1] - times[i];
+        const double u = (t - times[i]) / h;
+        const double u2 = u * u;
+        const double u3 = u2 * u;
+        const double h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
+        const double h10 = u3 - 2.0 * u2 + u;
+        const double h01 = -2.0 * u3 + 3.0 * u2;
+        const double h11 = u3 - u2;
+        return h00 * values[i] + h10 * h * slopes[i] + h01 * values[i + 1] +
+               h11 * h * slopes[i + 1];
+    };
+    const auto pinnedObjective = [&](const std::vector<double>& nodeZeros) {
+        std::vector<double> values(times.size());
+        for (std::size_t i = 0; i < times.size(); ++i) {
+            values[i] = nodeZeros[i] * times[i];
+        }
+        const double atHorizon = pinnedSpaceValue(values, horizon);
+        const double atOne = pinnedSpaceValue(values, 1.0);
+        return std::exp(-atHorizon) + atHorizon / horizon + (atHorizon - atOne) / (horizon - 1.0);
+    };
+    const double epsilon = 1e-6;
+    for (std::size_t j = 1; j < baseZeros.size(); ++j) {
+        std::vector<double> plus = baseZeros;
+        std::vector<double> minus = baseZeros;
+        plus[j] += epsilon;
+        minus[j] -= epsilon;
+        const double fd = (pinnedObjective(plus) - pinnedObjective(minus)) / (2.0 * epsilon);
+        util::checkClose("monotone cubic pinned gradient", zeros[j].adj(), fd, 1e-6);
+    }
+    stan::math::recover_memory();
+}
+
+/// Tied adjacent secants (a flat segment beside a steep one) make the
+/// standard Akima weights vanish; the tie fallback must keep the reverse-mode
+/// gradient finite and consistent with central differences. The difference
+/// step is kept small because the finite difference straddles the tie kink,
+/// which adds an O(step) term.
+void testTiedSecantGradient(InterpolationScheme scheme) {
+    stan::math::recover_memory();
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
+    const std::vector<double> baseZeros{0.0, 0.030, 0.033, 0.036};
+    std::vector<var> zeros(baseZeros.begin(), baseZeros.end());
+    var objective = 0.0;
+    {
+        const DiscountCurve<var> curve(times, zeros, InterpolationSpace::Zero, scheme);
+        objective =
+            curve.zero(1.5) + curve.zero(3.6) + curve.discount(1.5) + curve.forward(0.7, 2.4);
+    }
+    objective.grad();
+    const auto primal = [&](const std::vector<double>& nodeZeros) {
+        const DiscountCurve<double> curve(times, nodeZeros, InterpolationSpace::Zero, scheme);
+        return curve.zero(1.5) + curve.zero(3.6) + curve.discount(1.5) + curve.forward(0.7, 2.4);
+    };
+    const double epsilon = 1e-8;
+    for (std::size_t j = 1; j < baseZeros.size(); ++j) {
+        std::vector<double> plus = baseZeros;
+        std::vector<double> minus = baseZeros;
+        plus[j] += epsilon;
+        minus[j] -= epsilon;
+        const double fd = (primal(plus) - primal(minus)) / (2.0 * epsilon);
+        util::checkClose("tied-secant curve gradient", zeros[j].adj(), fd, 1e-6);
+    }
+    stan::math::recover_memory();
+}
+
+/// The spread curve interpolates its nodes in Zero space, so a near-flat
+/// spread node set hits the same tied-secant Akima weights.
+void testSpreadCurveTiedSecantGradient() {
+    stan::math::recover_memory();
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
+    const std::vector<double> parentZeros{0.0, 0.02, 0.025, 0.03};
+    const std::vector<double> baseSpreads{0.0, 0.030, 0.033, 0.036};
+    std::vector<var> parentNodes(parentZeros.begin(), parentZeros.end());
+    std::vector<var> spreads(baseSpreads.begin(), baseSpreads.end());
+    auto parent = std::make_shared<const DiscountCurve<var>>(
+        times, parentNodes, InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    var objective = 0.0;
+    {
+        const markets::SpreadCurve<var> curve(parent, times, spreads, InterpolationScheme::Akima);
+        objective =
+            curve.zero(1.5) + curve.zero(3.6) + curve.discount(1.5) + curve.forward(0.7, 2.4);
+    }
+    objective.grad();
+    const auto primal = [&](const std::vector<double>& spreadNodes) {
+        auto base = std::make_shared<const DiscountCurve<double>>(
+            times, parentZeros, InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+        const markets::SpreadCurve<double> curve(base, times, spreadNodes,
+                                                 InterpolationScheme::Akima);
+        return curve.zero(1.5) + curve.zero(3.6) + curve.discount(1.5) + curve.forward(0.7, 2.4);
+    };
+    const double epsilon = 1e-8;
+    for (std::size_t j = 1; j < baseSpreads.size(); ++j) {
+        std::vector<double> plus = baseSpreads;
+        std::vector<double> minus = baseSpreads;
+        plus[j] += epsilon;
+        minus[j] -= epsilon;
+        const double fd = (primal(plus) - primal(minus)) / (2.0 * epsilon);
+        util::checkClose("tied-secant spread gradient", spreads[j].adj(), fd, 1e-6);
+    }
+    stan::math::recover_memory();
+}
+
 void testTurnOverlayVarGradient() {
     static_assert(markets::CurveProvider<markets::TurnOverlay<var>, var>);
     static_assert(
@@ -289,6 +471,47 @@ void testTurnOverlayVarGradient() {
         const double fd = (primal(baseZeros, plus) - primal(baseZeros, minus)) / (2.0 * epsilon);
         util::checkClose("turn overlay spread var gradient", spreads[j].adj(), fd, 1e-6);
     }
+}
+
+/// Native overlay node weights are the exogenous amplitude sensitivities, so
+/// reverse-mode adjoints of `zero(t)` with respect to `var` amplitudes must
+/// equal `zeroNodeWeights` on the matching double overlay.
+void testTurnOverlayNodeWeightsAd() {
+    static_assert(markets::CurveNodeProvider<markets::TurnOverlay<double>>);
+    static_assert(markets::CurveProvider<markets::TurnOverlay<var>, var>);
+    stan::math::recover_memory();
+    const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
+    const std::vector<double> baseZeros{0.0, 0.02, 0.025, 0.03};
+    const double turnTime = 0.5;
+    const double bumpBegin = 1.0;
+    const double bumpEnd = 1.25;
+    const double probe = 2.5;
+    var turnAmplitude = 4.0e-4;
+    var bumpAmplitude = 5.0e-4;
+    var objective = 0.0;
+    {
+        const auto base = std::make_shared<const DiscountCurve<var>>(
+            times, std::vector<var>(baseZeros.begin(), baseZeros.end()),
+            InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+        const markets::TurnOverlay<var> overlay(
+            base, std::vector<std::pair<double, var>>{{turnTime, turnAmplitude}},
+            std::vector<markets::TurnOverlay<var>::Bump>{{bumpBegin, bumpEnd, bumpAmplitude}});
+        objective = overlay.zero(probe);
+    }
+    objective.grad();
+
+    const auto baseDouble = std::make_shared<const DiscountCurve<double>>(
+        times, baseZeros, InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    const markets::TurnOverlay<double> overlayDouble(
+        baseDouble, std::vector<std::pair<double, double>>{{turnTime, 4.0e-4}},
+        std::vector<markets::TurnOverlay<double>::Bump>{{bumpBegin, bumpEnd, 5.0e-4}});
+    std::vector<double> weights;
+    overlayDouble.zeroNodeWeights(probe, weights);
+    CHECK(weights.size() == 3);
+    CHECK(weights[0] == 0.0);
+    util::checkClose("turn node weight AD", turnAmplitude.adj(), weights[1], 1e-12);
+    util::checkClose("bump node weight AD", bumpAmplitude.adj(), weights[2], 1e-12);
+    stan::math::recover_memory();
 }
 
 /// Exogenous turn risk through the overlay amplitudes: the overlay keeps the
@@ -992,10 +1215,9 @@ void testPortfolioRiskTable() {
     std::vector<TableRow> rows;
     for (std::size_t k = 0; k < entries.size(); ++k) {
         const mk::StackRiskEntry& entry = entries[k];
-        for (std::size_t j = 0; j < entry.quoteDeltas.size(); ++j) {
-            rows.push_back(TableRow{std::string(mk::curveRoleName(entry.quoteRoles[j])),
-                                    curveNames[k] + " " + entry.quoteLabels[j],
-                                    entry.quoteDeltas[j]});
+        for (const mk::QuotePoint& point : entry.points) {
+            rows.push_back(TableRow{std::string(mk::curveRoleName(point.role)),
+                                    curveNames[k] + " " + point.label, point.delta});
         }
     }
     for (std::size_t k = 0; k < overlayTurn.size(); ++k) {
@@ -1071,7 +1293,9 @@ void testPortfolioRiskTable() {
         const std::vector<mk::StackRiskEntry> transformed = mk::stackQuoteRisk(graded, kReference);
         std::vector<double> flat;
         for (const mk::StackRiskEntry& entry : transformed) {
-            flat.insert(flat.end(), entry.quoteDeltas.begin(), entry.quoteDeltas.end());
+            for (const mk::QuotePoint& point : entry.points) {
+                flat.push_back(point.delta);
+            }
         }
         return flat;
     };
@@ -1106,7 +1330,7 @@ void testPortfolioRiskTable() {
             if (!directPillars[k - 1][j].turnPillar) {
                 continue;
             }
-            directTurn += entries[k].quoteDeltas[j];
+            directTurn += entries[k].points[j].delta;
             turnQuote = directPillars[k - 1][j].quote;
         }
         double weight = 0.0;
@@ -1142,8 +1366,8 @@ void testPortfolioRiskTable() {
     const std::vector<double> controlIdentity = transformNodeGradient(controlNodes);
     double controlTurn = 0.0;
     for (std::size_t k = 1; k < 5; ++k) {
-        for (std::size_t j = 0; j < entries[k].quoteDeltas.size(); ++j) {
-            if (entries[k].quoteRoles[j] == mk::CurveRole::TurnOverlay) {
+        for (std::size_t j = 0; j < entries[k].points.size(); ++j) {
+            if (entries[k].points[j].role == mk::CurveRole::TurnOverlay) {
                 const std::size_t global = curveStartRow[k] + j;
                 controlTurn += controlIdentity[global];
             }
@@ -1156,8 +1380,8 @@ void testPortfolioRiskTable() {
     // side, and the overlay amplitude rows add the exogenous turn factors.
     double stackTotal = 0.0;
     for (const mk::StackRiskEntry& entry : entries) {
-        for (const double delta : entry.quoteDeltas) {
-            stackTotal += delta;
+        for (const mk::QuotePoint& point : entry.points) {
+            stackTotal += point.delta;
         }
     }
     double bucketTotal = 0.0;
@@ -1245,9 +1469,15 @@ int main() {
     testDiscountCurveVarGradient(InterpolationSpace::LogDiscount,
                                  InterpolationScheme::TensionSpline, 8.0);
     testMonotoneCubicVarValue();
+    testMonotoneCubicPinnedGradient();
+    testVarRiskWeightsMatchDouble();
     testHymanSplineCurveVar();
     testSpreadCurveVarGradient();
+    testTiedSecantGradient(InterpolationScheme::Akima);
+    testTiedSecantGradient(InterpolationScheme::MixedLinearCubic);
+    testSpreadCurveTiedSecantGradient();
     testTurnOverlayVarGradient();
+    testTurnOverlayNodeWeightsAd();
     testTurnOverlayRiskAdjoint();
     testTurnOverlayRiskMetadata();
     testTurnKnotCurveVarGradient();
