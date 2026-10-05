@@ -5,6 +5,7 @@
 #include "quantape/math/LinearAlgebra/DenseSolve.h"
 #include "quantape/util/Check.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -251,6 +252,8 @@ void testXccyJointFallbackAndRisk() {
     };
     const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005, 5);
     const DiscountCurve<double> xccyTarget = buildCurve(0.030, 0.0005, 3);
+    const DiscountCurve<double> foreignForecast = buildCurve(0.024, 0.0007, 3);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004, 5);
     auto foreignBase = std::make_shared<DiscountCurve<double>>(buildCurve(0.025, 0.0005, 3));
     const markets::SpreadCurve<double> spreadTarget(
         foreignBase, std::vector<double>{0.0, 1.0, 2.0, 3.0},
@@ -268,7 +271,7 @@ void testXccyJointFallbackAndRisk() {
         cp.basis.calendar = calendar;
         cp.xccy.spread =
             markets::impliedXccyBasisSpread(xccyTarget, spreadTarget, domesticDiscount,
-                                            domesticDiscount, cp.xccy, reference, zeroDayCounter);
+                                            domesticForecast, cp.xccy, reference, zeroDayCounter);
         cp.basis.spread = markets::impliedBasisSpread(spreadTarget, cp.basis, reference,
                                                       zeroDayCounter, &xccyTarget);
         coupledPillars.push_back(cp);
@@ -279,7 +282,7 @@ void testXccyJointFallbackAndRisk() {
     math::FixedPointOptions options;
     options.maxPasses = 1;
     const markets::XccyCoupledResult fallback = markets::bootstrapXccyCoupled(
-        domesticDiscount, domesticDiscount, foreignBase, reference, zeroDayCounter,
+        domesticDiscount, domesticForecast, foreignBase, reference, zeroDayCounter,
         InterpolationSpace::LogDiscount, InterpolationScheme::Linear, coupledPillars, 1e-14, 0.0, 1,
         options);
     CHECK(fallback.usedJointFallback);
@@ -293,7 +296,7 @@ void testXccyJointFallbackAndRisk() {
     // Jacobian rows vs central FD.
     std::vector<double> f;
     std::vector<double> c;
-    markets::assembleXccyJacobian(xccyTarget, spreadTarget, domesticDiscount, domesticDiscount,
+    markets::assembleXccyJacobian(xccyTarget, spreadTarget, domesticDiscount, domesticForecast,
                                   xccyPillars, reference, f, c);
     const std::size_t n = xccyPillars.size();
     const std::size_t m = domesticDiscount.size() - 1;
@@ -312,7 +315,7 @@ void testXccyJointFallbackAndRisk() {
                                      domesticDiscount.switchIndex());
     };
     const auto quote = [&](const DiscountCurve<double>& fc, const DiscountCurve<double>& dc) {
-        return markets::impliedXccyBasisSpread(fc, spreadTarget, dc, domesticDiscount,
+        return markets::impliedXccyBasisSpread(fc, spreadTarget, dc, domesticForecast,
                                                xccyPillars[0], reference, zeroDayCounter);
     };
     util::checkClose("xccy foreign row FD", f[0],
@@ -370,7 +373,7 @@ void testXccyJointFallbackAndRisk() {
     }
     const std::vector<double> crossColumn = quantape::math::solveDense(f, n, rhs);
     const auto refit = [&](const DiscountCurve<double>& root) {
-        return markets::bootstrapXccyDiscountCurve(root, domesticDiscount, spreadTarget, reference,
+        return markets::bootstrapXccyDiscountCurve(root, domesticForecast, spreadTarget, reference,
                                                    zeroDayCounter, InterpolationSpace::LogDiscount,
                                                    InterpolationScheme::Linear, xccyPillars);
     };
@@ -392,64 +395,54 @@ void testXccyJointFallbackAndRisk() {
         pillar.quote = markets::impliedQuote(pillar, reference, domesticDiscount);
         rootPillars.push_back(pillar);
     }
-    markets::XccyChildInput<markets::SpreadCurve<double>, DiscountCurve<double>> child;
+    markets::XccyChildInput<DiscountCurve<double>, DiscountCurve<double>> child;
     child.foreignForecastRole = markets::CurveRole::TenorBasis;
     child.domesticForecastRole = markets::CurveRole::IborOisBasis;
     child.foreignDiscount = &fallback.foreignDiscount;
     child.pillars = xccyPillars;
     child.dVdForeignZeros.assign(fallback.foreignDiscount.size(), 0.0);
     child.dVdForeignZeros[1] = 1.0;
-    child.foreignForecast.emplace(spreadTarget);
-    child.domesticForecast.emplace(domesticDiscount);
+    child.foreignForecast = &foreignForecast;
+    child.domesticForecast = &domesticForecast;
     std::vector<std::variant<decltype(child)>> children{child};
     std::vector<double> dVdRoot(domesticDiscount.size(), 0.0);
     dVdRoot[1] = 1.0;
     const std::vector<markets::StackRiskEntry> entries =
         markets::stackQuoteRiskXccy(domesticDiscount, rootPillars, dVdRoot, children, reference);
     CHECK(entries.size() == 4);
-    CHECK(entries[0].quoteDeltas.size() == rootPillars.size());
-    CHECK(entries[1].quoteDeltas.size() == n);
-    CHECK(entries[2].quoteDeltas.size() == 3); // funder: foreign forecast spread nodes
-    CHECK(entries[3].quoteDeltas.size() == domesticDiscount.size() - 1);
+    CHECK(entries[0].points.size() == rootPillars.size());
+    CHECK(entries[1].points.size() == n);
+    CHECK(entries[2].points.size() == 3); // funder: foreign forecast spread nodes
+    CHECK(entries[3].points.size() == domesticDiscount.size() - 1);
     for (const markets::StackRiskEntry& entry : entries) {
-        for (const double value : entry.quoteDeltas) {
-            CHECK(std::isfinite(value));
-        }
+        entry.validate();
     }
 
-    // Every xccy path fills per-quote roles, buckets and labels, and the role
-    // buckets add back to the full table.
-    CHECK(entries[0].quoteRoles.size() == entries[0].quoteDeltas.size());
-    CHECK(entries[1].quoteRoles.size() == entries[1].quoteDeltas.size());
-    CHECK(entries[2].quoteRoles.size() == entries[2].quoteDeltas.size());
-    CHECK(entries[3].quoteRoles.size() == entries[3].quoteDeltas.size());
-    for (const markets::StackRiskEntry& entry : entries) {
-        CHECK(entry.quoteBuckets.size() == entry.quoteDeltas.size());
-        CHECK(entry.quoteLabels.size() == entry.quoteDeltas.size());
+    // Every xccy path reports under its own role, with maturity labels and
+    // buckets in pillar order; the role buckets add back to the full table.
+    CHECK(entries[0].points[0].role == markets::CurveRole::Discount);
+    CHECK(entries[1].points[0].role == markets::CurveRole::XccyBasis);
+    CHECK(entries[2].points[0].role == markets::CurveRole::TenorBasis);
+    CHECK(entries[3].points[0].role == markets::CurveRole::IborOisBasis);
+    for (const markets::QuotePoint& point : entries[1].points) {
+        CHECK(point.role == markets::CurveRole::XccyBasis);
     }
-    CHECK(entries[0].quoteRoles[0] == markets::CurveRole::Discount);
-    CHECK(entries[1].quoteRoles[0] == markets::CurveRole::XccyBasis);
-    CHECK(entries[2].quoteRoles[0] == markets::CurveRole::TenorBasis);
-    CHECK(entries[3].quoteRoles[0] == markets::CurveRole::IborOisBasis);
-    for (const markets::CurveRole role : entries[1].quoteRoles) {
-        CHECK(role == markets::CurveRole::XccyBasis);
+    for (const markets::QuotePoint& point : entries[2].points) {
+        CHECK(point.role == markets::CurveRole::TenorBasis);
     }
-    for (const markets::CurveRole role : entries[2].quoteRoles) {
-        CHECK(role == markets::CurveRole::TenorBasis);
+    for (const markets::QuotePoint& point : entries[3].points) {
+        CHECK(point.role == markets::CurveRole::IborOisBasis);
     }
-    for (const markets::CurveRole role : entries[3].quoteRoles) {
-        CHECK(role == markets::CurveRole::IborOisBasis);
-    }
-    CHECK(entries[1].quoteBuckets[0] == "1Y");
-    CHECK(entries[1].quoteLabels[0] == "Xccy 1Y");
-    CHECK(entries[2].quoteBuckets[0] == "1Y");
-    CHECK(entries[2].quoteLabels[0] == "XccyFwd 1Y");
-    CHECK(entries[3].quoteBuckets[0] == "1Y");
-    CHECK(entries[3].quoteLabels[0] == "XccyDom 1Y");
+    CHECK(entries[1].points[0].bucket == "1Y");
+    CHECK(entries[1].points[0].label == "Xccy 1Y");
+    CHECK(entries[2].points[0].bucket == "1Y");
+    CHECK(entries[2].points[0].label == "XccyFwd 1Y");
+    CHECK(entries[3].points[0].bucket == "1Y");
+    CHECK(entries[3].points[0].label == "XccyDom 1Y");
     double tableTotal = 0.0;
     for (const markets::StackRiskEntry& entry : entries) {
-        for (const double delta : entry.quoteDeltas) {
-            tableTotal += delta;
+        for (const markets::QuotePoint& point : entry.points) {
+            tableTotal += point.delta;
         }
     }
     double roleTotal = 0.0;
@@ -469,6 +462,697 @@ void testXccyJointFallbackAndRisk() {
     CHECK(sawXccyBasis);
     CHECK(sawTenorBasis);
     CHECK(sawIborOisBasis);
+
+    // The wrapper is the general engine: a hand-built unified input list (the
+    // root, the xccy child, and the two forecast factor blocks) must produce
+    // the same entry metadata and deltas to solver precision.
+    {
+        const markets::StackCurveView::Ptr rootView =
+            markets::StackCurveView::make(domesticDiscount);
+        const markets::StackCurveView::Ptr foreignForecastView =
+            markets::StackCurveView::make(*child.foreignForecast);
+        const markets::StackCurveView::Ptr domesticForecastView =
+            markets::StackCurveView::make(*child.domesticForecast);
+        std::vector<markets::StackCurveInput> unified(4);
+        unified[0].curve = rootView;
+        unified[0].role = markets::CurveRole::Discount;
+        unified[0].discountPillars = rootPillars;
+        unified[0].dVdNodes = dVdRoot;
+        unified[1].curve = markets::StackCurveView::make(*child.foreignDiscount);
+        unified[1].role = child.role;
+        unified[1].xccyPillars = child.pillars;
+        unified[1].xccy =
+            markets::XccyRowInput{foreignForecastView, domesticForecastView, rootView};
+        unified[1].dVdNodes = child.dVdForeignZeros;
+        unified[2].curve = foreignForecastView;
+        unified[2].role = child.foreignForecastRole;
+        unified[2].factor = markets::StackFactorInput{
+            "XccyFwd", markets::forecastNodeDayCounter(*child.foreignForecast)};
+        unified[2].dVdNodes.assign(foreignForecastView->size(), 0.0);
+        unified[3].curve = domesticForecastView;
+        unified[3].role = child.domesticForecastRole;
+        unified[3].factor = markets::StackFactorInput{
+            "XccyDom", markets::forecastNodeDayCounter(*child.domesticForecast)};
+        unified[3].dVdNodes.assign(domesticForecastView->size(), 0.0);
+        const std::vector<markets::StackRiskEntry> general =
+            markets::stackQuoteRisk(unified, reference);
+        CHECK(general.size() == entries.size());
+        for (std::size_t k = 0; k < general.size(); ++k) {
+            CHECK(general[k].role == entries[k].role);
+            CHECK(general[k].points.size() == entries[k].points.size());
+            for (std::size_t j = 0; j < general[k].points.size(); ++j) {
+                CHECK(general[k].points[j].label == entries[k].points[j].label);
+                CHECK(general[k].points[j].bucket == entries[k].points[j].bucket);
+                CHECK(general[k].points[j].year == entries[k].points[j].year);
+                CHECK(general[k].points[j].role == entries[k].points[j].role);
+                util::checkClose("xccy wrapper vs general engine", general[k].points[j].delta,
+                                 entries[k].points[j].delta, 1e-10);
+            }
+        }
+
+        // Cross-currency gamma now runs on the analytic rows: the general
+        // curvature path differentiates the assembled Jacobian once. A zero
+        // HZeta still leaves the bootstrap-curvature correction, and the
+        // result must be a finite, symmetric matrix.
+        const std::size_t unifiedDim = unified[0].curve->size() + unified[1].curve->size() +
+                                       unified[2].curve->size() + unified[3].curve->size() - 4;
+        const std::vector<double> zeroHessian(unifiedDim * unifiedDim, 0.0);
+        const markets::StackQuoteGamma xccyGamma =
+            markets::stackQuoteGamma(unified, zeroHessian, reference);
+        CHECK(xccyGamma.dim == unifiedDim);
+        for (std::size_t a = 0; a < unifiedDim; ++a) {
+            for (std::size_t b = a + 1; b < unifiedDim; ++b) {
+                util::checkClose("xccy gamma symmetry", xccyGamma.at(a, b), xccyGamma.at(b, a),
+                                 1e-12);
+            }
+        }
+
+        // An xccy row reference that is not a block of the input list is
+        // rejected instead of silently binding to an equal-valued curve.
+        {
+            std::vector<markets::StackCurveInput> detached = unified;
+            detached[1].xccy->foreignForecast =
+                markets::StackCurveView::make(fallback.foreignSpread);
+            bool referenceThrew = false;
+            try {
+                (void)markets::stackQuoteRisk(detached, reference);
+            } catch (const std::invalid_argument&) {
+                referenceThrew = true;
+            }
+            CHECK(referenceThrew);
+        }
+
+        // Delta regression: the block-elimination order the wrapper used
+        // historically (child solve, root absorption, forecast residuals)
+        // recovers the same root, child and factor deltas.
+        const std::size_t nRef = xccyPillars.size();
+        const std::size_t mRef = rootPillars.size();
+        std::vector<double> fRootRef;
+        std::vector<double> scratchRef;
+        markets::assembleQuoteJacobian(domesticDiscount, rootPillars, reference, fRootRef,
+                                       scratchRef);
+        std::vector<double> fRef;
+        std::vector<double> crossRef;
+        std::vector<double> fwdRef;
+        std::vector<double> domRef;
+        markets::assembleXccyJacobianFull(*child.foreignDiscount, *child.foreignForecast,
+                                          domesticDiscount, *child.domesticForecast, xccyPillars,
+                                          reference, fRef, crossRef, fwdRef, domRef);
+        std::vector<double> fChildTranspose(nRef * nRef);
+        for (std::size_t j = 0; j < nRef; ++j) {
+            for (std::size_t i = 0; i < nRef; ++i) {
+                fChildTranspose[i * nRef + j] = fRef[j * nRef + i];
+            }
+        }
+        std::vector<double> childG(nRef);
+        for (std::size_t i = 0; i < nRef; ++i) {
+            childG[i] = child.dVdForeignZeros[i + 1];
+        }
+        const std::vector<double> xChildRef = math::solveDense(fChildTranspose, nRef, childG);
+        std::vector<double> rootG(mRef);
+        for (std::size_t j = 0; j < mRef; ++j) {
+            rootG[j] = dVdRoot[j + 1];
+        }
+        for (std::size_t i = 0; i < nRef; ++i) {
+            for (std::size_t j = 0; j < mRef; ++j) {
+                rootG[j] -= crossRef[i * mRef + j] * xChildRef[i];
+            }
+        }
+        std::vector<double> fRootTranspose(mRef * mRef);
+        for (std::size_t j = 0; j < mRef; ++j) {
+            for (std::size_t i = 0; i < mRef; ++i) {
+                fRootTranspose[i * mRef + j] = fRootRef[j * mRef + i];
+            }
+        }
+        const std::vector<double> rootRef = math::solveDense(fRootTranspose, mRef, rootG);
+        for (std::size_t j = 0; j < mRef; ++j) {
+            util::checkClose("xccy root delta regression", entries[0].points[j].delta, rootRef[j],
+                             1e-10);
+        }
+        for (std::size_t i = 0; i < nRef; ++i) {
+            util::checkClose("xccy child delta regression", entries[1].points[i].delta,
+                             xChildRef[i], 1e-10);
+        }
+        for (std::size_t k = 0; k < entries[2].points.size(); ++k) {
+            double reference = 0.0;
+            for (std::size_t i = 0; i < nRef; ++i) {
+                reference -= fwdRef[i * entries[2].points.size() + k] * xChildRef[i];
+            }
+            util::checkClose("xccy fwd factor delta regression", entries[2].points[k].delta,
+                             reference, 1e-10);
+        }
+        for (std::size_t k = 0; k < entries[3].points.size(); ++k) {
+            double reference = 0.0;
+            for (std::size_t i = 0; i < nRef; ++i) {
+                reference -= domRef[i * entries[3].points.size() + k] * xChildRef[i];
+            }
+            util::checkClose("xccy dom factor delta regression", entries[3].points[k].delta,
+                             reference, 1e-10);
+        }
+    }
+
+    // Wrapper validation keeps the general engine's input contract: a wrong
+    // root sensitivity size, a root pillar count that misses the nodes, or a
+    // child without a foreign discount curve are all rejected.
+    {
+        const auto throwsInvalid = [](const auto& call) {
+            try {
+                call();
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+            return false;
+        };
+        const std::vector<std::variant<decltype(child)>> single{child};
+        std::vector<double> wrongRoot(dVdRoot.size() + 1, 0.0);
+        CHECK(throwsInvalid([&] {
+            (void)markets::stackQuoteRiskXccy(domesticDiscount, rootPillars, wrongRoot, single,
+                                              reference);
+        }));
+        const std::vector<markets::CurvePillar> shortPillars(rootPillars.begin(),
+                                                             rootPillars.end() - 1);
+        CHECK(throwsInvalid([&] {
+            (void)markets::stackQuoteRiskXccy(domesticDiscount, shortPillars, dVdRoot, single,
+                                              reference);
+        }));
+        auto broken = child;
+        broken.foreignDiscount = nullptr;
+        const std::vector<std::variant<decltype(child)>> brokenChildren{broken};
+        CHECK(throwsInvalid([&] {
+            (void)markets::stackQuoteRiskXccy(domesticDiscount, rootPillars, dVdRoot,
+                                              brokenChildren, reference);
+        }));
+    }
+}
+
+/// Analytic cross-currency rows against the finite-difference reference, for
+/// every referenced block: the leg discount curves, the forecast native nodes,
+/// a depth-2 foreign forecast chain and a domestic forecast parented on the
+/// domestic discount itself, with per-leg payment lags and stub schedules.
+void testXccyAnalyticRowsAgainstFiniteDifference() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope) {
+        const std::vector<datetime::Date> dates{reference.plusYears(1), reference.plusYears(2),
+                                                reference.plusYears(3), reference.plusYears(4)};
+        std::vector<double> zeros;
+        for (const datetime::Date& date : dates) {
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> foreignDiscount = buildCurve(0.030, 0.0006);
+    // The domestic discount object also parents the domestic forecast, so its
+    // block row carries both the discount and the forecast-parent sensitivity.
+    auto domesticParent = std::make_shared<DiscountCurve<double>>(buildCurve(0.040, 0.0005));
+    const std::vector<double> nodeTimes{0.0, 1.0, 2.0, 3.0, 4.0};
+    const markets::SpreadCurve<double> domesticForecast(
+        domesticParent, nodeTimes, std::vector<double>{0.0, 0.0003, 0.0004, 0.0005, 0.0006},
+        InterpolationScheme::Linear);
+    auto foreignBase = std::make_shared<DiscountCurve<double>>(buildCurve(0.025, 0.0007));
+    auto foreignParent = std::make_shared<markets::SpreadCurve<double>>(
+        foreignBase, nodeTimes, std::vector<double>{0.0, 0.0004, 0.0005, 0.0006, 0.0007},
+        InterpolationScheme::Linear);
+    const markets::SpreadCurve<double, markets::SpreadCurve<double>> foreignForecast(
+        foreignParent, nodeTimes, std::vector<double>{0.0, 0.0002, 0.0003, 0.0004, 0.0005},
+        InterpolationScheme::Linear);
+
+    const markets::StackCurveView::Ptr foreignDiscountView =
+        markets::StackCurveView::make(foreignDiscount);
+    const markets::StackCurveView::Ptr foreignForecastView =
+        markets::StackCurveView::make(foreignForecast);
+    const markets::StackCurveView::Ptr domesticDiscountView =
+        markets::StackCurveView::make(*domesticParent);
+    const markets::StackCurveView::Ptr domesticForecastView =
+        markets::StackCurveView::make(domesticForecast);
+
+    for (const bool spreadOnForeign : {true, false}) {
+        markets::XccyPillar pillar;
+        pillar.maturity = reference.plusYears(3);
+        pillar.foreignTenor = datetime::Period(7, datetime::TimeUnit::Months);
+        pillar.domesticTenor = datetime::Period(4, datetime::TimeUnit::Months);
+        pillar.foreignPaymentLag = 2;
+        pillar.domesticPaymentLag = 1;
+        pillar.foreignBusinessDayConvention = datetime::BusinessDayConvention::Following;
+        pillar.domesticBusinessDayConvention = datetime::BusinessDayConvention::ModifiedFollowing;
+        pillar.foreignCalendar = calendar;
+        pillar.domesticCalendar = calendar;
+        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.spreadOnForeignLeg = spreadOnForeign;
+        const std::vector<markets::XccyRowBlock> analytic = markets::xccySwapJacobianRowsView(
+            *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
+            *domesticForecastView, pillar, reference, zeroDc);
+        const std::vector<markets::XccyRowBlock> finiteDifference =
+            markets::xccySwapJacobianRowsViewFiniteDifference(
+                *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
+                *domesticForecastView, pillar, reference, zeroDc);
+        // Foreign discount, foreign forecast, two foreign ancestors, domestic
+        // discount (merged with the domestic forecast parent) and domestic
+        // forecast.
+        CHECK(analytic.size() == 6);
+        CHECK(finiteDifference.size() == analytic.size());
+        double maxRowDeviation = 0.0;
+        for (std::size_t b = 0; b < analytic.size(); ++b) {
+            CHECK(analytic[b].curve->identity() == finiteDifference[b].curve->identity());
+            CHECK(analytic[b].row.size() == finiteDifference[b].row.size());
+            for (std::size_t i = 0; i < analytic[b].row.size(); ++i) {
+                maxRowDeviation = std::max(
+                    maxRowDeviation, std::abs(analytic[b].row[i] - finiteDifference[b].row[i]));
+                util::checkClose("xccy analytic row vs FD", analytic[b].row[i],
+                                 finiteDifference[b].row[i], 1e-6);
+            }
+        }
+        QTA_LOG_INFO("test", "xccy analytic rows vs FD ({} blocks, spread-on-foreign={}): max {}",
+                     analytic.size(), spreadOnForeign, maxRowDeviation);
+        double foreignBaseRisk = 0.0;
+        double domesticDiscountRisk = 0.0;
+        for (const markets::XccyRowBlock& block : analytic) {
+            if (block.curve->identity() == foreignBase.get()) {
+                for (const double value : block.row) {
+                    foreignBaseRisk += std::abs(value);
+                }
+            }
+            if (block.curve->identity() == domesticDiscountView->identity()) {
+                for (const double value : block.row) {
+                    domesticDiscountRisk += std::abs(value);
+                }
+            }
+        }
+        CHECK(foreignBaseRisk > 1e-8);
+        CHECK(domesticDiscountRisk > 1e-8);
+    }
+}
+
+/// Xccy gamma against an independent finite difference of the deltas: the
+/// quote-space Hessian is compared with the central difference of
+/// `stackQuoteRisk` after bumping each root and xccy quote and re-bootstrapping
+/// the curve, with the quadratic value's node gradient re-evaluated at the
+/// rebuilt nodes.
+void testXccyGammaFiniteDifference() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope) {
+        const std::vector<datetime::Date> dates{reference.plusYears(1), reference.plusYears(2)};
+        std::vector<double> zeros;
+        for (const datetime::Date& date : dates) {
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> rootTarget = buildCurve(0.030, 0.0004);
+    std::vector<markets::CurvePillar> rootPillars;
+    for (int year = 1; year <= 2; ++year) {
+        markets::CurvePillar pillar;
+        pillar.maturity = reference.plusYears(year);
+        pillar.kind = markets::PillarKind::OisSwap;
+        pillar.quoteDayCounter = zeroDc;
+        pillar.calendar = calendar;
+        pillar.quote = markets::impliedQuote(pillar, reference, rootTarget);
+        rootPillars.push_back(pillar);
+    }
+    const auto bootstrapRoot = [&](const std::vector<markets::CurvePillar>& quotes) {
+        return std::make_shared<DiscountCurve<double>>(
+            markets::bootstrapDiscountCurve(reference, zeroDc, InterpolationSpace::LogDiscount,
+                                            InterpolationScheme::Linear, quotes));
+    };
+    std::shared_ptr<DiscountCurve<double>> rootPtr = bootstrapRoot(rootPillars);
+    const std::vector<double> forecastTimes{0.0, 1.0, 2.0};
+    const std::vector<double> forecastSpreads{0.0, 0.0008, 0.0011};
+    const auto makeForecast = [&](const std::shared_ptr<DiscountCurve<double>>& parent) {
+        return markets::SpreadCurve<double>(parent, forecastTimes, forecastSpreads,
+                                            InterpolationScheme::Linear);
+    };
+    // The foreign forecast is parented on the root object, so a root bump
+    // reaches the xccy rows through the forecast parent chain.
+    const markets::SpreadCurve<double> foreignForecast = makeForecast(rootPtr);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.041, 0.0003);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0005);
+    std::vector<markets::XccyPillar> xccyPillars;
+    for (int year = 1; year <= 2; ++year) {
+        markets::XccyPillar pillar;
+        pillar.maturity = reference.plusYears(year);
+        pillar.foreignTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        pillar.domesticTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        pillar.foreignCalendar = calendar;
+        pillar.domesticCalendar = calendar;
+        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.spread = markets::impliedXccyBasisSpread(
+            foreignTarget, foreignForecast, *rootPtr, domesticForecast, pillar, reference, zeroDc);
+        xccyPillars.push_back(pillar);
+    }
+    const auto bootstrapChild = [&](const DiscountCurve<double>& rootCurve,
+                                    const markets::SpreadCurve<double>& forecast,
+                                    const std::vector<markets::XccyPillar>& quotes) {
+        return markets::bootstrapXccyDiscountCurve(rootCurve, domesticForecast, forecast, reference,
+                                                   zeroDc, InterpolationSpace::LogDiscount,
+                                                   InterpolationScheme::Linear, quotes);
+    };
+    const DiscountCurve<double> childBase = bootstrapChild(*rootPtr, foreignForecast, xccyPillars);
+
+    const std::size_t m = rootPillars.size();
+    const std::size_t n = xccyPillars.size();
+    const std::size_t p = foreignForecast.size() - 1;
+    const std::size_t q = domesticForecast.size() - 1;
+    const std::size_t dim = m + n + p + q;
+    std::vector<double> g(dim, 0.0);
+    for (std::size_t i = 0; i < dim; ++i) {
+        g[i] = 0.01 + 0.003 * static_cast<double>(i);
+    }
+    std::vector<double> HZeta(dim * dim, 0.0);
+    for (std::size_t i = 0; i < dim; ++i) {
+        for (std::size_t j = 0; j < dim; ++j) {
+            HZeta[i * dim + j] =
+                0.02 * static_cast<double>(std::min(i, j) + 1) + (i == j ? 0.05 : 0.0);
+        }
+    }
+    const auto zetaAt =
+        [&](const DiscountCurve<double>& rootCurve, const DiscountCurve<double>& childCurve,
+            const markets::SpreadCurve<double>& fwdCurve, const DiscountCurve<double>& domCurve) {
+            std::vector<double> zeta;
+            zeta.reserve(dim);
+            for (std::size_t i = 1; i <= m; ++i) {
+                zeta.push_back(rootCurve.zeros()[i]);
+            }
+            for (std::size_t i = 1; i <= n; ++i) {
+                zeta.push_back(childCurve.zeros()[i]);
+            }
+            for (std::size_t i = 1; i <= p; ++i) {
+                zeta.push_back(fwdCurve.spreadNodes().zeros()[i]);
+            }
+            for (std::size_t i = 1; i <= q; ++i) {
+                zeta.push_back(domCurve.zeros()[i]);
+            }
+            return zeta;
+        };
+    const auto gradientAt = [&](const std::vector<double>& zeta) {
+        std::vector<double> nodeGradient(dim, 0.0);
+        for (std::size_t i = 0; i < dim; ++i) {
+            double sum = g[i];
+            for (std::size_t j = 0; j < dim; ++j) {
+                sum += HZeta[i * dim + j] * zeta[j];
+            }
+            nodeGradient[i] = sum;
+        }
+        return nodeGradient;
+    };
+    const auto buildInputs = [&](const std::shared_ptr<DiscountCurve<double>>& rootCurve,
+                                 const DiscountCurve<double>& childCurve,
+                                 const markets::SpreadCurve<double>& fwdCurve,
+                                 const DiscountCurve<double>& domCurve,
+                                 const std::vector<double>& nodeGradient) {
+        const markets::StackCurveView::Ptr rootView = markets::StackCurveView::make(*rootCurve);
+        const markets::StackCurveView::Ptr childView = markets::StackCurveView::make(childCurve);
+        const markets::StackCurveView::Ptr fwdView = markets::StackCurveView::make(fwdCurve);
+        const markets::StackCurveView::Ptr domView = markets::StackCurveView::make(domCurve);
+        std::vector<markets::StackCurveInput> inputs(4);
+        inputs[0].curve = rootView;
+        inputs[0].role = markets::CurveRole::Discount;
+        inputs[0].discountPillars = rootPillars;
+        inputs[0].dVdNodes.assign(rootView->size(), 0.0);
+        inputs[1].curve = childView;
+        inputs[1].role = markets::CurveRole::XccyBasis;
+        inputs[1].xccyPillars = xccyPillars;
+        inputs[1].xccy = markets::XccyRowInput{fwdView, domView, rootView};
+        inputs[1].dVdNodes.assign(childView->size(), 0.0);
+        inputs[2].curve = fwdView;
+        inputs[2].role = markets::CurveRole::Forecast;
+        inputs[2].factor =
+            markets::StackFactorInput{"XccyFwd", markets::forecastNodeDayCounter(fwdCurve)};
+        inputs[2].dVdNodes.assign(fwdView->size(), 0.0);
+        inputs[3].curve = domView;
+        inputs[3].role = markets::CurveRole::Forecast;
+        inputs[3].factor =
+            markets::StackFactorInput{"XccyDom", markets::forecastNodeDayCounter(domCurve)};
+        inputs[3].dVdNodes.assign(domView->size(), 0.0);
+        for (std::size_t i = 0; i < m; ++i) {
+            inputs[0].dVdNodes[i + 1] = nodeGradient[i];
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            inputs[1].dVdNodes[i + 1] = nodeGradient[m + i];
+        }
+        for (std::size_t i = 0; i < p; ++i) {
+            inputs[2].dVdNodes[i + 1] = nodeGradient[m + n + i];
+        }
+        for (std::size_t i = 0; i < q; ++i) {
+            inputs[3].dVdNodes[i + 1] = nodeGradient[m + n + p + i];
+        }
+        return inputs;
+    };
+    const auto flatten = [](const std::vector<markets::StackRiskEntry>& entries) {
+        std::vector<double> flat;
+        for (const markets::StackRiskEntry& entry : entries) {
+            for (const markets::QuotePoint& point : entry.points) {
+                flat.push_back(point.delta);
+            }
+        }
+        return flat;
+    };
+    const std::vector<double> baseZeta =
+        zetaAt(*rootPtr, childBase, foreignForecast, domesticForecast);
+    const std::vector<double> baseGradient = gradientAt(baseZeta);
+    const markets::StackQuoteGamma gamma = markets::stackQuoteGamma(
+        buildInputs(rootPtr, childBase, foreignForecast, domesticForecast, baseGradient), HZeta,
+        reference);
+    CHECK(gamma.dim == dim);
+    for (std::size_t i = 0; i < dim; ++i) {
+        for (std::size_t j = i + 1; j < dim; ++j) {
+            util::checkClose("xccy gamma symmetry", gamma.at(i, j), gamma.at(j, i), 1e-12);
+        }
+    }
+    const double epsilon = 1e-6;
+    double maxGammaDeviation = 0.0;
+    for (std::size_t r = 0; r < m; ++r) {
+        std::vector<markets::CurvePillar> up = rootPillars;
+        std::vector<markets::CurvePillar> down = rootPillars;
+        up[r].quote += epsilon;
+        down[r].quote -= epsilon;
+        const std::shared_ptr<DiscountCurve<double>> rootUp = bootstrapRoot(up);
+        const std::shared_ptr<DiscountCurve<double>> rootDown = bootstrapRoot(down);
+        const markets::SpreadCurve<double> fwdUp = makeForecast(rootUp);
+        const markets::SpreadCurve<double> fwdDown = makeForecast(rootDown);
+        const DiscountCurve<double> childUp = bootstrapChild(*rootUp, fwdUp, xccyPillars);
+        const DiscountCurve<double> childDown = bootstrapChild(*rootDown, fwdDown, xccyPillars);
+        const std::vector<double> plus = flatten(markets::stackQuoteRisk(
+            buildInputs(rootUp, childUp, fwdUp, domesticForecast,
+                        gradientAt(zetaAt(*rootUp, childUp, fwdUp, domesticForecast))),
+            reference));
+        const std::vector<double> minus = flatten(markets::stackQuoteRisk(
+            buildInputs(rootDown, childDown, fwdDown, domesticForecast,
+                        gradientAt(zetaAt(*rootDown, childDown, fwdDown, domesticForecast))),
+            reference));
+        for (std::size_t a = 0; a < dim; ++a) {
+            const double fd = (plus[a] - minus[a]) / (2.0 * epsilon);
+            maxGammaDeviation =
+                std::max(maxGammaDeviation, std::abs(gamma.hessian[a * dim + r] - fd));
+            util::checkClose("xccy gamma root quote FD", gamma.hessian[a * dim + r], fd, 1e-6);
+        }
+    }
+    for (std::size_t r = 0; r < n; ++r) {
+        std::vector<markets::XccyPillar> up = xccyPillars;
+        std::vector<markets::XccyPillar> down = xccyPillars;
+        up[r].spread += epsilon;
+        down[r].spread -= epsilon;
+        const DiscountCurve<double> childUp = bootstrapChild(*rootPtr, foreignForecast, up);
+        const DiscountCurve<double> childDown = bootstrapChild(*rootPtr, foreignForecast, down);
+        const std::vector<double> plus = flatten(markets::stackQuoteRisk(
+            buildInputs(rootPtr, childUp, foreignForecast, domesticForecast,
+                        gradientAt(zetaAt(*rootPtr, childUp, foreignForecast, domesticForecast))),
+            reference));
+        const std::vector<double> minus = flatten(markets::stackQuoteRisk(
+            buildInputs(rootPtr, childDown, foreignForecast, domesticForecast,
+                        gradientAt(zetaAt(*rootPtr, childDown, foreignForecast, domesticForecast))),
+            reference));
+        for (std::size_t a = 0; a < dim; ++a) {
+            const double fd = (plus[a] - minus[a]) / (2.0 * epsilon);
+            maxGammaDeviation =
+                std::max(maxGammaDeviation, std::abs(gamma.hessian[a * dim + m + r] - fd));
+            util::checkClose("xccy gamma xccy quote FD", gamma.hessian[a * dim + m + r], fd, 1e-6);
+        }
+    }
+    QTA_LOG_INFO("test", "xccy gamma vs delta FD over {} quotes: max deviation {}", m + n,
+                 maxGammaDeviation);
+}
+
+/// Two children sharing one forecast object keep the shared factor block but
+/// emit one `XccyFwd`/`XccyDom` entry each; the per-child residuals are
+/// non-zero and sum to the shared block total.
+void testXccySharedForecastSplit() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope) {
+        const std::vector<datetime::Date> dates{reference.plusYears(1), reference.plusYears(2),
+                                                reference.plusYears(3)};
+        std::vector<double> zeros;
+        for (const datetime::Date& date : dates) {
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> rootTarget = buildCurve(0.030, 0.0004);
+    std::vector<markets::CurvePillar> rootPillars;
+    for (int year = 1; year <= 3; ++year) {
+        markets::CurvePillar pillar;
+        pillar.maturity = reference.plusYears(year);
+        pillar.kind = markets::PillarKind::OisSwap;
+        pillar.quoteDayCounter = zeroDc;
+        pillar.calendar = calendar;
+        pillar.quote = markets::impliedQuote(pillar, reference, rootTarget);
+        rootPillars.push_back(pillar);
+    }
+    const auto rootPtr = std::make_shared<DiscountCurve<double>>(
+        markets::bootstrapDiscountCurve(reference, zeroDc, InterpolationSpace::LogDiscount,
+                                        InterpolationScheme::Linear, rootPillars));
+    const DiscountCurve<double> domesticForecast = buildCurve(0.041, 0.0003);
+    // The shared forecast is parented on the root object itself, so its parent
+    // chain block is the root already present in the stack.
+    const std::vector<double> forecastTimes{0.0, 1.0, 2.0, 3.0};
+    const markets::SpreadCurve<double> foreignForecast(
+        rootPtr, forecastTimes, std::vector<double>{0.0, 0.0005, 0.0007, 0.0009},
+        InterpolationScheme::Linear);
+    const DiscountCurve<double> targetA = buildCurve(0.028, 0.0005);
+    const DiscountCurve<double> targetB = buildCurve(0.032, 0.0004);
+    const auto makePillars = [&](const DiscountCurve<double>& target) {
+        std::vector<markets::XccyPillar> pillars;
+        for (int year = 1; year <= 3; ++year) {
+            markets::XccyPillar pillar;
+            pillar.maturity = reference.plusYears(year);
+            pillar.foreignTenor = datetime::Period(3, datetime::TimeUnit::Months);
+            pillar.domesticTenor = datetime::Period(3, datetime::TimeUnit::Months);
+            pillar.foreignCalendar = calendar;
+            pillar.domesticCalendar = calendar;
+            pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+            pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+            pillar.spread = markets::impliedXccyBasisSpread(
+                target, foreignForecast, *rootPtr, domesticForecast, pillar, reference, zeroDc);
+            pillars.push_back(pillar);
+        }
+        return pillars;
+    };
+    const std::vector<markets::XccyPillar> pillarsA = makePillars(targetA);
+    const std::vector<markets::XccyPillar> pillarsB = makePillars(targetB);
+    const DiscountCurve<double> discountA = markets::bootstrapXccyDiscountCurve(
+        *rootPtr, domesticForecast, foreignForecast, reference, zeroDc,
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillarsA);
+    const DiscountCurve<double> discountB = markets::bootstrapXccyDiscountCurve(
+        *rootPtr, domesticForecast, foreignForecast, reference, zeroDc,
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillarsB);
+
+    using ChildT = markets::XccyChildInput<markets::SpreadCurve<double>, DiscountCurve<double>>;
+    ChildT childA;
+    childA.foreignForecastRole = markets::CurveRole::TenorBasis;
+    childA.domesticForecastRole = markets::CurveRole::Forecast;
+    childA.foreignDiscount = &discountA;
+    childA.pillars = pillarsA;
+    childA.dVdForeignZeros.assign(discountA.size(), 0.0);
+    childA.dVdForeignZeros[1] = 1.0;
+    childA.foreignForecast = &foreignForecast;
+    childA.domesticForecast = &domesticForecast;
+    childA.dVdForeignForecast = std::vector<double>(foreignForecast.size(), 0.0);
+    (*childA.dVdForeignForecast)[1] = 0.25;
+    childA.dVdDomesticForecast = std::vector<double>(domesticForecast.size(), 0.0);
+    (*childA.dVdDomesticForecast)[1] = 0.10;
+    ChildT childB = childA;
+    childB.foreignForecastRole = markets::CurveRole::IborOisBasis;
+    childB.domesticForecastRole = markets::CurveRole::TenorBasis;
+    childB.foreignDiscount = &discountB;
+    childB.pillars = pillarsB;
+    childB.dVdForeignZeros.assign(discountB.size(), 0.0);
+    childB.dVdForeignZeros[2] = 1.0;
+    (*childB.dVdForeignForecast)[1] = 0.40;
+    (*childB.dVdDomesticForecast)[1] = 0.20;
+
+    std::vector<double> dVdRoot(rootPtr->size(), 0.0);
+    dVdRoot[1] = 1.0;
+    std::vector<std::variant<ChildT>> children;
+    children.emplace_back(childA);
+    children.emplace_back(childB);
+    const std::vector<markets::StackRiskEntry> entries =
+        markets::stackQuoteRiskXccy(*rootPtr, rootPillars, dVdRoot, children, reference);
+    // Root, then each child's quote, foreign forecast and domestic forecast.
+    CHECK(entries.size() == 7);
+    CHECK(entries[0].points.size() == rootPillars.size());
+    CHECK(entries[1].points.size() == pillarsA.size());
+    CHECK(entries[2].points.size() == foreignForecast.size() - 1);
+    CHECK(entries[3].points.size() == domesticForecast.size() - 1);
+    CHECK(entries[4].points.size() == pillarsB.size());
+    CHECK(entries[5].points.size() == foreignForecast.size() - 1);
+    CHECK(entries[6].points.size() == domesticForecast.size() - 1);
+    CHECK(entries[2].role == markets::CurveRole::TenorBasis);
+    CHECK(entries[5].role == markets::CurveRole::IborOisBasis);
+    CHECK(entries[3].role == markets::CurveRole::Forecast);
+    CHECK(entries[6].role == markets::CurveRole::TenorBasis);
+
+    // Shared-block reference: one unified input list with a single foreign and
+    // domestic factor block holding the summed direct sensitivities.
+    const markets::StackCurveView::Ptr rootView = markets::StackCurveView::make(*rootPtr);
+    const markets::StackCurveView::Ptr fwdView = markets::StackCurveView::make(foreignForecast);
+    const markets::StackCurveView::Ptr domView = markets::StackCurveView::make(domesticForecast);
+    std::vector<markets::StackCurveInput> unified(5);
+    unified[0].curve = rootView;
+    unified[0].role = markets::CurveRole::Discount;
+    unified[0].discountPillars = rootPillars;
+    unified[0].dVdNodes = dVdRoot;
+    for (std::size_t c = 0; c < 2; ++c) {
+        const ChildT& child = c == 0 ? childA : childB;
+        unified[1 + c].curve = markets::StackCurveView::make(*child.foreignDiscount);
+        unified[1 + c].role = child.role;
+        unified[1 + c].xccyPillars = child.pillars;
+        unified[1 + c].xccy = markets::XccyRowInput{fwdView, domView, rootView};
+        unified[1 + c].dVdNodes = child.dVdForeignZeros;
+    }
+    unified[3].curve = fwdView;
+    unified[3].role = markets::CurveRole::Forecast;
+    unified[3].factor =
+        markets::StackFactorInput{"XccyFwd", markets::forecastNodeDayCounter(foreignForecast)};
+    unified[3].dVdNodes.assign(fwdView->size(), 0.0);
+    unified[4].curve = domView;
+    unified[4].role = markets::CurveRole::Forecast;
+    unified[4].factor =
+        markets::StackFactorInput{"XccyDom", markets::forecastNodeDayCounter(domesticForecast)};
+    unified[4].dVdNodes.assign(domView->size(), 0.0);
+    for (std::size_t i = 1; i < childA.dVdForeignForecast->size(); ++i) {
+        unified[3].dVdNodes[i] += (*childA.dVdForeignForecast)[i] + (*childB.dVdForeignForecast)[i];
+    }
+    for (std::size_t i = 1; i < childA.dVdDomesticForecast->size(); ++i) {
+        unified[4].dVdNodes[i] +=
+            (*childA.dVdDomesticForecast)[i] + (*childB.dVdDomesticForecast)[i];
+    }
+    const std::vector<markets::StackRiskEntry> shared = markets::stackQuoteRisk(unified, reference);
+    CHECK(shared.size() == 5);
+    double childAForward = 0.0;
+    double childBForward = 0.0;
+    double childADomestic = 0.0;
+    double childBDomestic = 0.0;
+    for (std::size_t k = 0; k < entries[2].points.size(); ++k) {
+        childAForward += std::abs(entries[2].points[k].delta);
+        childBForward += std::abs(entries[5].points[k].delta);
+        util::checkClose("shared forecast split",
+                         entries[2].points[k].delta + entries[5].points[k].delta,
+                         shared[3].points[k].delta, 1e-10);
+    }
+    for (std::size_t k = 0; k < entries[3].points.size(); ++k) {
+        childADomestic += std::abs(entries[3].points[k].delta);
+        childBDomestic += std::abs(entries[6].points[k].delta);
+        util::checkClose("shared domestic split",
+                         entries[3].points[k].delta + entries[6].points[k].delta,
+                         shared[4].points[k].delta, 1e-10);
+    }
+    CHECK(childAForward > 1e-8);
+    CHECK(childBForward > 1e-8);
+    CHECK(childADomestic > 1e-8);
+    CHECK(childBDomestic > 1e-8);
+    QTA_LOG_INFO("test",
+                 "shared forecast split: |A| fwd={} dom={}, |B| fwd={} dom={}, per-node sums match "
+                 "the shared block",
+                 childAForward, childADomestic, childBForward, childBDomestic);
 }
 
 } // namespace
@@ -479,6 +1163,9 @@ int main() {
     testXccyCoupledBootstrap();
     testForecastNodeDateConversion();
     testXccyJointFallbackAndRisk();
+    testXccyAnalyticRowsAgainstFiniteDifference();
+    testXccyGammaFiniteDifference();
+    testXccySharedForecastSplit();
     QTA_LOG_INFO("test", "test_xccy: ok");
     return 0;
 }

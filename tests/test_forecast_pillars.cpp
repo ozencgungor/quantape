@@ -471,41 +471,32 @@ void testForecastRiskLabelsUseAdjustedDates() {
     input.curve = markets::StackCurveView::make(child);
     input.role = markets::CurveRole::Forecast;
     input.forecastPillars = {deposit};
-    std::vector<std::string> labels;
-    std::vector<int> years;
-    std::vector<std::string> buckets;
-    std::vector<markets::CurveRole> roles;
-    markets::appendStackQuoteMetadata(input, kReference, labels, years, buckets, roles);
-    CHECK(labels.size() == 1);
-    CHECK(labels[0] == "Deposit 04Jan27");
-    CHECK(buckets[0] == "04Jan27");
-    CHECK(roles[0] == markets::CurveRole::Forecast);
+    std::vector<markets::QuotePoint> points;
+    markets::appendStackQuoteMetadata(input, kReference, points);
+    CHECK(points.size() == 1);
+    CHECK(points[0].label == "Deposit 04Jan27");
+    CHECK(points[0].bucket == "04Jan27");
+    CHECK(points[0].role == markets::CurveRole::Forecast);
 
     ForecastPillar irs;
     irs.kind = ForecastPillar::Kind::Irs;
     irs.irs = irsPillar(datetime::Date(2027, 1, 1));
     irs.irs.fixedCalendar = calendar;
     input.forecastPillars = {irs};
-    labels.clear();
-    years.clear();
-    buckets.clear();
-    roles.clear();
-    markets::appendStackQuoteMetadata(input, kReference, labels, years, buckets, roles);
-    CHECK(labels.size() == 1);
-    CHECK(labels[0] == "Irs 04Jan27");
+    points.clear();
+    markets::appendStackQuoteMetadata(input, kReference, points);
+    CHECK(points.size() == 1);
+    CHECK(points[0].label == "Irs 04Jan27");
 
     ForecastPillar basis;
     basis.kind = ForecastPillar::Kind::BasisSwap;
     basis.basis = basisPillar(datetime::Date(2027, 1, 1));
     basis.basis.calendar = calendar;
     input.forecastPillars = {basis};
-    labels.clear();
-    years.clear();
-    buckets.clear();
-    roles.clear();
-    markets::appendStackQuoteMetadata(input, kReference, labels, years, buckets, roles);
-    CHECK(labels.size() == 1);
-    CHECK(labels[0] == "Basis 04Jan27");
+    points.clear();
+    markets::appendStackQuoteMetadata(input, kReference, points);
+    CHECK(points.size() == 1);
+    CHECK(points[0].label == "Basis 04Jan27");
 
     // A turn pillar without an explicit start prices from and labels with the
     // reference date.
@@ -516,15 +507,12 @@ void testForecastRiskLabelsUseAdjustedDates() {
     turn.calendar = kCalendar;
     turn.quoteDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
     input.forecastPillars = {turn};
-    labels.clear();
-    years.clear();
-    buckets.clear();
-    roles.clear();
-    markets::appendStackQuoteMetadata(input, kReference, labels, years, buckets, roles);
-    CHECK(labels.size() == 1);
-    CHECK(labels[0] == "Turn 2026-09-29");
-    CHECK(buckets[0] == "Turn 2026-09-29");
-    CHECK(roles[0] == markets::CurveRole::TurnOverlay);
+    points.clear();
+    markets::appendStackQuoteMetadata(input, kReference, points);
+    CHECK(points.size() == 1);
+    CHECK(points[0].label == "Turn 2026-09-29");
+    CHECK(points[0].bucket == "Turn 2026-09-29");
+    CHECK(points[0].role == markets::CurveRole::TurnOverlay);
 }
 
 void testChainedForecastCurves() {

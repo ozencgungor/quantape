@@ -230,19 +230,13 @@ void testFutureConfigRoundTrip() {
     CHECK(stack.curves.size() == 1);
     const markets::CurveSpec& spec = stack.curves.front();
     CHECK(spec.pillars.size() == 2);
-    CHECK(spec.pillars[1].kind == PillarKind::Future);
+    CHECK(spec.pillars[1].kind == markets::PillarSpec::Kind::Future);
     util::checkClose("config convexity", spec.pillars[1].convexityAdjustment, 0.0002, 1e-15);
-    const DiscountCurve<double> curve = markets::buildCurve(stack, spec);
-    for (const markets::PillarSpec& pillar : spec.pillars) {
-        CurvePillar out;
-        out.maturity = pillar.maturity;
-        out.start = pillar.start;
-        out.kind = pillar.kind;
-        out.quote = pillar.quote;
-        out.convexityAdjustment = pillar.convexityAdjustment;
-        out.quoteDayCounter = pillar.quoteDayCounter;
-        out.calendar = pillar.calendar;
-        util::checkClose("future config reprice", markets::impliedQuote(out, stack.asOf, curve),
+    std::vector<CurvePillar> filled;
+    const DiscountCurve<double> curve = markets::buildCurve(stack, spec, {}, &filled);
+    CHECK(filled.size() == spec.pillars.size());
+    for (const CurvePillar& pillar : filled) {
+        util::checkClose("future config reprice", markets::impliedQuote(pillar, stack.asOf, curve),
                          pillar.quote, 1e-9);
     }
 }

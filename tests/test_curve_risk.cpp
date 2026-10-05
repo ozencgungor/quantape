@@ -201,8 +201,8 @@ double checkStackGammaFiniteDifference(const IrsStackFixture& fixture, const std
         std::vector<double> gradient(dim, 0.0);
         std::size_t index = 0;
         for (const markets::StackRiskEntry& entry : entries) {
-            for (const double delta : entry.quoteDeltas) {
-                gradient[index++] = delta;
+            for (const markets::QuotePoint& point : entry.points) {
+                gradient[index++] = point.delta;
             }
         }
         return gradient;
@@ -529,11 +529,9 @@ void logStack(const char* title, const std::vector<markets::StackRiskEntry>& ent
     std::string out = std::string("=== ") + title + " ===\n";
     for (const markets::StackRiskEntry& entry : entries) {
         out += "  role " + std::string(markets::curveRoleName(entry.role)) + "\n";
-        for (std::size_t j = 0; j < entry.quoteDeltas.size(); ++j) {
-            out += "      " +
-                   padRight(j < entry.quoteLabels.size() ? entry.quoteLabels[j] : std::string("?"),
-                            14) +
-                   " " + padLeft(valueText(entry.quoteDeltas[j]), 18) + "\n";
+        for (const markets::QuotePoint& point : entry.points) {
+            out += "      " + padRight(point.label, 14) + " " +
+                   padLeft(valueText(point.delta), 18) + "\n";
         }
     }
     if (!out.empty() && out.back() == '\n') {
@@ -576,6 +574,38 @@ std::vector<std::string> pillarLabels(const datetime::Date& reference,
                          markets::riskMaturityTag(maturity, t));
     }
     return labels;
+}
+
+std::vector<std::string> pointLabels(const std::vector<markets::QuotePoint>& points) {
+    std::vector<std::string> labels;
+    labels.reserve(points.size());
+    for (const markets::QuotePoint& point : points) {
+        labels.push_back(point.label);
+    }
+    return labels;
+}
+
+std::vector<double> pointDeltas(const std::vector<markets::QuotePoint>& points) {
+    std::vector<double> deltas;
+    deltas.reserve(points.size());
+    for (const markets::QuotePoint& point : points) {
+        deltas.push_back(point.delta);
+    }
+    return deltas;
+}
+
+bool samePointMetadata(const std::vector<markets::QuotePoint>& left,
+                       const std::vector<markets::QuotePoint>& right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        if (left[i].label != right[i].label || left[i].bucket != right[i].bucket ||
+            left[i].year != right[i].year || left[i].role != right[i].role) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void testBasisRiskRepresentation() {
@@ -1071,7 +1101,7 @@ void testStackRiskTreePass() {
         const double fd =
             (rebuildChild(parent, up).discount(t) - rebuildChild(parent, down).discount(t)) /
             (2.0 * epsilon);
-        util::checkClose("stack child total vs FD", stack[1].quoteDeltas[j], fd, 1e-4);
+        util::checkClose("stack child total vs FD", stack[1].points[j].delta, fd, 1e-4);
     }
     // Root totals: FD with child quotes fixed (spreads re-solved).
     for (std::size_t j = 0; j < fx.pillars.size(); ++j) {
@@ -1088,7 +1118,7 @@ void testStackRiskTreePass() {
         const double fd = (rebuildChild(rootUp, basisPillars).discount(t) -
                            rebuildChild(rootDown, basisPillars).discount(t)) /
                           (2.0 * epsilon);
-        util::checkClose("stack root total vs FD", stack[0].quoteDeltas[j], fd, 1e-4);
+        util::checkClose("stack root total vs FD", stack[0].points[j].delta, fd, 1e-4);
     }
 }
 
@@ -1132,7 +1162,8 @@ void testStackIrsChildRiskAndGamma() {
         *fixture.root, fixture.rootPillars, dVdRoot, HZeta, fixture.reference, children);
     CHECK(gamma.dim == 2);
     util::checkClose("stack gamma symmetry", gamma.at(0, 1), gamma.at(1, 0), 1e-14);
-    logMatrix("exact stack gamma", gamma.hessian, 2, 2, gamma.quoteLabels, gamma.quoteLabels);
+    logMatrix("exact stack gamma", gamma.hessian, 2, 2, pointLabels(gamma.points),
+              pointLabels(gamma.points));
     const double curvature = checkStackGammaFiniteDifference(fixture, g, HZeta, gamma, 1e-5);
     CHECK(curvature > 1e-9);
     QTA_LOG_INFO("test", "stack gamma curvature vs Gauss-Newton: {}", curvature);
@@ -1142,8 +1173,9 @@ void testStackIrsChildRiskAndGamma() {
         *fixture.root, fixture.rootPillars, dVdRoot, children, fixture.reference);
     const double expectedRoot = jacobian[0][0] * dVdRoot[1] + jacobian[1][0] * dVdSpread[1];
     const double expectedChild = jacobian[0][1] * dVdRoot[1] + jacobian[1][1] * dVdSpread[1];
-    util::checkClose("stack delta root equals J^T g", stack[0].quoteDeltas[0], expectedRoot, 1e-12);
-    util::checkClose("stack delta child equals J^T g", stack[1].quoteDeltas[0], expectedChild,
+    util::checkClose("stack delta root equals J^T g", stack[0].points[0].delta, expectedRoot,
+                     1e-12);
+    util::checkClose("stack delta child equals J^T g", stack[1].points[0].delta, expectedChild,
                      1e-12);
 
     // Labels, years and roles follow the stackQuoteRisk entry order.
@@ -1151,16 +1183,22 @@ void testStackIrsChildRiskAndGamma() {
     std::vector<int> years;
     std::vector<markets::CurveRole> roles;
     for (const markets::StackRiskEntry& entry : stack) {
-        for (std::size_t j = 0; j < entry.quoteDeltas.size(); ++j) {
-            labels.push_back(entry.quoteLabels[j]);
-            years.push_back(entry.quoteYears[j]);
-            roles.push_back(entry.role);
+        for (const markets::QuotePoint& point : entry.points) {
+            labels.push_back(point.label);
+            years.push_back(point.year);
+            roles.push_back(point.role);
         }
     }
-    CHECK(gamma.quoteLabels == labels);
-    CHECK(gamma.quoteYears == years);
-    CHECK(gamma.roles == roles);
-    CHECK(gamma.quoteLabels.back() == "Irs 1Y");
+    std::vector<int> gammaYears;
+    std::vector<markets::CurveRole> gammaRoles;
+    for (const markets::QuotePoint& point : gamma.points) {
+        gammaYears.push_back(point.year);
+        gammaRoles.push_back(point.role);
+    }
+    CHECK(pointLabels(gamma.points) == labels);
+    CHECK(gammaYears == years);
+    CHECK(gammaRoles == roles);
+    CHECK(gamma.points.back().label == "Irs 1Y");
 
     // An equal discount curve as a different object is accepted and produces
     // the same gamma as the implicit forecast-parent discounting.
@@ -1226,7 +1264,7 @@ void testStackIrsGammaSymmetry() {
     const std::vector<markets::StackRiskEntry> stack = markets::stackQuoteRisk(
         *fixture.root, fixture.rootPillars, dVdRoot, children, fixture.reference);
     CHECK(stack.size() == 2);
-    CHECK(stack[1].quoteDeltas.size() == fixture.childPillars.size());
+    CHECK(stack[1].points.size() == fixture.childPillars.size());
 
     const double epsilon = 1e-6;
     // Child totals: re-bootstrap the child with the parent frozen.
@@ -1238,7 +1276,7 @@ void testStackIrsGammaSymmetry() {
         const double fd = (rebuildChild(fixture.root, up).discount(t) -
                            rebuildChild(fixture.root, down).discount(t)) /
                           (2.0 * epsilon);
-        util::checkClose("irs stack child total vs FD", stack[1].quoteDeltas[j], fd, 1e-4);
+        util::checkClose("irs stack child total vs FD", stack[1].points[j].delta, fd, 1e-4);
     }
     // Root totals: child quotes fixed (spreads re-solved) while the root moves.
     for (std::size_t j = 0; j < fixture.rootPillars.size(); ++j) {
@@ -1256,7 +1294,7 @@ void testStackIrsGammaSymmetry() {
         const double fd = (rebuildChild(rootUp, fixture.childPillars).discount(t) -
                            rebuildChild(rootDown, fixture.childPillars).discount(t)) /
                           (2.0 * epsilon);
-        util::checkClose("irs stack root total vs FD", stack[0].quoteDeltas[j], fd, 1e-4);
+        util::checkClose("irs stack root total vs FD", stack[0].points[j].delta, fd, 1e-4);
     }
 
     // Stack gamma with an arbitrary symmetric portfolio Hessian: dimension,
@@ -1355,7 +1393,7 @@ void runDepth2FiniteDifference(const char* prefix, bool exogenousRootDiscount) {
                                                           fixture.grandPillars),
                                        gradients)) /
                           (2.0 * epsilon);
-        util::checkClose(rootLabel.c_str(), stack[0].quoteDeltas[j], fd, tolerance);
+        util::checkClose(rootLabel.c_str(), stack[0].points[j].delta, fd, tolerance);
     }
     const std::string childLabel = std::string(prefix) + " child quote vs FD";
     for (std::size_t j = 0; j < fixture.childPillars.size(); ++j) {
@@ -1370,7 +1408,7 @@ void runDepth2FiniteDifference(const char* prefix, bool exogenousRootDiscount) {
                  rebuildDepth2Stack(fixture, fixture.rootPillars, down, fixture.grandPillars),
                  gradients)) /
             (2.0 * epsilon);
-        util::checkClose(childLabel.c_str(), stack[1].quoteDeltas[j], fd, tolerance);
+        util::checkClose(childLabel.c_str(), stack[1].points[j].delta, fd, tolerance);
     }
     const std::string grandLabel = std::string(prefix) + " grandchild quote vs FD";
     for (std::size_t j = 0; j < fixture.grandPillars.size(); ++j) {
@@ -1385,7 +1423,7 @@ void runDepth2FiniteDifference(const char* prefix, bool exogenousRootDiscount) {
                  rebuildDepth2Stack(fixture, fixture.rootPillars, fixture.childPillars, down),
                  gradients)) /
             (2.0 * epsilon);
-        util::checkClose(grandLabel.c_str(), stack[2].quoteDeltas[j], fd, tolerance);
+        util::checkClose(grandLabel.c_str(), stack[2].points[j].delta, fd, tolerance);
     }
 }
 
@@ -1506,8 +1544,8 @@ void runDepth2GammaFiniteDifference(const char* prefix, bool exogenousRootDiscou
         std::vector<double> gradient(dim, 0.0);
         std::size_t index = 0;
         for (const markets::StackRiskEntry& entry : entries) {
-            for (const double delta : entry.quoteDeltas) {
-                gradient[index++] = delta;
+            for (const markets::QuotePoint& point : entry.points) {
+                gradient[index++] = point.delta;
             }
         }
         return gradient;
@@ -1540,7 +1578,8 @@ void runDepth2GammaFiniteDifference(const char* prefix, bool exogenousRootDiscou
         }
     }
     QTA_LOG_INFO("test", "{} max depth-2 gamma FD deviation: {}", prefix, maxDeviation);
-    logMatrix(prefix, gamma.hessian, dim, dim, gamma.quoteLabels, gamma.quoteLabels);
+    logMatrix(prefix, gamma.hessian, dim, dim, pointLabels(gamma.points),
+              pointLabels(gamma.points));
 }
 
 void testStackDepth2GammaFiniteDifference() {
@@ -1569,15 +1608,14 @@ void testStackDepth1Equivalence() {
     CHECK(general.size() == legacy.size());
     for (std::size_t k = 0; k < general.size(); ++k) {
         CHECK(general[k].role == legacy[k].role);
-        CHECK(general[k].quoteLabels == legacy[k].quoteLabels);
-        CHECK(general[k].quoteYears == legacy[k].quoteYears);
-        util::checkClose("depth-1 equivalence deltas", general[k].quoteDeltas,
-                         legacy[k].quoteDeltas, 1e-12);
+        CHECK(samePointMetadata(general[k].points, legacy[k].points));
+        util::checkClose("depth-1 equivalence deltas", pointDeltas(general[k].points),
+                         pointDeltas(legacy[k].points), 1e-12);
     }
     logStack("depth-1 general engine", general);
 
     // The general and legacy gamma overloads agree entry by entry.
-    const std::size_t gammaDim = general[0].quoteDeltas.size() + general[1].quoteDeltas.size();
+    const std::size_t gammaDim = general[0].points.size() + general[1].points.size();
     std::vector<double> HZeta(gammaDim * gammaDim, 0.0);
     for (std::size_t i = 0; i < gammaDim; ++i) {
         for (std::size_t j = 0; j < gammaDim; ++j) {
@@ -1590,9 +1628,7 @@ void testStackDepth1Equivalence() {
     const markets::StackQuoteGamma legacyGamma = markets::stackQuoteGamma(
         *fixture.root, fixture.rootPillars, gradients.root, HZeta, fixture.reference, children);
     CHECK(generalGamma.dim == legacyGamma.dim);
-    CHECK(generalGamma.quoteLabels == legacyGamma.quoteLabels);
-    CHECK(generalGamma.quoteYears == legacyGamma.quoteYears);
-    CHECK(generalGamma.roles == legacyGamma.roles);
+    CHECK(samePointMetadata(generalGamma.points, legacyGamma.points));
     for (std::size_t k = 0; k < generalGamma.hessian.size(); ++k) {
         util::checkClose("depth-1 equivalence gamma", generalGamma.hessian[k],
                          legacyGamma.hessian[k], 1e-12);
@@ -1684,6 +1720,48 @@ void testStackGammaValidation() {
     threw = false;
     try {
         (void)empty.at(0, 0);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+
+    // Point-metadata validation: a complete point passes, a partial one is
+    // rejected, and the gamma gate ties the point count to `dim`.
+    const std::vector<markets::QuotePoint> complete{
+        markets::QuotePoint{"Irs 1Y", "1Y", 1, markets::CurveRole::Forecast, 0.5}};
+    markets::validateQuotePoints(complete, 1);
+    threw = false;
+    try {
+        (void)markets::validateQuotePoints(
+            {markets::QuotePoint{"Irs 1Y", "", 1, markets::CurveRole::Forecast, 0.5}}, 1);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+    threw = false;
+    try {
+        (void)markets::validateQuotePoints(complete, 2);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+    markets::StackRiskEntry malformed;
+    malformed.points.push_back(markets::QuotePoint{"", "1Y", 1, markets::CurveRole::Forecast, 0.5});
+    threw = false;
+    try {
+        malformed.validate();
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+    gamma.points = complete;
+    gamma.dim = 1;
+    gamma.hessian = {1.0};
+    gamma.validate();
+    gamma.points.clear();
+    threw = false;
+    try {
+        gamma.validate();
     } catch (const std::invalid_argument&) {
         threw = true;
     }
@@ -1920,8 +1998,8 @@ void testStackLadderHedgeDual() {
         markets::stackQuoteRisk(*parent, fx.pillars, dVdRoot, children, fx.reference);
     double total = 0.0;
     for (const auto& entry : stack) {
-        for (const double delta : entry.quoteDeltas) {
-            total += delta;
+        for (const markets::QuotePoint& point : entry.points) {
+            total += point.delta;
         }
     }
     double ladderTotal = 0.0;
@@ -1934,8 +2012,8 @@ void testStackLadderHedgeDual() {
     logBuckets("stack year ladder:", markets::stackYearLadder(stack));
     util::checkClose("stack ladder total", ladderTotal, total, 1e-12);
     CHECK(sawBasis);
-    CHECK(!stack[0].quoteLabels.empty());
-    CHECK(!stack[1].quoteLabels.empty());
+    CHECK(!stack[0].points.empty());
+    CHECK(!stack[1].points.empty());
 
     // Hedge solve: 2x2 sensitivity matrix, exact recovery.
     const std::vector<double> jacobian{1.0, 0.5, 0.5, 1.0};

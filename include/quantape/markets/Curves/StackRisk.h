@@ -4,8 +4,11 @@
 #include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/CurveRiskReport.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
+#include "quantape/markets/Curves/StackCurveView.h"
+#include "quantape/markets/Curves/StackRiskRows.h"
 #include "quantape/markets/Curves/TurnOverlay.h"
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
+#include "quantape/markets/Curves/XccyRisk.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,162 +48,92 @@ namespace quantape::markets {
  * re-solve is encoded in the block inverse of `[[F_p,0],[C,F_c]]`.
  *
  * Children are additive spread curves bootstrapped from basis-swap or par IRS
- * pillars. The general engine supports arbitrary curve trees: each forecast
- * parent, exogenous discount curve and ancestor on their parent chains must
- * match a curve in the stack exactly (grid, discounts and interpolation), so a
- * block is never bound to a curve that only shares its node values.
+ * pillars, or cross-currency basis children whose rows are analytic over each
+ * referenced curve's native nodes. The general engine supports arbitrary curve
+ * trees: each forecast parent, exogenous discount curve and ancestor on their
+ * parent chains must match a curve in the stack exactly (grid, discounts and
+ * interpolation), so a block is never bound to a curve that only shares its
+ * node values. Cross-currency rows bind their referenced blocks by view
+ * identity and share the assembled matrix with every other child.
  */
 
-/// Type-erased cold-path view over a double curve node provider.
-class StackCurveView {
-public:
-    using Ptr = std::shared_ptr<const StackCurveView>;
-    virtual ~StackCurveView() = default;
-    virtual std::size_t size() const = 0;                 // nodes + 1
-    virtual const std::vector<double>& times() const = 0; // native node times
-    virtual double discount(double t) const = 0;
-    virtual void zeroNodeWeights(double t, std::vector<double>& out) const = 0;
-    virtual const datetime::DayCounter& zeroDayCounter() const = 0;
-    virtual const void* identity() const = 0; // address of the underlying curve
-    virtual const StackCurveView* parentView() const { return nullptr; } // spread curves only
-    virtual Ptr rebuildWithNode(std::size_t node, double delta,
-                                const Ptr& parentOverride) const = 0;
-
-    /// Caller-input view: `identity()` is the caller's curve address, so a
-    /// view made from the same object matches it exactly.
-    template <CurveNodeProvider C>
-    static Ptr make(const C& curve);
-
-    /// Owned view: the adapter keeps its own curve copy and `identity()` is
-    /// that copy's address. Rebuilt views use this factory so a destroyed
-    /// temporary's address can never be mistaken for another curve.
-    template <CurveNodeProvider C>
-    static Ptr makeOwned(C&& curve);
-
-private:
-    template <typename C>
-    class StackCurveViewOf;
-
-    /// Selects the owning `StackCurveViewOf` constructor.
-    struct OwnedTag {};
+/// A factor block contributes solved node columns and identity instrument rows.
+/// Its output entry is the node-space hedge residual after every quote row, so
+/// a forecast curve whose own quotes are not in the stack is reported without
+/// dropping its sensitivity. `labelPrefix` heads the emitted point labels.
+struct StackFactorInput {
+    std::string labelPrefix;
+    datetime::DayCounter nodeDayCounter; ///< Clock of the native node grid
 };
 
-template <typename C>
-class StackCurveView::StackCurveViewOf final : public StackCurveView {
-    static_assert(std::is_same_v<C, void>, "StackCurveViewOf: unsupported curve type");
+/// One curve of a general stack tree: native quotes, node sensitivities and
+/// (optionally) an exogenous discount curve. Inputs are listed in any order;
+/// every parent or discount view, and every ancestor in their parent chains,
+/// must match a curve in the list. Exactly one row mode is set per input:
+/// discount pillars, forecast pillars, cross-currency pillars, or a factor
+/// block.
+struct StackCurveInput {
+    StackCurveView::Ptr curve;
+    CurveRole role = CurveRole::Discount;
+    std::vector<CurvePillar> discountPillars;    ///< Discount-curve quote rows
+    std::vector<ForecastPillar> forecastPillars; ///< Forecast-curve quote rows
+    std::vector<XccyPillar> xccyPillars;         ///< Cross-currency child rows
+    std::optional<XccyRowInput> xccy;            ///< References for xccyPillars
+    std::optional<StackFactorInput> factor;      ///< Identity-row factor block
+    std::vector<double> dVdNodes; ///< dV/d(zeta_i); size == curve->size(), node 0 unused
+    StackCurveView::Ptr discount; ///< Exogenous discounting; null uses the parent view
 };
 
-template <>
-class StackCurveView::StackCurveViewOf<DiscountCurve<double>> final : public StackCurveView {
-public:
-    explicit StackCurveViewOf(const DiscountCurve<double>& curve)
-        : m_curve(curve), m_identity(&curve) {}
+/// Assembled stack quote system over native node coordinates: per-curve block
+/// offsets and the row-major instrument Jacobian `F = d r / d zeta`.
+struct StackQuoteSystem {
+    std::size_t dim = 0;
+    std::vector<std::size_t> offsets; ///< First node column of each input curve
+    std::vector<double> jacobian;     ///< Row-major dim x dim
+};
 
-    StackCurveViewOf(OwnedTag, DiscountCurve<double>&& curve)
-        : m_curve(std::move(curve)), m_identity(&m_curve) {}
+/// One quoted risk row of a stack curve in `stackQuoteRisk` order: the
+/// instrument kind plus maturity label, the maturity-tag bucket, the rounded
+/// maturity year and the role the quote reports under. `delta` carries the
+/// quote-space derivative for a risk entry and the diagonal Hessian element
+/// for a gamma entry.
+struct QuotePoint {
+    std::string label;
+    std::string bucket; ///< riskMaturityTag
+    int year = 0;       ///< Rounded maturity years
+    CurveRole role = CurveRole::Discount;
+    double delta = 0.0;
+};
 
-    std::size_t size() const override { return m_curve.size(); }
-    const std::vector<double>& times() const override { return m_curve.times(); }
-    double discount(double t) const override { return m_curve.discount(t); }
-    void zeroNodeWeights(double t, std::vector<double>& out) const override {
-        m_curve.zeroNodeWeights(t, out);
+/// Throws unless every point carries a label, a maturity-tag bucket and a
+/// finite delta; `expected` optionally pins the point count. Consuming a point
+/// vector through this gate keeps partial metadata out of every aggregation.
+inline void validateQuotePoints(const std::vector<QuotePoint>& points,
+                                std::optional<std::size_t> expected = std::nullopt) {
+    if (expected.has_value() && points.size() != *expected) {
+        throw std::invalid_argument("validateQuotePoints: point count mismatch");
     }
-    const datetime::DayCounter& zeroDayCounter() const override { return m_curve.zeroDayCounter(); }
-    const void* identity() const override { return m_identity; }
-    const DiscountCurve<double>& concreteParent() const { return m_curve; }
-
-    Ptr rebuildWithNode(std::size_t node, double delta, const Ptr&) const override {
-        std::vector<double> bumped = m_curve.zeros();
-        bumped[node] += delta;
-        // The node times are inverted to whole-day pillar dates on the curve's
-        // own date clock, so the rebuilt curve keeps its reference date and
-        // zero day counter and every Jacobian row stays on the same clock. The
-        // times constructor is the fallback for grids whose times are not
-        // exact whole-day year fractions.
-        std::vector<datetime::Date> pillarDates;
-        if (detail::recoverPillarDates(m_curve.referenceDate(), m_curve.zeroDayCounter(),
-                                       m_curve.times(), pillarDates)) {
-            return StackCurveView::makeOwned(DiscountCurve<double>(
-                m_curve.referenceDate(), pillarDates, m_curve.zeroDayCounter(), std::move(bumped),
-                m_curve.space(), m_curve.scheme(), m_curve.tension(), m_curve.switchIndex()));
+    for (const QuotePoint& point : points) {
+        if (point.label.empty()) {
+            throw std::invalid_argument("validateQuotePoints: empty quote label");
         }
-        return StackCurveView::makeOwned(
-            DiscountCurve<double>(m_curve.times(), std::move(bumped), m_curve.space(),
-                                  m_curve.scheme(), m_curve.tension(), m_curve.switchIndex()));
-    }
-
-private:
-    DiscountCurve<double> m_curve;
-    const void* m_identity = nullptr;
-};
-
-template <typename ParentT>
-class StackCurveView::StackCurveViewOf<SpreadCurve<double, ParentT>> final : public StackCurveView {
-public:
-    using Curve = SpreadCurve<double, ParentT>;
-
-    explicit StackCurveViewOf(const Curve& curve)
-        : m_curve(curve), m_identity(&curve), m_parent(StackCurveView::make(curve.parent())) {}
-
-    StackCurveViewOf(OwnedTag, Curve&& curve)
-        : m_curve(std::move(curve)), m_identity(&m_curve),
-          m_parent(StackCurveView::make(m_curve.parent())) {}
-
-    std::size_t size() const override { return m_curve.size(); }
-    const std::vector<double>& times() const override { return m_curve.spreadNodes().times(); }
-    double discount(double t) const override { return m_curve.discount(t); }
-    void zeroNodeWeights(double t, std::vector<double>& out) const override {
-        m_curve.zeroNodeWeights(t, out);
-    }
-    const datetime::DayCounter& zeroDayCounter() const override { return m_curve.zeroDayCounter(); }
-    const void* identity() const override { return m_identity; }
-    const StackCurveView* parentView() const override { return m_parent.get(); }
-    const Curve& concreteParent() const { return m_curve; }
-
-    Ptr rebuildWithNode(std::size_t node, double delta, const Ptr& parentOverride) const override {
-        const Ptr& parentRef = parentOverride ? parentOverride : m_parent;
-        const auto parentAdapter =
-            std::dynamic_pointer_cast<const StackCurveViewOf<ParentT>>(parentRef);
-        if (parentAdapter == nullptr) {
-            throw std::invalid_argument(
-                "StackCurveViewOf<SpreadCurve>::rebuildWithNode: parent view type mismatch");
+        if (point.bucket.empty()) {
+            throw std::invalid_argument("validateQuotePoints: empty quote bucket");
         }
-        const DiscountCurve<double>& spreadNodes = m_curve.spreadNodes();
-        std::vector<double> spreads = spreadNodes.zeros();
-        spreads[node] += delta;
-        // Spread nodes have no date constructor: the spread grid is carried by
-        // times while the date metadata (reference date and zero clock) lives
-        // on the parent copy, which is re-bound through the parent override or
-        // the adapter's own parent and therefore keeps its own reconstruction.
-        return StackCurveView::makeOwned(
-            Curve(std::make_shared<ParentT>(parentAdapter->concreteParent()), spreadNodes.times(),
-                  std::move(spreads), spreadNodes.scheme(), spreadNodes.tension()));
+        if (!std::isfinite(point.delta)) {
+            throw std::invalid_argument("validateQuotePoints: non-finite quote delta");
+        }
     }
-
-private:
-    Curve m_curve;
-    const void* m_identity = nullptr;
-    Ptr m_parent;
-};
-
-template <CurveNodeProvider C>
-StackCurveView::Ptr StackCurveView::make(const C& curve) {
-    return std::make_shared<StackCurveViewOf<std::remove_cvref_t<C>>>(curve);
 }
 
-template <CurveNodeProvider C>
-StackCurveView::Ptr StackCurveView::makeOwned(C&& curve) {
-    using CurveT = std::remove_cvref_t<C>;
-    return std::make_shared<StackCurveViewOf<CurveT>>(OwnedTag{}, std::forward<C>(curve));
-}
-
+/// One curve's quote rows: the curve role plus the per-quote points in
+/// `stackQuoteRisk` entry order. A direct turn knot keeps its bootstrap column
+/// but reports under `TurnOverlay` with a `Turn <date>` label.
 struct StackRiskEntry {
     CurveRole role = CurveRole::Discount; ///< Curve role; turn pillars override per quote
-    std::vector<CurveRole> quoteRoles;    ///< Per-quote role (`TurnOverlay` for turn knots)
-    std::vector<double> quoteDeltas;
-    std::vector<std::string> quoteLabels;  ///< Instrument kind + maturity tag (turn date)
-    std::vector<int> quoteYears;           ///< Rounded maturity years (compatibility)
-    std::vector<std::string> quoteBuckets; ///< Maturity tag (date / year / month)
+    std::vector<QuotePoint> points;       ///< Quote rows in curve/node order
+
+    void validate() const { validateQuotePoints(points); }
 };
 
 /// Role buckets of a stack risk table. Sums each quote under its own role, so
@@ -218,12 +151,9 @@ inline std::vector<RiskBucket> stackRoleBuckets(const std::vector<StackRiskEntry
         buckets.push_back(RiskBucket{std::string(label), delta});
     };
     for (const StackRiskEntry& entry : entries) {
-        if (!entry.quoteRoles.empty() && entry.quoteRoles.size() != entry.quoteDeltas.size()) {
-            throw std::invalid_argument("stackRoleBuckets: quote role size mismatch");
-        }
-        for (std::size_t j = 0; j < entry.quoteDeltas.size(); ++j) {
-            const CurveRole role = entry.quoteRoles.empty() ? entry.role : entry.quoteRoles[j];
-            add(curveRoleName(role), entry.quoteDeltas[j]);
+        entry.validate();
+        for (const QuotePoint& point : entry.points) {
+            add(curveRoleName(point.role), point.delta);
         }
     }
     return buckets;
@@ -266,11 +196,8 @@ inline std::vector<RiskBucket> addTurnRiskBuckets(const std::vector<StackRiskEnt
 /// Stack-level quote Hessian in quote space, row-major `dim x dim`.
 struct StackQuoteGamma {
     std::size_t dim = 0;
-    std::vector<std::string> quoteLabels;  ///< Same order as `stackQuoteRisk` entries
-    std::vector<int> quoteYears;           ///< Rounded maturity years (compatibility)
-    std::vector<std::string> quoteBuckets; ///< Maturity tag (date / year / month)
-    std::vector<CurveRole> roles;          ///< One per quote
-    std::vector<double> hessian;           ///< Row-major `dim x dim`
+    std::vector<QuotePoint> points; ///< One per quote, in `stackQuoteRisk` order
+    std::vector<double> hessian;    ///< Row-major `dim x dim`
 
     /// Bounds- and size-checked access to the row-major Hessian.
     double at(std::size_t i, std::size_t j) const {
@@ -278,6 +205,14 @@ struct StackQuoteGamma {
             throw std::invalid_argument("StackQuoteGamma::at: index out of bounds");
         }
         return hessian[i * dim + j];
+    }
+
+    /// Throws unless the Hessian and the point metadata both match `dim`.
+    void validate() const {
+        if (hessian.size() != dim * dim) {
+            throw std::invalid_argument("StackQuoteGamma::validate: hessian size mismatch");
+        }
+        validateQuotePoints(points, dim);
     }
 };
 
@@ -292,894 +227,55 @@ struct StackChildInput {
     const DiscountCurve<double>* discountCurve = nullptr;
 };
 
-/// Analytic basis-swap rows: `fRow = ∂b/∂ζ_child` and
-/// `cRow = ∂b/∂ζ_parent` for the quoted par basis spread `b`.
-inline void basisSwapJacobianRows(const SpreadCurve<double>& child, const BasisPillar& pillar,
-                                  const datetime::Date& referenceDate, std::vector<double>& fRow,
-                                  std::vector<double>& cRow) {
-    const DiscountCurve<double>& parent = child.parent();
-    const datetime::Schedule schedule(referenceDate, pillar.maturity, pillar.floatTenor,
-                                      pillar.calendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    const std::size_t periods = dates.size() - 1;
-    const std::size_t nParent = parent.size();
-    const std::size_t nChild = child.size();
-    std::vector<double> times(periods + 1);
-    std::vector<double> taus(periods);
-    std::vector<double> parentDf(periods + 1);
-    std::vector<double> childDf(periods + 1);
-    std::vector<double> parentForward(periods);
-    std::vector<double> childForward(periods);
-    times[0] = datetime::yearFraction(referenceDate, dates[0], parent.zeroDayCounter());
-    parentDf[0] = parent.discount(times[0]);
-    childDf[0] = child.discount(times[0]);
-    double annuity = 0.0;
-    double numerator = 0.0;
-    for (std::size_t k = 0; k < periods; ++k) {
-        times[k + 1] = datetime::yearFraction(referenceDate, dates[k + 1], parent.zeroDayCounter());
-        taus[k] = datetime::yearFraction(dates[k], dates[k + 1], pillar.quoteDayCounter);
-        parentDf[k + 1] = parent.discount(times[k + 1]);
-        childDf[k + 1] = child.discount(times[k + 1]);
-        parentForward[k] = (parentDf[k] / parentDf[k + 1] - 1.0) / taus[k];
-        childForward[k] = (childDf[k] / childDf[k + 1] - 1.0) / taus[k];
-        annuity += taus[k] * parentDf[k + 1];
-        numerator += taus[k] * parentDf[k + 1] * (childForward[k] - parentForward[k]);
-    }
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("basisSwapJacobianRows: non-positive annuity");
-    }
-
-    fRow.assign(nChild - 1, 0.0);
-    cRow.assign(nParent - 1, 0.0);
-    const auto weightsAt = [](const auto& curve, double time, std::vector<double>& out) {
-        // D(0) = 1 is node-independent; sensitivities at t = 0 are zero.
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
+/// Depth-1 stack input list: the root discount curve as the first block and
+/// one additive spread child per element, each parented on the root. Shared by
+/// the legacy delta and gamma wrappers so both adapt the same way.
+inline std::vector<StackCurveInput> makeDepth1Inputs(const DiscountCurve<double>& root,
+                                                     const std::vector<CurvePillar>& rootPillars,
+                                                     const std::vector<double>& dVdRoot,
+                                                     const std::vector<StackChildInput>& children) {
+    const StackCurveView::Ptr rootView = StackCurveView::make(root);
+    std::vector<StackCurveInput> inputs;
+    inputs.reserve(children.size() + 1);
+    StackCurveInput rootInput;
+    rootInput.curve = rootView;
+    rootInput.role = CurveRole::Discount;
+    rootInput.discountPillars = rootPillars;
+    rootInput.dVdNodes = dVdRoot;
+    inputs.push_back(std::move(rootInput));
+    for (const StackChildInput& child : children) {
+        if (child.curve == nullptr) {
+            throw std::invalid_argument("makeDepth1Inputs: malformed child input");
         }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> weightsPrevious;
-    std::vector<double> weightsCurrent;
-    for (std::size_t k = 0; k < periods; ++k) {
-        // Own-curve row: only the child forwards vary (parent frozen).
-        weightsAt(child, times[k], weightsPrevious);
-        weightsAt(child, times[k + 1], weightsCurrent);
-        const double childFactor = (1.0 + taus[k] * childForward[k]) / taus[k];
-        const double weight = taus[k] * parentDf[k + 1] / annuity;
-        for (std::size_t j = 1; j < nChild; ++j) {
-            fRow[j - 1] += weight * childFactor *
-                           (-times[k] * weightsPrevious[j] + times[k + 1] * weightsCurrent[j]);
+        StackCurveInput input;
+        input.curve = StackCurveView::make(*child.curve);
+        input.role = child.role;
+        input.forecastPillars = child.pillars;
+        input.dVdNodes = child.dVdSpread;
+        if (child.discountCurve != nullptr) {
+            input.discount = sameCurveValues(*child.discountCurve, root)
+                                 ? rootView
+                                 : StackCurveView::make(*child.discountCurve);
         }
-        // Cross row: with the spread state fixed, zeta_child(t) = z_parent(t)
-        // + s(t) moves with the parent, so BOTH forwards vary:
-        //   d(f_c - f_p)/dz_j = (f_c - f_p) * (-t_prev w_prev + t_cur w_cur),
-        // the (1 + tau f)/tau factors cancelling in the difference. Parent
-        // discounts and the annuity vary as well.
-        weightsAt(parent, times[k], weightsPrevious);
-        weightsAt(parent, times[k + 1], weightsCurrent);
-        const double forwardSpread = childForward[k] - parentForward[k];
-        for (std::size_t j = 1; j < nParent; ++j) {
-            const double dDiscount = -times[k + 1] * parentDf[k + 1] * weightsCurrent[j];
-            const double dForwardSpread =
-                forwardSpread * (-times[k] * weightsPrevious[j] + times[k + 1] * weightsCurrent[j]);
-            const double dNumerator =
-                taus[k] * (dDiscount * forwardSpread + parentDf[k + 1] * dForwardSpread);
-            cRow[j - 1] += dNumerator;
-        }
+        inputs.push_back(std::move(input));
     }
-    // d b = (dN A - N dA) / A^2, with dA_j = sum_k tau D'_k.
-    std::vector<double> dAnnuity(nParent - 1, 0.0);
-    for (std::size_t k = 0; k < periods; ++k) {
-        weightsAt(parent, times[k + 1], weightsCurrent);
-        for (std::size_t j = 1; j < nParent; ++j) {
-            dAnnuity[j - 1] += taus[k] * (-times[k + 1] * parentDf[k + 1] * weightsCurrent[j]);
-        }
-    }
-    for (std::size_t j = 0; j < nParent - 1; ++j) {
-        cRow[j] = (cRow[j] * annuity - numerator * dAnnuity[j]) / (annuity * annuity);
-    }
-    if (!pillar.spreadOnParentLeg) {
-        for (double& value : fRow) {
-            value = -value;
-        }
-        for (double& value : cRow) {
-            value = -value;
-        }
-    }
+    return inputs;
 }
 
-namespace detail {
-
-/// Shared value comparison behind `sameCurveValues` and `sameCurveView`: the
-/// same underlying object, or the same node grid with equal discounts at every
-/// node and equal zero-node weights at every segment midpoint. The midpoint
-/// weights fingerprint the interpolation space, scheme, tension and switch
-/// index, so curves that only share their node values are not interchangeable.
-template <typename LeftT, typename RightT>
-inline bool sameCurveValuesCore(const LeftT& left, const void* leftIdentity, const RightT& right,
-                                const void* rightIdentity) {
-    if (leftIdentity == rightIdentity) {
-        return true;
-    }
-    if (left.size() != right.size() || left.times() != right.times()) {
-        return false;
-    }
-    const std::vector<double>& times = left.times();
-    for (const double t : times) {
-        if (left.discount(t) != right.discount(t)) {
-            return false;
-        }
-    }
-    std::vector<double> leftWeights;
-    std::vector<double> rightWeights;
-    for (std::size_t i = 0; i + 1 < times.size(); ++i) {
-        const double midpoint = 0.5 * (times[i] + times[i + 1]);
-        if (!(midpoint > 0.0)) {
-            continue;
-        }
-        left.zeroNodeWeights(midpoint, leftWeights);
-        right.zeroNodeWeights(midpoint, rightWeights);
-        if (leftWeights != rightWeights) {
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace detail
-
-/// True when two discount curves define the same discount function: the same
-/// object, or the same node grid with equal discounts at every node and equal
-/// zero-node weights at every segment midpoint. The midpoint weights
-/// fingerprint the interpolation space, scheme, tension and switch index, so
-/// curves that only share their node values are not interchangeable.
-inline bool sameCurveValues(const DiscountCurve<double>& left, const DiscountCurve<double>& right) {
-    return detail::sameCurveValuesCore(left, &left, right, &right);
-}
-
-/// Analytic IRS rows for `R = floatPv / fixedAnnuity` with the floating
-/// forwards from the child spread curve over `forecastParent` and every
-/// discount factor from `discount`:
-/// `fRow = d R / d spread_k` (parent and discount frozen),
-/// `parentRow = d R / d z_forecastParent` (spreads and discount frozen) and
-/// `discountRow = d R / d z_discount` (spreads and forecast parent frozen).
-inline void irsSwapJacobianRows(const SpreadCurve<double>& child,
-                                const DiscountCurve<double>& forecastParent,
-                                const DiscountCurve<double>& discount, const IrsPillar& pillar,
-                                const datetime::Date& referenceDate,
-                                const datetime::DayCounter& zeroDayCounter,
-                                std::vector<double>& fRow, std::vector<double>& parentRow,
-                                std::vector<double>& discountRow) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule floatSchedule(effective, pillar.maturity, pillar.floatTenor,
-                                           pillar.floatCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const datetime::Schedule fixedSchedule(effective, pillar.maturity, pillar.fixedTenor,
-                                           pillar.fixedCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& floatDates = floatSchedule.dates();
-    const std::vector<datetime::Date>& fixedDates = fixedSchedule.dates();
-    const std::size_t nChild = child.size();
-    const std::size_t nParent = forecastParent.size();
-    const std::size_t nDiscount = discount.size();
-    fRow.assign(nChild - 1, 0.0);
-    parentRow.assign(nParent - 1, 0.0);
-    discountRow.assign(nDiscount - 1, 0.0);
-    const auto weightsAt = [](const auto& curve, double time, std::vector<double>& out) {
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> weights;
-    std::vector<double> annuityRow(nDiscount - 1, 0.0);
-    double annuity = 0.0;
-    for (std::size_t j = 1; j < fixedDates.size(); ++j) {
-        const double tau =
-            datetime::yearFraction(fixedDates[j - 1], fixedDates[j], pillar.fixedDayCounter);
-        const datetime::Date payDate = pillar.fixedCalendar.advance(
-            fixedDates[j], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        const double discountPay = discount.discount(tPay);
-        annuity += tau * discountPay;
-        weightsAt(discount, tPay, weights);
-        for (std::size_t i = 1; i < nDiscount; ++i) {
-            annuityRow[i - 1] += -tau * tPay * discountPay * weights[i];
-        }
-    }
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("irsSwapJacobianRows: non-positive fixed annuity");
-    }
-
-    // Coupon discount-factor sensitivities with the forward state frozen.
-    std::vector<double> discountNumerator(nDiscount - 1, 0.0);
-    std::vector<double> childPrev;
-    std::vector<double> childCur;
-    std::vector<double> parentPrev;
-    std::vector<double> parentCur;
-    std::vector<double> payWeights;
-    double floatPv = 0.0;
-    for (std::size_t k = 1; k < floatDates.size(); ++k) {
-        const double tau =
-            datetime::yearFraction(floatDates[k - 1], floatDates[k], pillar.floatDayCounter);
-        const double tPrev =
-            datetime::yearFraction(referenceDate, floatDates[k - 1], zeroDayCounter);
-        const double tCur = datetime::yearFraction(referenceDate, floatDates[k], zeroDayCounter);
-        const datetime::Date payDate = pillar.floatCalendar.advance(
-            floatDates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        const double discountPay = discount.discount(tPay);
-        if (k == 1 && pillar.firstCouponFixed) {
-            // A known fixing has no forward dependence; only its payment
-            // discount factor moves with the discount curve.
-            const double couponPv = tau * discountPay * pillar.firstCouponRate;
-            floatPv += couponPv;
-            weightsAt(discount, tPay, payWeights);
-            for (std::size_t i = 1; i < nDiscount; ++i) {
-                discountNumerator[i - 1] += -tPay * couponPv * payWeights[i];
-            }
-            continue;
-        }
-        const double childPrevious = child.discount(tPrev);
-        const double childCurrent = child.discount(tCur);
-        const double forward = (childPrevious / childCurrent - 1.0) / tau;
-        floatPv += tau * discountPay * forward;
-        const double ratio = childPrevious / childCurrent;
-        weightsAt(child, tPrev, childPrev);
-        weightsAt(child, tCur, childCur);
-        weightsAt(forecastParent, tPrev, parentPrev);
-        weightsAt(forecastParent, tCur, parentCur);
-        weightsAt(discount, tPay, payWeights);
-        // f = (R - 1) / tau with R = D_c(tPrev) / D_c(tCur), so
-        // d f = (1 + tau f)/tau * (-tPrev dw + tCur dw) on the curve whose
-        // nodes move. A child bump moves only the child curve; a parent bump
-        // shifts the child zero curve one-for-one (zeta_child = zeta_parent +
-        // s) and leaves the annuity on the frozen discount curve unchanged.
-        for (std::size_t i = 1; i < nChild; ++i) {
-            fRow[i - 1] +=
-                (discountPay * ratio / annuity) * (-tPrev * childPrev[i] + tCur * childCur[i]);
-        }
-        for (std::size_t i = 1; i < nParent; ++i) {
-            parentRow[i - 1] +=
-                (discountPay * ratio / annuity) * (-tPrev * parentPrev[i] + tCur * parentCur[i]);
-        }
-        // Coupon PV is tau * Dp * f with f frozen: the direct discount-factor
-        // term keeps tau.
-        for (std::size_t i = 1; i < nDiscount; ++i) {
-            discountNumerator[i - 1] += -tPay * tau * discountPay * forward * payWeights[i];
-        }
-    }
-    const double denominator = annuity * annuity;
-    for (std::size_t i = 1; i < nDiscount; ++i) {
-        discountRow[i - 1] =
-            (discountNumerator[i - 1] * annuity - floatPv * annuityRow[i - 1]) / denominator;
-    }
-}
-
-/// Assemble the child own-curve Jacobian `F_c` (row-major `m_c x m_c`) and the
-/// cross block `C` (row-major `m_c x m_p`) from basis pillars.
-inline void assembleBasisJacobian(const SpreadCurve<double>& child,
-                                  const std::vector<BasisPillar>& pillars,
-                                  const datetime::Date& referenceDate, std::vector<double>& f,
-                                  std::vector<double>& c) {
-    if (child.size() != pillars.size() + 1) {
-        throw std::invalid_argument(
-            "assembleBasisJacobian: child nodes must match the pillar count");
-    }
-    const std::size_t mChild = pillars.size();
-    const std::size_t mParent = child.parent().size() - 1;
-    f.assign(mChild * mChild, 0.0);
-    c.assign(mChild * mParent, 0.0);
-    std::vector<double> fRow;
-    std::vector<double> cRow;
-    for (std::size_t j = 0; j < mChild; ++j) {
-        basisSwapJacobianRows(child, pillars[j], referenceDate, fRow, cRow);
-        for (std::size_t i = 0; i < mChild; ++i) {
-            f[j * mChild + i] = fRow[i];
-        }
-        for (std::size_t i = 0; i < mParent; ++i) {
-            c[j * mParent + i] = cRow[i];
-        }
-    }
-}
-
-/// Analytic rows of a synthetic money-market forecast pillar
-/// `r = (D_f(t1) / D_f(t2) - 1) / tau` (deposit or forward-starting FRA):
-/// `ownRow = d r / d spread_k` over the child spread nodes and
-/// `parentRow = d r / d z_parent,k` over the forecast parent, whose nodes
-/// shift the child zero curve one-for-one. The pillar never references a
-/// discount curve, so there is no separate discount sensitivity.
-inline void forecastSimpleJacobianRows(const SpreadCurve<double>& child,
-                                       const ForecastPillar& pillar,
-                                       const datetime::Date& referenceDate,
-                                       std::vector<double>& ownRow,
-                                       std::vector<double>& parentRow) {
-    const DiscountCurve<double>& parent = child.parent();
-    const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Date maturity =
-        pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
-    const datetime::DayCounter& zeroDayCounter = child.zeroDayCounter();
-    const double t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    const double t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    const double tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-    if (!(tau > 0.0)) {
-        throw std::invalid_argument("forecastSimpleJacobianRows: non-positive accrual");
-    }
-    if (!(t1 >= 0.0)) {
-        throw std::invalid_argument("forecastSimpleJacobianRows: start before the reference date");
-    }
-    const double ratio = child.discount(t1) / child.discount(t2);
-    ownRow.assign(child.size() - 1, 0.0);
-    parentRow.assign(parent.size() - 1, 0.0);
-    const auto weightsAt = [](const auto& curve, double time, std::vector<double>& out) {
-        // D(0) = 1 is node-independent; sensitivities at t = 0 are zero.
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> previous;
-    std::vector<double> current;
-    const double factor = ratio / tau;
-    weightsAt(child, t1, previous);
-    weightsAt(child, t2, current);
-    for (std::size_t j = 1; j < child.size(); ++j) {
-        ownRow[j - 1] = factor * (-t1 * previous[j] + t2 * current[j]);
-    }
-    weightsAt(parent, t1, previous);
-    weightsAt(parent, t2, current);
-    for (std::size_t j = 1; j < parent.size(); ++j) {
-        parentRow[j - 1] = factor * (-t1 * previous[j] + t2 * current[j]);
-    }
-}
-
-/// Core own/parent rows of a forecast-curve rate future, shared by the
-/// concrete-curve and view-based entry points: the period forward or the
-/// business-day-grid averaged rate on `child` plus the stored convexity
-/// adjustment. Convexity is additive and drops out of the row. `ownRow` picks
-/// up the child spread-node weights; `parentRow` the `parent` weights, whose
-/// nodes shift the child zero curve one-for-one.
-template <typename ChildT, typename ParentT>
-inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
-                                   const ForecastPillar& pillar,
-                                   const datetime::Date& referenceDate, std::vector<double>& ownRow,
-                                   std::vector<double>& parentRow) {
-    const datetime::DayCounter& zeroDayCounter = child.zeroDayCounter();
-    ownRow.assign(child.size() - 1, 0.0);
-    parentRow.assign(parent.size() - 1, 0.0);
-    const auto weightsAt = [](const auto& curve, double time, std::vector<double>& out) {
-        // D(0) = 1 is node-independent; sensitivities at t = 0 are zero.
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    const double startTime = datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
-    if (!(startTime >= 0.0)) {
-        throw std::invalid_argument(
-            "forecastFutureRowsCore: futures fixing before the reference date");
-    }
-    if (pillar.futureStyle == FutureStyle::Averaged &&
-        pillar.averagingStyle == AveragingStyle::Arithmetic) {
-        const std::vector<datetime::Date> fixings =
-            businessDayFixings(pillar.calendar, pillar.start, pillar.maturity);
-        const std::size_t periods = fixings.size() - 1;
-        if (periods == 0) {
-            throw std::invalid_argument(
-                "forecastFutureRowsCore: empty averaged futures reference period");
-        }
-        std::vector<double> weightsStart;
-        std::vector<double> weightsEnd;
-        for (std::size_t k = 0; k < periods; ++k) {
-            const double tau =
-                datetime::yearFraction(fixings[k], fixings[k + 1], pillar.quoteDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument(
-                    "forecastFutureRowsCore: non-positive averaged futures accrual");
-            }
-            const double t1 = datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter);
-            const double t2 = datetime::yearFraction(referenceDate, fixings[k + 1], zeroDayCounter);
-            const double d1 = child.discount(t1);
-            const double d2 = child.discount(t2);
-            const double ratio = d1 / d2;
-            const double scale = 1.0 / (tau * d2);
-            const auto accumulate = [&](const auto& weightsCurve, std::vector<double>& row) {
-                weightsAt(weightsCurve, t1, weightsStart);
-                weightsAt(weightsCurve, t2, weightsEnd);
-                for (std::size_t j = 1; j < row.size() + 1; ++j) {
-                    row[j - 1] +=
-                        scale * (-t1 * d1 * weightsStart[j] + ratio * t2 * d2 * weightsEnd[j]);
-                }
-            };
-            accumulate(child, ownRow);
-            accumulate(parent, parentRow);
-        }
-        for (double& value : ownRow) {
-            value /= static_cast<double>(periods);
-        }
-        for (double& value : parentRow) {
-            value /= static_cast<double>(periods);
-        }
-        return;
-    }
-    // Simple, compounded and compounded-average futures: the daily compounded
-    // products telescope to the period forward, so the simple-rate row is
-    // exact.
-    const double tau =
-        datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-    if (!(tau > 0.0)) {
-        throw std::invalid_argument("forecastFutureRowsCore: non-positive futures accrual");
-    }
-    const double endTime = datetime::yearFraction(referenceDate, pillar.maturity, zeroDayCounter);
-    const double d1 = child.discount(startTime);
-    const double d2 = child.discount(endTime);
-    std::vector<double> weightsStart;
-    std::vector<double> weightsEnd;
-    const double factor = d1 / (tau * d2);
-    weightsAt(child, startTime, weightsStart);
-    weightsAt(child, endTime, weightsEnd);
-    for (std::size_t j = 1; j < ownRow.size() + 1; ++j) {
-        ownRow[j - 1] = factor * (-startTime * weightsStart[j] + endTime * weightsEnd[j]);
-    }
-    weightsAt(parent, startTime, weightsStart);
-    weightsAt(parent, endTime, weightsEnd);
-    for (std::size_t j = 1; j < parentRow.size() + 1; ++j) {
-        parentRow[j - 1] = factor * (-startTime * weightsStart[j] + endTime * weightsEnd[j]);
-    }
-}
-
-/// Analytic rows of a forecast-curve rate future:
-/// `ownRow = d r / d s_k` over the child spread nodes and
-/// `parentRow = d r / d z_parent,k` over the forecast parent, whose nodes
-/// shift the child zero curve one-for-one. The pillar never references a
-/// discount curve, so there is no separate discount sensitivity.
-inline void forecastFutureJacobianRows(const SpreadCurve<double>& child,
-                                       const ForecastPillar& pillar,
-                                       const datetime::Date& referenceDate,
-                                       std::vector<double>& ownRow,
-                                       std::vector<double>& parentRow) {
-    forecastFutureRowsCore(child, child.parent(), pillar, referenceDate, ownRow, parentRow);
-}
-
-/// Own-curve, forecast-parent and discount rows of one forecast pillar.
-/// Basis swaps use the parent row as the cross row and report a zero discount
-/// row; IRS pillars report the parent and discount rows separately. Synthetic
-/// deposits, FRAs and rate futures move with the child spread nodes and the
-/// forecast parent one-for-one and report a zero discount row.
-inline void forecastPillarJacobianRows(const SpreadCurve<double>& child,
-                                       const ForecastPillar& pillar,
-                                       const datetime::Date& referenceDate,
-                                       const DiscountCurve<double>* discountCurve,
-                                       std::vector<double>& fRow, std::vector<double>& parentRow,
-                                       std::vector<double>& discountRow) {
-    const DiscountCurve<double>& forecastParent = child.parent();
-    const DiscountCurve<double>& discount =
-        discountCurve != nullptr ? *discountCurve : forecastParent;
-    switch (pillar.kind) {
-        case ForecastPillar::Kind::Deposit:
-        case ForecastPillar::Kind::Fra:
-            forecastSimpleJacobianRows(child, pillar, referenceDate, fRow, parentRow);
-            discountRow.assign(discount.size() - 1, 0.0);
-            return;
-        case ForecastPillar::Kind::Future:
-            forecastFutureJacobianRows(child, pillar, referenceDate, fRow, parentRow);
-            discountRow.assign(discount.size() - 1, 0.0);
-            return;
-        case ForecastPillar::Kind::BasisSwap:
-            basisSwapJacobianRows(child, pillar.basis, referenceDate, fRow, parentRow);
-            discountRow.assign(discount.size() - 1, 0.0);
-            return;
-        case ForecastPillar::Kind::Irs:
-            irsSwapJacobianRows(child, forecastParent, discount, pillar.irs, referenceDate,
-                                child.zeroDayCounter(), fRow, parentRow, discountRow);
-            return;
-    }
-    throw std::invalid_argument("forecastPillarJacobianRows: unknown forecast pillar kind");
-}
-
-/// Assemble the child own-curve Jacobian `F_c` (row-major `m_c x m_c`) and the
-/// cross block `C` (row-major `m_c x m_p`) over the forecast-parent nodes.
-/// When an IRS child discounts on its forecast parent (the same object, or a
-/// curve with the same grid and values) the cross block is the sum of the
-/// parent and discount rows, because the forward and discounting curves are
-/// then the same curve.
-inline void assembleForecastJacobian(const SpreadCurve<double>& child,
-                                     const std::vector<ForecastPillar>& pillars,
-                                     const datetime::Date& referenceDate,
-                                     const DiscountCurve<double>* discountCurve,
-                                     std::vector<double>& f, std::vector<double>& c) {
-    if (child.size() != pillars.size() + 1) {
-        throw std::invalid_argument(
-            "assembleForecastJacobian: child nodes must match the pillar count");
-    }
-    const std::size_t mChild = pillars.size();
-    const DiscountCurve<double>& forecastParent = child.parent();
-    const std::size_t mParent = forecastParent.size() - 1;
-    const DiscountCurve<double>& discount =
-        discountCurve != nullptr ? *discountCurve : forecastParent;
-    const bool discountIsParent =
-        &discount == &forecastParent || sameCurveValues(discount, forecastParent);
-    f.assign(mChild * mChild, 0.0);
-    c.assign(mChild * mParent, 0.0);
-    std::vector<double> fRow;
-    std::vector<double> parentRow;
-    std::vector<double> discountRow;
-    for (std::size_t j = 0; j < mChild; ++j) {
-        forecastPillarJacobianRows(child, pillars[j], referenceDate, discountCurve, fRow, parentRow,
-                                   discountRow);
-        for (std::size_t i = 0; i < mChild; ++i) {
-            f[j * mChild + i] = fRow[i];
-        }
-        for (std::size_t i = 0; i < mParent; ++i) {
-            c[j * mParent + i] = parentRow[i] + (discountIsParent ? discountRow[i] : 0.0);
-        }
-    }
-}
-
-/// Discount-function equality of two views: the same underlying object or the
-/// same node grid with equal discount factors at every node and equal zero-node
-/// weights at every segment midpoint. The midpoint weights fingerprint the
-/// interpolation space, scheme, tension and switch index, so views that only
-/// share their node values are not interchangeable.
-inline bool sameCurveView(const StackCurveView& left, const StackCurveView& right) {
-    return detail::sameCurveValuesCore(left, left.identity(), right, right.identity());
-}
-
-/// View-based basis rows for an arbitrary forecast parent and discount curve:
-/// `ownRow` over the child spread nodes, `parentRow` over the forecast-parent
-/// nodes (both forwards move with the parent, the annuity is frozen), and
-/// `discountRow` over the discount nodes (discount factors only). The optional
-/// weight sources let the same curve-space partial be expressed on an ancestor
-/// curve's node grid, which is how a depth-2 chain's rows reach the root block.
-inline void basisSwapJacobianRowsView(const StackCurveView& child, const StackCurveView& parent,
-                                      const StackCurveView& discount, const BasisPillar& pillar,
-                                      const datetime::Date& referenceDate,
-                                      std::vector<double>& ownRow, std::vector<double>& parentRow,
-                                      std::vector<double>& discountRow,
-                                      const StackCurveView* parentWeights = nullptr,
-                                      const StackCurveView* discountWeights = nullptr) {
-    const datetime::Schedule schedule(referenceDate, pillar.maturity, pillar.floatTenor,
-                                      pillar.calendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    const std::size_t periods = dates.size() - 1;
-    const std::size_t nChild = child.size();
-    const StackCurveView& parentWeightCurve = parentWeights != nullptr ? *parentWeights : parent;
-    const StackCurveView& discountWeightCurve =
-        discountWeights != nullptr ? *discountWeights : discount;
-    const std::size_t nParent = parentWeightCurve.size();
-    const std::size_t nDiscount = discountWeightCurve.size();
-    const datetime::DayCounter& zeroDayCounter = discount.zeroDayCounter();
-    std::vector<double> times(periods + 1);
-    std::vector<double> taus(periods);
-    std::vector<double> discountDf(periods + 1);
-    std::vector<double> childDf(periods + 1);
-    std::vector<double> parentDf(periods + 1);
-    std::vector<double> childForward(periods);
-    std::vector<double> parentForward(periods);
-    times[0] = datetime::yearFraction(referenceDate, dates[0], zeroDayCounter);
-    discountDf[0] = discount.discount(times[0]);
-    childDf[0] = child.discount(times[0]);
-    parentDf[0] = parent.discount(times[0]);
-    double annuity = 0.0;
-    double numerator = 0.0;
-    for (std::size_t k = 0; k < periods; ++k) {
-        times[k + 1] = datetime::yearFraction(referenceDate, dates[k + 1], zeroDayCounter);
-        taus[k] = datetime::yearFraction(dates[k], dates[k + 1], pillar.quoteDayCounter);
-        discountDf[k + 1] = discount.discount(times[k + 1]);
-        childDf[k + 1] = child.discount(times[k + 1]);
-        parentDf[k + 1] = parent.discount(times[k + 1]);
-        childForward[k] = (childDf[k] / childDf[k + 1] - 1.0) / taus[k];
-        parentForward[k] = (parentDf[k] / parentDf[k + 1] - 1.0) / taus[k];
-        annuity += taus[k] * discountDf[k + 1];
-        numerator += taus[k] * discountDf[k + 1] * (childForward[k] - parentForward[k]);
-    }
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("basisSwapJacobianRowsView: non-positive annuity");
-    }
-    ownRow.assign(nChild - 1, 0.0);
-    parentRow.assign(nParent - 1, 0.0);
-    discountRow.assign(nDiscount - 1, 0.0);
-    const auto weightsAt = [](const StackCurveView& curve, double time, std::vector<double>& out) {
-        // D(0) = 1 is node-independent; sensitivities at t = 0 are zero.
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> weightsPrevious;
-    std::vector<double> weightsCurrent;
-    for (std::size_t k = 0; k < periods; ++k) {
-        weightsAt(child, times[k], weightsPrevious);
-        weightsAt(child, times[k + 1], weightsCurrent);
-        const double childFactor = (1.0 + taus[k] * childForward[k]) / taus[k];
-        const double weight = taus[k] * discountDf[k + 1] / annuity;
-        for (std::size_t j = 1; j < nChild; ++j) {
-            ownRow[j - 1] += weight * childFactor *
-                             (-times[k] * weightsPrevious[j] + times[k + 1] * weightsCurrent[j]);
-        }
-        weightsAt(parentWeightCurve, times[k], weightsPrevious);
-        weightsAt(parentWeightCurve, times[k + 1], weightsCurrent);
-        const double forwardSpread = childForward[k] - parentForward[k];
-        for (std::size_t j = 1; j < nParent; ++j) {
-            parentRow[j - 1] += weight * forwardSpread *
-                                (-times[k] * weightsPrevious[j] + times[k + 1] * weightsCurrent[j]);
-        }
-    }
-    std::vector<double> numeratorDiscount(nDiscount - 1, 0.0);
-    std::vector<double> annuityDiscount(nDiscount - 1, 0.0);
-    for (std::size_t k = 0; k < periods; ++k) {
-        weightsAt(discountWeightCurve, times[k + 1], weightsCurrent);
-        const double forwardSpread = childForward[k] - parentForward[k];
-        for (std::size_t j = 1; j < nDiscount; ++j) {
-            const double dDiscount = -times[k + 1] * discountDf[k + 1] * weightsCurrent[j];
-            numeratorDiscount[j - 1] += taus[k] * dDiscount * forwardSpread;
-            annuityDiscount[j - 1] += taus[k] * dDiscount;
-        }
-    }
-    const double denominator = annuity * annuity;
-    for (std::size_t j = 0; j < nDiscount - 1; ++j) {
-        discountRow[j] =
-            (numeratorDiscount[j] * annuity - numerator * annuityDiscount[j]) / denominator;
-    }
-    if (!pillar.spreadOnParentLeg) {
-        for (double& value : ownRow) {
-            value = -value;
-        }
-        for (double& value : parentRow) {
-            value = -value;
-        }
-        for (double& value : discountRow) {
-            value = -value;
-        }
-    }
-}
-
-/// View-based IRS rows for `R = floatPv / fixedAnnuity` with the floating
-/// forwards from the child spread curve over `forecastParent` and every
-/// discount factor from `discount`. The optional weight sources express the
-/// same partials on an ancestor curve's node grid for depth-2 chains.
-inline void irsSwapJacobianRowsView(const StackCurveView& child,
-                                    const StackCurveView& forecastParent,
-                                    const StackCurveView& discount, const IrsPillar& pillar,
-                                    const datetime::Date& referenceDate, std::vector<double>& fRow,
-                                    std::vector<double>& parentRow,
-                                    std::vector<double>& discountRow,
-                                    const StackCurveView* parentWeights = nullptr,
-                                    const StackCurveView* discountWeights = nullptr) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule floatSchedule(effective, pillar.maturity, pillar.floatTenor,
-                                           pillar.floatCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const datetime::Schedule fixedSchedule(effective, pillar.maturity, pillar.fixedTenor,
-                                           pillar.fixedCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& floatDates = floatSchedule.dates();
-    const std::vector<datetime::Date>& fixedDates = fixedSchedule.dates();
-    const std::size_t nChild = child.size();
-    const StackCurveView& parentWeightCurve =
-        parentWeights != nullptr ? *parentWeights : forecastParent;
-    const StackCurveView& discountWeightCurve =
-        discountWeights != nullptr ? *discountWeights : discount;
-    const std::size_t nParent = parentWeightCurve.size();
-    const std::size_t nDiscount = discountWeightCurve.size();
-    const datetime::DayCounter& zeroDayCounter = discount.zeroDayCounter();
-    fRow.assign(nChild - 1, 0.0);
-    parentRow.assign(nParent - 1, 0.0);
-    discountRow.assign(nDiscount - 1, 0.0);
-    const auto weightsAt = [](const StackCurveView& curve, double time, std::vector<double>& out) {
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> weights;
-    std::vector<double> annuityRow(nDiscount - 1, 0.0);
-    double annuity = 0.0;
-    for (std::size_t j = 1; j < fixedDates.size(); ++j) {
-        const double tau =
-            datetime::yearFraction(fixedDates[j - 1], fixedDates[j], pillar.fixedDayCounter);
-        const datetime::Date payDate = pillar.fixedCalendar.advance(
-            fixedDates[j], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        const double discountPay = discount.discount(tPay);
-        annuity += tau * discountPay;
-        weightsAt(discountWeightCurve, tPay, weights);
-        for (std::size_t i = 1; i < nDiscount; ++i) {
-            annuityRow[i - 1] += -tau * tPay * discountPay * weights[i];
-        }
-    }
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("irsSwapJacobianRowsView: non-positive fixed annuity");
-    }
-    std::vector<double> discountNumerator(nDiscount - 1, 0.0);
-    std::vector<double> childPrev;
-    std::vector<double> childCur;
-    std::vector<double> parentPrev;
-    std::vector<double> parentCur;
-    std::vector<double> payWeights;
-    double floatPv = 0.0;
-    for (std::size_t k = 1; k < floatDates.size(); ++k) {
-        const double tau =
-            datetime::yearFraction(floatDates[k - 1], floatDates[k], pillar.floatDayCounter);
-        const double tPrev =
-            datetime::yearFraction(referenceDate, floatDates[k - 1], zeroDayCounter);
-        const double tCur = datetime::yearFraction(referenceDate, floatDates[k], zeroDayCounter);
-        const datetime::Date payDate = pillar.floatCalendar.advance(
-            floatDates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        const double discountPay = discount.discount(tPay);
-        if (k == 1 && pillar.firstCouponFixed) {
-            const double couponPv = tau * discountPay * pillar.firstCouponRate;
-            floatPv += couponPv;
-            weightsAt(discountWeightCurve, tPay, payWeights);
-            for (std::size_t i = 1; i < nDiscount; ++i) {
-                discountNumerator[i - 1] += -tPay * couponPv * payWeights[i];
-            }
-            continue;
-        }
-        const double childPrevious = child.discount(tPrev);
-        const double childCurrent = child.discount(tCur);
-        const double forward = (childPrevious / childCurrent - 1.0) / tau;
-        floatPv += tau * discountPay * forward;
-        const double ratio = childPrevious / childCurrent;
-        weightsAt(child, tPrev, childPrev);
-        weightsAt(child, tCur, childCur);
-        weightsAt(parentWeightCurve, tPrev, parentPrev);
-        weightsAt(parentWeightCurve, tCur, parentCur);
-        weightsAt(discountWeightCurve, tPay, payWeights);
-        for (std::size_t i = 1; i < nChild; ++i) {
-            fRow[i - 1] +=
-                (discountPay * ratio / annuity) * (-tPrev * childPrev[i] + tCur * childCur[i]);
-        }
-        for (std::size_t i = 1; i < nParent; ++i) {
-            parentRow[i - 1] +=
-                (discountPay * ratio / annuity) * (-tPrev * parentPrev[i] + tCur * parentCur[i]);
-        }
-        for (std::size_t i = 1; i < nDiscount; ++i) {
-            discountNumerator[i - 1] += -tPay * tau * discountPay * forward * payWeights[i];
-        }
-    }
-    const double denominator = annuity * annuity;
-    for (std::size_t i = 1; i < nDiscount; ++i) {
-        discountRow[i - 1] =
-            (discountNumerator[i - 1] * annuity - floatPv * annuityRow[i - 1]) / denominator;
-    }
-}
-
-/// View-based rows of a synthetic money-market forecast pillar
-/// `r = (D_f(t1) / D_f(t2) - 1) / tau`: `ownRow` over the child spread nodes,
-/// `parentRow` over the forecast-parent grid (an additive spread curve shifts
-/// the child forwards one-for-one with its parent) and a zero discount row.
-/// The optional weight sources express the parent partial on an ancestor
-/// curve's node grid for depth-2 chains.
-inline void
-forecastSimpleJacobianRowsView(const StackCurveView& child, const StackCurveView& parent,
-                               const StackCurveView& discount, const ForecastPillar& pillar,
-                               const datetime::Date& referenceDate, std::vector<double>& ownRow,
-                               std::vector<double>& parentRow, std::vector<double>& discountRow,
-                               const StackCurveView* parentWeights = nullptr,
-                               const StackCurveView* discountWeights = nullptr) {
-    const StackCurveView& parentWeightCurve = parentWeights != nullptr ? *parentWeights : parent;
-    const StackCurveView& discountWeightCurve =
-        discountWeights != nullptr ? *discountWeights : discount;
-    const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Date maturity =
-        pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
-    const datetime::DayCounter& zeroDayCounter = child.zeroDayCounter();
-    const double t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    const double t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    const double tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-    if (!(tau > 0.0)) {
-        throw std::invalid_argument("forecastSimpleJacobianRowsView: non-positive accrual");
-    }
-    if (!(t1 >= 0.0)) {
-        throw std::invalid_argument(
-            "forecastSimpleJacobianRowsView: start before the reference date");
-    }
-    const double ratio = child.discount(t1) / child.discount(t2);
-    ownRow.assign(child.size() - 1, 0.0);
-    parentRow.assign(parentWeightCurve.size() - 1, 0.0);
-    discountRow.assign(discountWeightCurve.size() - 1, 0.0);
-    const auto weightsAt = [](const StackCurveView& curve, double time, std::vector<double>& out) {
-        // D(0) = 1 is node-independent; sensitivities at t = 0 are zero.
-        if (time <= 0.0) {
-            out.assign(curve.size(), 0.0);
-            return;
-        }
-        curve.zeroNodeWeights(time, out);
-    };
-    std::vector<double> previous;
-    std::vector<double> current;
-    const double factor = ratio / tau;
-    weightsAt(child, t1, previous);
-    weightsAt(child, t2, current);
-    for (std::size_t j = 1; j < child.size(); ++j) {
-        ownRow[j - 1] = factor * (-t1 * previous[j] + t2 * current[j]);
-    }
-    weightsAt(parentWeightCurve, t1, previous);
-    weightsAt(parentWeightCurve, t2, current);
-    for (std::size_t j = 1; j < parentWeightCurve.size(); ++j) {
-        parentRow[j - 1] = factor * (-t1 * previous[j] + t2 * current[j]);
-    }
-}
-
-/// View-based rows of a forecast-curve rate future: `ownRow` over the child
-/// spread nodes, `parentRow` over the forecast-parent grid (an additive spread
-/// curve shifts the child forwards one-for-one with its parent) and a zero
-/// discount row. The optional weight sources express the parent partial on an
-/// ancestor curve's node grid for depth-2 chains.
-inline void
-forecastFutureJacobianRowsView(const StackCurveView& child, const StackCurveView& parent,
-                               const StackCurveView& discount, const ForecastPillar& pillar,
-                               const datetime::Date& referenceDate, std::vector<double>& ownRow,
-                               std::vector<double>& parentRow, std::vector<double>& discountRow,
-                               const StackCurveView* parentWeights = nullptr,
-                               const StackCurveView* discountWeights = nullptr) {
-    const StackCurveView& parentWeightCurve = parentWeights != nullptr ? *parentWeights : parent;
-    const StackCurveView& discountWeightCurve =
-        discountWeights != nullptr ? *discountWeights : discount;
-    forecastFutureRowsCore(child, parentWeightCurve, pillar, referenceDate, ownRow, parentRow);
-    discountRow.assign(discountWeightCurve.size() - 1, 0.0);
-}
-
-/// One curve of a general stack tree: native quotes, node sensitivities and
-/// (optionally) an exogenous discount curve. Inputs are listed in any order;
-/// every parent or discount view, and every ancestor in their parent chains,
-/// must match a curve in the list.
-struct StackCurveInput {
-    StackCurveView::Ptr curve;
-    CurveRole role = CurveRole::Discount;
-    std::vector<CurvePillar> discountPillars; ///< Exactly one of the two is set
-    std::vector<ForecastPillar> forecastPillars;
-    std::vector<double> dVdNodes; ///< dV/d(zeta_i); size == curve->size(), node 0 unused
-    StackCurveView::Ptr discount; ///< Exogenous discounting; null uses the parent view
-};
-
-/// Assembled stack quote system over native node coordinates: per-curve block
-/// offsets and the row-major instrument Jacobian `F = d r / d zeta`.
-struct StackQuoteSystem {
-    std::size_t dim = 0;
-    std::vector<std::size_t> offsets; ///< First node column of each input curve
-    std::vector<double> jacobian;     ///< Row-major dim x dim
-};
-
-/// Quote labels, maturity years, maturity-tag buckets and per-quote roles of
-/// one stack input in `stackQuoteRisk` entry order. A direct turn knot keeps
-/// its bootstrap column but reports under `TurnOverlay` with a `Turn <date>`
-/// label.
+/// Quote points of one stack input in `stackQuoteRisk` entry order. A direct
+/// turn knot keeps its bootstrap column but reports under `TurnOverlay` with a
+/// `Turn <date>` label. The caller fills each point's `delta`.
 inline void appendStackQuoteMetadata(const StackCurveInput& input,
                                      const datetime::Date& referenceDate,
-                                     std::vector<std::string>& labels, std::vector<int>& years,
-                                     std::vector<std::string>& buckets,
-                                     std::vector<CurveRole>& roles) {
+                                     std::vector<QuotePoint>& points) {
     if (!input.discountPillars.empty()) {
         for (const CurvePillar& pillar : input.discountPillars) {
             const datetime::Date maturity = pillarRiskMaturity(pillar);
             const double t =
                 datetime::yearFraction(referenceDate, maturity, input.curve->zeroDayCounter());
             const std::string tag = riskMaturityTag(maturity, t);
-            years.push_back(static_cast<int>(std::lround(t)));
-            buckets.push_back(tag);
-            labels.push_back(std::string(pillarKindName(pillar.kind)) + " " + tag);
-            roles.push_back(input.role);
+            points.push_back(QuotePoint{std::string(pillarKindName(pillar.kind)) + " " + tag, tag,
+                                        static_cast<int>(std::lround(t)), input.role, 0.0});
         }
         return;
     }
@@ -1187,24 +283,61 @@ inline void appendStackQuoteMetadata(const StackCurveInput& input,
         const datetime::Date maturity = forecastPillarRiskMaturity(pillar);
         const double t =
             datetime::yearFraction(referenceDate, maturity, input.curve->zeroDayCounter());
-        years.push_back(static_cast<int>(std::lround(t)));
-        roles.push_back(pillar.turnPillar ? CurveRole::TurnOverlay : input.role);
+        const int year = static_cast<int>(std::lround(t));
+        const CurveRole role = pillar.turnPillar ? CurveRole::TurnOverlay : input.role;
         if (pillar.turnPillar) {
             const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
             const std::string label = "Turn " + start.toIso();
-            buckets.push_back(label);
-            labels.push_back(label);
+            points.push_back(QuotePoint{label, label, year, role, 0.0});
         } else {
             const std::string tag = riskMaturityTag(maturity, t);
-            buckets.push_back(tag);
-            labels.push_back(std::string(forecastPillarKindName(pillar.kind)) + " " + tag);
+            points.push_back(
+                QuotePoint{std::string(forecastPillarKindName(pillar.kind)) + " " + tag, tag, year,
+                           role, 0.0});
         }
+    }
+}
+
+/// Quote points of a cross-currency child input: one `Xccy <tag>` point per
+/// pillar, aged on the domestic discount block's zero clock. The caller fills
+/// each point's `delta`.
+inline void appendXccyQuoteMetadata(const StackCurveInput& input,
+                                    const datetime::Date& referenceDate,
+                                    std::vector<QuotePoint>& points) {
+    const datetime::DayCounter& zeroDayCounter = input.xccy->domesticDiscount->zeroDayCounter();
+    for (const XccyPillar& pillar : input.xccyPillars) {
+        const datetime::Date maturity =
+            pillar.foreignCalendar.adjust(pillar.maturity, pillar.foreignBusinessDayConvention);
+        const double t = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
+        const std::string tag = riskMaturityTag(maturity, t);
+        points.push_back(
+            QuotePoint{"Xccy " + tag, tag, static_cast<int>(std::lround(t)), input.role, 0.0});
+    }
+}
+
+/// Calendar date of a native forecast node time (definition below).
+inline datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,
+                                       const datetime::Date& referenceDate, double t);
+
+/// Quote points of a factor block: one `<prefix> <tag>` point per solved node,
+/// aged on the factor's own node clock. The caller fills each point's `delta`.
+inline void appendFactorMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
+                                 std::vector<QuotePoint>& points) {
+    const std::vector<double>& times = input.curve->times();
+    for (std::size_t i = 1; i < input.curve->size(); ++i) {
+        const datetime::Date nodeDate =
+            forecastNodeDate(input.factor->nodeDayCounter, referenceDate, times[i]);
+        const std::string bucket = riskMaturityTag(nodeDate, times[i]);
+        points.push_back(QuotePoint{input.factor->labelPrefix + " " + bucket, bucket,
+                                    static_cast<int>(std::lround(times[i])), input.role, 0.0});
     }
 }
 
 /// Assemble the stack quote Jacobian `F = d r / d zeta` (row-major `dim x dim`)
 /// and the per-curve node block offsets. Every instrument row is assembled
-/// analytically over the view-native node coordinates.
+/// analytically over the view-native node coordinates; cross-currency child
+/// rows arrive per block and are placed by view identity, and factor blocks
+/// contribute identity rows so their solved value is the node-space residual.
 inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInput>& curves,
                                                  const datetime::Date& referenceDate) {
     if (curves.empty()) {
@@ -1219,13 +352,29 @@ inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInp
         }
         const bool hasDiscount = !input.discountPillars.empty();
         const bool hasForecast = !input.forecastPillars.empty();
-        if (hasDiscount == hasForecast) {
+        const bool hasXccy = input.xccy.has_value();
+        const bool hasFactor = input.factor.has_value();
+        const int modes =
+            (hasDiscount ? 1 : 0) + (hasForecast ? 1 : 0) + (hasXccy ? 1 : 0) + (hasFactor ? 1 : 0);
+        if (modes != 1) {
             throw std::invalid_argument(
                 "assembleStackQuoteSystem: exactly one pillar set must be non-empty");
         }
-        const std::size_t pillars =
-            hasDiscount ? input.discountPillars.size() : input.forecastPillars.size();
-        if (pillars + 1 != input.curve->size()) {
+        const std::size_t rows = hasDiscount   ? input.discountPillars.size()
+                                 : hasForecast ? input.forecastPillars.size()
+                                 : hasXccy     ? input.xccyPillars.size()
+                                               : input.curve->size() - 1;
+        if (hasXccy) {
+            if (input.xccyPillars.empty() || input.xccyPillars.size() + 1 != input.curve->size()) {
+                throw std::invalid_argument(
+                    "assembleStackQuoteSystem: xccy pillars must match the curve nodes");
+            }
+            if (input.xccy->foreignForecast == nullptr || input.xccy->domesticForecast == nullptr ||
+                input.xccy->domesticDiscount == nullptr) {
+                throw std::invalid_argument(
+                    "assembleStackQuoteSystem: malformed xccy row references");
+            }
+        } else if (rows + 1 != input.curve->size()) {
             throw std::invalid_argument(
                 "assembleStackQuoteSystem: pillars must match the curve nodes");
         }
@@ -1254,14 +403,58 @@ inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInp
         }
         throw std::invalid_argument("assembleStackQuoteSystem: curve is not part of the stack");
     };
+    // Cross-currency rows bind their referenced blocks by view identity, so a
+    // discount block and a forecast block on equal curve values stay distinct,
+    // and a forecast curve that happens to be the child's own discount
+    // function keeps its own block. A rebuilt ancestor copy (a gamma bump
+    // re-binds a forecast parent by value) falls back to discount-function
+    // equality, since only the stack can supply the parent's block.
+    const auto matchIdentity = [&](const StackCurveView& view) -> std::size_t {
+        for (std::size_t m = 0; m < curves.size(); ++m) {
+            if (curves[m].curve->identity() == view.identity()) {
+                return m;
+            }
+        }
+        for (std::size_t m = 0; m < curves.size(); ++m) {
+            if (sameCurveView(*curves[m].curve, view)) {
+                return m;
+            }
+        }
+        throw std::invalid_argument(
+            "assembleStackQuoteSystem: xccy row block is not part of the stack");
+    };
     system.jacobian.assign(dim * dim, 0.0);
     std::vector<double> scratch;
     std::size_t row = 0;
     for (std::size_t k = 0; k < curves.size(); ++k) {
         const StackCurveInput& input = curves[k];
+        if (input.factor) {
+            for (std::size_t i = 0; i + 1 < input.curve->size(); ++i) {
+                system.jacobian[row * dim + system.offsets[k] + i] = 1.0;
+                ++row;
+            }
+            continue;
+        }
+        if (input.xccy) {
+            const XccyRowInput& refs = *input.xccy;
+            for (const XccyPillar& pillar : input.xccyPillars) {
+                const std::vector<XccyRowBlock> blocks = xccySwapJacobianRowsView(
+                    *input.curve, *refs.foreignForecast, *refs.domesticDiscount,
+                    *refs.domesticForecast, pillar, referenceDate,
+                    refs.domesticDiscount->zeroDayCounter());
+                for (const XccyRowBlock& block : blocks) {
+                    const std::size_t target = matchIdentity(*block.curve);
+                    for (std::size_t i = 0; i < block.row.size(); ++i) {
+                        system.jacobian[row * dim + system.offsets[target] + i] += block.row[i];
+                    }
+                }
+                ++row;
+            }
+            continue;
+        }
         if (!input.discountPillars.empty()) {
             for (const CurvePillar& pillar : input.discountPillars) {
-                if (!pillarJacobianRow(pillar, referenceDate, *input.curve, scratch)) {
+                if (!discountPillarJacobianRow(pillar, referenceDate, *input.curve, scratch)) {
                     throw std::invalid_argument("assembleStackQuoteSystem: degenerate pillar");
                 }
                 for (std::size_t i = 0; i < scratch.size(); ++i) {
@@ -1351,8 +544,9 @@ inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInp
 
 /// Rebuild every curve view after bumping one native node of the stack. The
 /// bumped input receives the node bump; every other input whose parent
-/// identity chain reaches a bumped view is rebuilt with the bumped parent, and
-/// discount views are re-pointed at the bumped curve they reference.
+/// identity chain reaches a bumped view is rebuilt with the bumped parent,
+/// discount views are re-pointed at the bumped curve they reference, and
+/// cross-currency block references follow their rebuilt views.
 inline std::vector<StackCurveInput> bumpStackInputs(const std::vector<StackCurveInput>& curves,
                                                     std::size_t bumpedCurve, std::size_t node,
                                                     double delta) {
@@ -1403,6 +597,20 @@ inline std::vector<StackCurveInput> bumpStackInputs(const std::vector<StackCurve
             }
         }
     }
+    for (StackCurveInput& input : result) {
+        if (!input.xccy) {
+            continue;
+        }
+        const auto repoint = [&](StackCurveView::Ptr& reference) {
+            const auto found = rebuilt.find(reference->identity());
+            if (found != rebuilt.end()) {
+                reference = found->second;
+            }
+        };
+        repoint(input.xccy->foreignForecast);
+        repoint(input.xccy->domesticForecast);
+        repoint(input.xccy->domesticDiscount);
+    }
     return result;
 }
 
@@ -1435,12 +643,16 @@ inline std::vector<StackRiskEntry> stackQuoteRisk(const std::vector<StackCurveIn
         const StackCurveInput& input = curves[k];
         StackRiskEntry entry;
         entry.role = input.role;
-        entry.quoteDeltas.assign(input.curve->size() - 1, 0.0);
-        for (std::size_t i = 0; i < entry.quoteDeltas.size(); ++i) {
-            entry.quoteDeltas[i] = x[offset[k] + i];
+        if (input.factor) {
+            appendFactorMetadata(input, referenceDate, entry.points);
+        } else if (input.xccy) {
+            appendXccyQuoteMetadata(input, referenceDate, entry.points);
+        } else {
+            appendStackQuoteMetadata(input, referenceDate, entry.points);
         }
-        appendStackQuoteMetadata(input, referenceDate, entry.quoteLabels, entry.quoteYears,
-                                 entry.quoteBuckets, entry.quoteRoles);
+        for (std::size_t i = 0; i < entry.points.size(); ++i) {
+            entry.points[i].delta = x[offset[k] + i];
+        }
         result.push_back(std::move(entry));
     }
     return result;
@@ -1453,32 +665,7 @@ inline std::vector<StackRiskEntry> stackQuoteRisk(const DiscountCurve<double>& r
                                                   const std::vector<double>& dVdRoot,
                                                   const std::vector<StackChildInput>& children,
                                                   const datetime::Date& referenceDate) {
-    const StackCurveView::Ptr rootView = StackCurveView::make(root);
-    std::vector<StackCurveInput> inputs;
-    inputs.reserve(children.size() + 1);
-    StackCurveInput rootInput;
-    rootInput.curve = rootView;
-    rootInput.role = CurveRole::Discount;
-    rootInput.discountPillars = rootPillars;
-    rootInput.dVdNodes = dVdRoot;
-    inputs.push_back(std::move(rootInput));
-    for (const StackChildInput& child : children) {
-        if (child.curve == nullptr) {
-            throw std::invalid_argument("stackQuoteRisk: malformed child input");
-        }
-        StackCurveInput input;
-        input.curve = StackCurveView::make(*child.curve);
-        input.role = child.role;
-        input.forecastPillars = child.pillars;
-        input.dVdNodes = child.dVdSpread;
-        if (child.discountCurve != nullptr) {
-            input.discount = sameCurveValues(*child.discountCurve, root)
-                                 ? rootView
-                                 : StackCurveView::make(*child.discountCurve);
-        }
-        inputs.push_back(std::move(input));
-    }
-    return stackQuoteRisk(inputs, referenceDate);
+    return stackQuoteRisk(makeDepth1Inputs(root, rootPillars, dVdRoot, children), referenceDate);
 }
 
 /**
@@ -1498,8 +685,10 @@ inline std::vector<StackRiskEntry> stackQuoteRisk(const DiscountCurve<double>& r
  * term is the bootstrap-curvature correction; the first term alone is the
  * Gauss-Newton approximation. `G` is built by central differences with step
  * `1e-6` on the instrument Jacobian, bumping one native node and rebuilding
- * every curve that depends on it through its parent or discount chain. The
- * result is symmetrized to absorb dense-product round-off.
+ * every curve that depends on it through its parent or discount chain. Cross-
+ * currency rows are analytic, so their curvature is smooth and the same
+ * central-difference pass applies. The result is symmetrized to absorb dense-
+ * product round-off.
  */
 inline StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curves,
                                        const std::vector<double>& HZeta,
@@ -1597,14 +786,18 @@ inline StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curve
         }
     }
     for (const StackCurveInput& input : curves) {
-        appendStackQuoteMetadata(input, referenceDate, result.quoteLabels, result.quoteYears,
-                                 result.quoteBuckets, result.roles);
+        if (input.factor) {
+            appendFactorMetadata(input, referenceDate, result.points);
+        } else if (input.xccy) {
+            appendXccyQuoteMetadata(input, referenceDate, result.points);
+        } else {
+            appendStackQuoteMetadata(input, referenceDate, result.points);
+        }
     }
-    if (result.hessian.size() != dim * dim || result.quoteLabels.size() != dim ||
-        result.quoteYears.size() != dim || result.quoteBuckets.size() != dim ||
-        result.roles.size() != dim) {
-        throw std::invalid_argument("stackQuoteGamma: metadata size mismatch");
+    for (std::size_t i = 0; i < dim; ++i) {
+        result.points[i].delta = result.hessian[i * dim + i];
     }
+    result.validate();
     return result;
 }
 
@@ -1615,60 +808,27 @@ inline StackQuoteGamma
 stackQuoteGamma(const DiscountCurve<double>& root, const std::vector<CurvePillar>& rootPillars,
                 const std::vector<double>& dVdRoot, const std::vector<double>& HZeta,
                 const datetime::Date& referenceDate, const std::vector<StackChildInput>& children) {
-    const StackCurveView::Ptr rootView = StackCurveView::make(root);
-    std::vector<StackCurveInput> inputs;
-    inputs.reserve(children.size() + 1);
-    StackCurveInput rootInput;
-    rootInput.curve = rootView;
-    rootInput.role = CurveRole::Discount;
-    rootInput.discountPillars = rootPillars;
-    rootInput.dVdNodes = dVdRoot;
-    inputs.push_back(std::move(rootInput));
-    for (const StackChildInput& child : children) {
-        if (child.curve == nullptr) {
-            throw std::invalid_argument("stackQuoteGamma: malformed child input");
-        }
-        StackCurveInput input;
-        input.curve = StackCurveView::make(*child.curve);
-        input.role = child.role;
-        input.forecastPillars = child.pillars;
-        input.dVdNodes = child.dVdSpread;
-        if (child.discountCurve != nullptr) {
-            input.discount = sameCurveValues(*child.discountCurve, root)
-                                 ? rootView
-                                 : StackCurveView::make(*child.discountCurve);
-        }
-        inputs.push_back(std::move(input));
-    }
-    return stackQuoteGamma(inputs, HZeta, referenceDate);
+    return stackQuoteGamma(makeDepth1Inputs(root, rootPillars, dVdRoot, children), HZeta,
+                           referenceDate);
 }
 
 /// Maturity-tag ladder across all curves of the stack (sums quote deltas by
-/// maturity tag for every entry; entries without tags fall back to the rounded
-/// year).
+/// maturity tag for every entry).
 inline std::vector<RiskBucket> stackYearLadder(const std::vector<StackRiskEntry>& entries) {
     std::vector<RiskBucket> buckets;
     for (const StackRiskEntry& entry : entries) {
-        if (entry.quoteYears.size() != entry.quoteDeltas.size()) {
-            throw std::invalid_argument("stackYearLadder: quote years and deltas size mismatch");
-        }
-        if (!entry.quoteBuckets.empty() && entry.quoteBuckets.size() != entry.quoteDeltas.size()) {
-            throw std::invalid_argument("stackYearLadder: quote buckets and deltas size mismatch");
-        }
-        for (std::size_t j = 0; j < entry.quoteDeltas.size(); ++j) {
-            const std::string label = entry.quoteBuckets.empty()
-                                          ? std::to_string(entry.quoteYears[j]) + "Y"
-                                          : entry.quoteBuckets[j];
+        entry.validate();
+        for (const QuotePoint& point : entry.points) {
             bool merged = false;
             for (RiskBucket& bucket : buckets) {
-                if (bucket.label == label) {
-                    bucket.delta += entry.quoteDeltas[j];
+                if (bucket.label == point.bucket) {
+                    bucket.delta += point.delta;
                     merged = true;
                     break;
                 }
             }
             if (!merged) {
-                buckets.push_back(RiskBucket{label, entry.quoteDeltas[j]});
+                buckets.push_back(RiskBucket{point.bucket, point.delta});
             }
         }
     }
@@ -1683,18 +843,6 @@ inline std::size_t forecastNodeCount(const XccyForecastCurve auto& forecast) {
     } else {
         return forecast.size() - 1;
     }
-}
-
-/// Node times (without the fixed node 0) of a forecast provider.
-inline std::vector<double> forecastNodeTimes(const XccyForecastCurve auto& forecast) {
-    std::vector<double> times;
-    if constexpr (requires { forecast.spreadNodes(); }) {
-        times.assign(forecast.spreadNodes().times().begin() + 1,
-                     forecast.spreadNodes().times().end());
-    } else {
-        times.assign(forecast.times().begin() + 1, forecast.times().end());
-    }
-    return times;
 }
 
 /// Zero-clock day counter of a forecast provider (spread nodes share the
@@ -1731,125 +879,6 @@ inline datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounte
             break;
     }
     return referenceDate.plusDays(static_cast<std::int32_t>(std::lround(t * daysPerYear)));
-}
-
-/// Forecast rebuilt with one solved node bumped (`SpreadCurve`: spread node,
-/// `DiscountCurve`: zero node).
-inline auto forecastWithNode(const XccyForecastCurve auto& forecast, std::size_t node,
-                             double delta) {
-    if constexpr (requires { forecast.spreadNodes(); }) {
-        const DiscountCurve<double>& nodes = forecast.spreadNodes();
-        std::vector<double> spreads = nodes.zeros();
-        spreads[node] += delta;
-        return SpreadCurve<double>(forecast.parentPointer(), nodes.times(), spreads, nodes.scheme(),
-                                   nodes.tension());
-    } else {
-        std::vector<double> zeros = forecast.zeros();
-        zeros[node] += delta;
-        return DiscountCurve<double>(forecast.times(), zeros, forecast.space(), forecast.scheme(),
-                                     forecast.tension(), forecast.switchIndex());
-    }
-}
-
-/// Full cross-currency risk rows over every curve the par condition touches:
-/// `fRow` foreign discount nodes, `cRow` root nodes (including the domestic
-/// forecast parent chain when the forecast is a spread curve over the root),
-/// `gRow` foreign forecast nodes and `hRow` domestic forecast nodes, all by
-/// central differences on rebuilt curves.
-inline void xccySwapJacobianRows(const DiscountCurve<double>& foreignDiscount,
-                                 const XccyForecastCurve auto& foreignForecast,
-                                 const DiscountCurve<double>& domesticDiscount,
-                                 const XccyForecastCurve auto& domesticForecast,
-                                 const XccyPillar& pillar, const datetime::Date& referenceDate,
-                                 const datetime::DayCounter& zeroDayCounter,
-                                 std::vector<double>& fRow, std::vector<double>& cRow,
-                                 std::vector<double>& gRow, std::vector<double>& hRow) {
-    const double step = 1e-6;
-    const auto quoteAt = [&](const auto& foreignForecastRef, const auto& domesticForecastRef,
-                             const DiscountCurve<double>& foreignCurve,
-                             const DiscountCurve<double>& domesticCurve) {
-        return impliedXccyBasisSpread(foreignCurve, foreignForecastRef, domesticCurve,
-                                      domesticForecastRef, pillar, referenceDate, zeroDayCounter);
-    };
-    const auto bumpCurve = [](const DiscountCurve<double>& curve, std::size_t node, double delta) {
-        std::vector<double> zeros = curve.zeros();
-        zeros[node] += delta;
-        return DiscountCurve<double>(curve.times(), zeros, curve.space(), curve.scheme(),
-                                     curve.tension(), curve.switchIndex());
-    };
-    // A spread-curve domestic forecast is parented on the root: root bumps move it too.
-    const auto domesticForecastAtRoot = [&](const DiscountCurve<double>& rootCurve) {
-        if constexpr (requires {
-                          domesticForecast.spreadNodes();
-                          domesticForecast.parent();
-                      }) {
-            const DiscountCurve<double>& nodes = domesticForecast.spreadNodes();
-            return SpreadCurve<double>(std::make_shared<DiscountCurve<double>>(rootCurve),
-                                       nodes.times(), nodes.zeros(), nodes.scheme(),
-                                       nodes.tension());
-        } else {
-            return domesticForecast;
-        }
-    };
-    // A spread-curve foreign forecast parented on the foreign discount curve
-    // moves together with foreign bumps; identity of the parent curve object
-    // distinguishes it from an independent base curve on the same grid.
-    const auto foreignForecastAtDiscount = [&](const DiscountCurve<double>& foreignCurve) {
-        if constexpr (requires {
-                          foreignForecast.spreadNodes();
-                          foreignForecast.parentPointer();
-                      }) {
-            const std::shared_ptr<const DiscountCurve<double>>& parent =
-                foreignForecast.parentPointer();
-            if (parent != nullptr && parent.get() == &foreignDiscount) {
-                const DiscountCurve<double>& nodes = foreignForecast.spreadNodes();
-                return SpreadCurve<double>(std::make_shared<DiscountCurve<double>>(foreignCurve),
-                                           nodes.times(), nodes.zeros(), nodes.scheme(),
-                                           nodes.tension());
-            }
-            return foreignForecast;
-        } else {
-            return foreignForecast;
-        }
-    };
-    const std::size_t foreignNodes = foreignDiscount.size() - 1;
-    fRow.assign(foreignNodes, 0.0);
-    for (std::size_t i = 1; i <= foreignNodes; ++i) {
-        const DiscountCurve<double> plus = bumpCurve(foreignDiscount, i, step);
-        const DiscountCurve<double> minus = bumpCurve(foreignDiscount, i, -step);
-        fRow[i - 1] =
-            (quoteAt(foreignForecastAtDiscount(plus), domesticForecast, plus, domesticDiscount) -
-             quoteAt(foreignForecastAtDiscount(minus), domesticForecast, minus, domesticDiscount)) /
-            (2.0 * step);
-    }
-    const std::size_t domesticNodes = domesticDiscount.size() - 1;
-    cRow.assign(domesticNodes, 0.0);
-    for (std::size_t i = 1; i <= domesticNodes; ++i) {
-        const DiscountCurve<double> plus = bumpCurve(domesticDiscount, i, step);
-        const DiscountCurve<double> minus = bumpCurve(domesticDiscount, i, -step);
-        cRow[i - 1] =
-            (quoteAt(foreignForecast, domesticForecastAtRoot(plus), foreignDiscount, plus) -
-             quoteAt(foreignForecast, domesticForecastAtRoot(minus), foreignDiscount, minus)) /
-            (2.0 * step);
-    }
-    const std::size_t foreignForecastNodes = forecastNodeCount(foreignForecast);
-    gRow.assign(foreignForecastNodes, 0.0);
-    for (std::size_t i = 1; i <= foreignForecastNodes; ++i) {
-        gRow[i - 1] = (quoteAt(forecastWithNode(foreignForecast, i, step), domesticForecast,
-                               foreignDiscount, domesticDiscount) -
-                       quoteAt(forecastWithNode(foreignForecast, i, -step), domesticForecast,
-                               foreignDiscount, domesticDiscount)) /
-                      (2.0 * step);
-    }
-    const std::size_t domesticForecastNodes = forecastNodeCount(domesticForecast);
-    hRow.assign(domesticForecastNodes, 0.0);
-    for (std::size_t i = 1; i <= domesticForecastNodes; ++i) {
-        hRow[i - 1] = (quoteAt(foreignForecast, forecastWithNode(domesticForecast, i, step),
-                               foreignDiscount, domesticDiscount) -
-                       quoteAt(foreignForecast, forecastWithNode(domesticForecast, i, -step),
-                               foreignDiscount, domesticDiscount)) /
-                      (2.0 * step);
-    }
 }
 
 /// Assemble F (xccy quote × foreign nodes), C (× root nodes), G (× foreign
@@ -1912,7 +941,9 @@ inline void assembleXccyJacobian(const DiscountCurve<double>& foreignDiscount,
 }
 
 /// One cross-currency child over the domestic root: `dVdForeignZeros` is the
-/// pricing risk over the foreign curve nodes (node 0 dropped).
+/// pricing risk over the foreign curve nodes (node 0 dropped). Forecast curves
+/// are referenced, so several children can share one forecast object and its
+/// factor block.
 template <XccyForecastCurve ForeignForecastT, XccyForecastCurve DomesticForecastT>
 struct XccyChildInput {
     CurveRole role = CurveRole::XccyBasis; ///< Cross-currency basis child quote role
@@ -1923,8 +954,8 @@ struct XccyChildInput {
     const DiscountCurve<double>* foreignDiscount = nullptr;
     std::vector<XccyPillar> pillars;
     std::vector<double> dVdForeignZeros;
-    std::optional<ForeignForecastT> foreignForecast;
-    std::optional<DomesticForecastT> domesticForecast;
+    const ForeignForecastT* foreignForecast = nullptr;
+    const DomesticForecastT* domesticForecast = nullptr;
     /// Optional portfolio sensitivities over the forecast nodes (node 0 = 0);
     /// the emitted entries add the residual/hedge correction on top.
     std::optional<std::vector<double>> dVdForeignForecast;
@@ -1932,11 +963,19 @@ struct XccyChildInput {
 };
 
 /// Stack risk with any number of (possibly heterogeneous) cross-currency
-/// children over the domestic root. Each child resolves `x_c = F^{-T} g` in
-/// its own foreign curve; the root right-hand side absorbs `C^T x_c` including
-/// the domestic forecast parent chain, and every forecast curve receives its
-/// `J^T x_c` correction as a *node-space* entry (labels `XccyFwd`/`XccyDom`),
-/// so no forecast-node sensitivity is dropped.
+/// children over the domestic root, implemented over the general engine. Each
+/// child contributes its `Xccy` quote block bound to the foreign forecast,
+/// domestic forecast and root blocks by view identity, and the two forecast
+/// curves enter as shared factor blocks. One dense solve covers the root,
+/// every child and every forecast factor, so no forecast-node sensitivity is
+/// dropped.
+///
+/// Children that share a forecast object keep the shared factor block but
+/// still emit one `XccyFwd`/`XccyDom` entry each, with the node residual
+/// `direct_c - G_c^T x_c` of that child; the per-child entries sum to the
+/// shared block's solved residual. The returned entries are the root entry,
+/// then for each child in order its quote entry followed by its forecast
+/// factor entries.
 template <typename... ChildTypes>
 inline std::vector<StackRiskEntry>
 stackQuoteRiskXccy(const DiscountCurve<double>& root, const std::vector<CurvePillar>& rootPillars,
@@ -1949,127 +988,181 @@ stackQuoteRiskXccy(const DiscountCurve<double>& root, const std::vector<CurvePil
     if (rootPillars.size() + 1 != root.size()) {
         throw std::invalid_argument("stackQuoteRiskXccy: root pillars must match the root nodes");
     }
-    const std::size_t mRoot = rootPillars.size();
-    std::vector<double> fRoot;
-    std::vector<double> rowScratch;
-    assembleQuoteJacobian(root, rootPillars, referenceDate, fRoot, rowScratch);
-    std::vector<double> fRootTranspose(mRoot * mRoot);
-    for (std::size_t j = 0; j < mRoot; ++j) {
-        for (std::size_t i = 0; i < mRoot; ++i) {
-            fRootTranspose[i * mRoot + j] = fRoot[j * mRoot + i];
+    const StackCurveView::Ptr rootView = StackCurveView::make(root);
+    std::vector<StackCurveInput> inputs;
+    inputs.reserve(1 + 3 * children.size());
+    StackCurveInput rootInput;
+    rootInput.curve = rootView;
+    rootInput.role = CurveRole::Discount;
+    rootInput.discountPillars = rootPillars;
+    rootInput.dVdNodes = dVdRoot;
+    inputs.push_back(std::move(rootInput));
+    std::unordered_map<const void*, std::size_t> factorBlocks;
+    const auto addFactor = [&](const StackCurveView::Ptr& view, CurveRole role,
+                               std::string_view labelPrefix,
+                               const datetime::DayCounter& nodeDayCounter,
+                               const std::vector<double>* direct) -> std::pair<std::size_t, bool> {
+        if (view->size() <= 1) {
+            return {0, false};
         }
-    }
-    std::vector<double> rhs(mRoot);
-    for (std::size_t j = 0; j < mRoot; ++j) {
-        rhs[j] = dVdRoot[j + 1];
-    }
-    std::vector<StackRiskEntry> childEntries;
+        const auto found = factorBlocks.find(view->identity());
+        if (found != factorBlocks.end()) {
+            if (direct != nullptr) {
+                std::vector<double>& target = inputs[found->second].dVdNodes;
+                if (direct->size() != target.size()) {
+                    throw std::invalid_argument(
+                        "stackQuoteRiskXccy: forecast sensitivity size mismatch");
+                }
+                for (std::size_t i = 0; i < target.size(); ++i) {
+                    target[i] += (*direct)[i];
+                }
+            }
+            return {found->second, true};
+        }
+        StackCurveInput input;
+        input.curve = view;
+        input.role = role;
+        input.factor = StackFactorInput{std::string(labelPrefix), nodeDayCounter};
+        input.dVdNodes.assign(view->size(), 0.0);
+        if (direct != nullptr) {
+            if (direct->size() != view->size()) {
+                throw std::invalid_argument(
+                    "stackQuoteRiskXccy: forecast sensitivity size mismatch");
+            }
+            input.dVdNodes = *direct;
+        }
+        inputs.push_back(std::move(input));
+        factorBlocks.emplace(view->identity(), inputs.size() - 1);
+        return {inputs.size() - 1, true};
+    };
+    struct XccyChildSplit {
+        std::size_t childInput = 0;
+        const StackCurveView* foreignDiscount = nullptr;
+        const StackCurveView* foreignForecast = nullptr;
+        const StackCurveView* domesticForecast = nullptr;
+        const StackCurveView* domesticDiscount = nullptr;
+        std::size_t foreignFactor = 0;
+        std::size_t domesticFactor = 0;
+        bool hasForeignFactor = false;
+        bool hasDomesticFactor = false;
+        CurveRole foreignRole = CurveRole::Forecast;
+        CurveRole domesticRole = CurveRole::Forecast;
+        std::vector<double> foreignDirect;
+        std::vector<double> domesticDirect;
+        std::vector<XccyPillar> pillars;
+    };
+    std::vector<XccyChildSplit> splits;
+    splits.reserve(children.size());
     const auto processChild = [&](const auto& child) {
-        if (child.foreignDiscount == nullptr || !child.foreignForecast || !child.domesticForecast ||
+        if (child.foreignDiscount == nullptr || child.foreignForecast == nullptr ||
+            child.domesticForecast == nullptr ||
             child.dVdForeignZeros.size() != child.foreignDiscount->size() ||
             child.pillars.size() + 1 != child.foreignDiscount->size()) {
             throw std::invalid_argument("stackQuoteRiskXccy: malformed child input");
         }
-        const std::size_t n = child.pillars.size();
-        std::vector<double> f;
-        std::vector<double> cross;
-        std::vector<double> fwdCross;
-        std::vector<double> domCross;
-        assembleXccyJacobianFull(*child.foreignDiscount, *child.foreignForecast, root,
-                                 *child.domesticForecast, child.pillars, referenceDate, f, cross,
-                                 fwdCross, domCross);
-        const std::size_t p = forecastNodeCount(*child.foreignForecast);
-        const std::size_t q = forecastNodeCount(*child.domesticForecast);
-        std::vector<double> fTranspose(n * n);
-        for (std::size_t j = 0; j < n; ++j) {
-            for (std::size_t i = 0; i < n; ++i) {
-                fTranspose[i * n + j] = f[j * n + i];
+        const StackCurveView::Ptr foreignForecastView =
+            StackCurveView::make(*child.foreignForecast);
+        const StackCurveView::Ptr domesticForecastView =
+            StackCurveView::make(*child.domesticForecast);
+        XccyChildSplit split;
+        split.foreignForecast = foreignForecastView.get();
+        split.domesticForecast = domesticForecastView.get();
+        split.domesticDiscount = rootView.get();
+        split.foreignRole = child.foreignForecastRole;
+        split.domesticRole = child.domesticForecastRole;
+        split.pillars = child.pillars;
+        split.foreignDirect.assign(foreignForecastView->size(), 0.0);
+        split.domesticDirect.assign(domesticForecastView->size(), 0.0);
+        StackCurveInput childInput;
+        childInput.curve = StackCurveView::make(*child.foreignDiscount);
+        split.foreignDiscount = childInput.curve.get();
+        childInput.role = child.role;
+        childInput.xccyPillars = child.pillars;
+        childInput.xccy = XccyRowInput{foreignForecastView, domesticForecastView, rootView};
+        childInput.dVdNodes = child.dVdForeignZeros;
+        inputs.push_back(std::move(childInput));
+        split.childInput = inputs.size() - 1;
+        const auto foreignFactor =
+            addFactor(foreignForecastView, child.foreignForecastRole, "XccyFwd",
+                      forecastNodeDayCounter(*child.foreignForecast),
+                      child.dVdForeignForecast ? &*child.dVdForeignForecast : nullptr);
+        split.foreignFactor = foreignFactor.first;
+        split.hasForeignFactor = foreignFactor.second;
+        if (child.dVdForeignForecast) {
+            if (child.dVdForeignForecast->size() != foreignForecastView->size()) {
+                throw std::invalid_argument(
+                    "stackQuoteRiskXccy: forecast sensitivity size mismatch");
             }
+            split.foreignDirect = *child.dVdForeignForecast;
         }
-        std::vector<double> g(n);
-        for (std::size_t i = 0; i < n; ++i) {
-            g[i] = child.dVdForeignZeros[i + 1];
+        const auto domesticFactor =
+            addFactor(domesticForecastView, child.domesticForecastRole, "XccyDom",
+                      forecastNodeDayCounter(*child.domesticForecast),
+                      child.dVdDomesticForecast ? &*child.dVdDomesticForecast : nullptr);
+        split.domesticFactor = domesticFactor.first;
+        split.hasDomesticFactor = domesticFactor.second;
+        if (child.dVdDomesticForecast) {
+            if (child.dVdDomesticForecast->size() != domesticForecastView->size()) {
+                throw std::invalid_argument(
+                    "stackQuoteRiskXccy: forecast sensitivity size mismatch");
+            }
+            split.domesticDirect = *child.dVdDomesticForecast;
         }
-        const std::vector<double> xChild = quantape::math::solveDense(fTranspose, n, g);
-        for (std::size_t i = 0; i < n; ++i) {
-            for (std::size_t j = 0; j < mRoot; ++j) {
-                rhs[j] -= cross[i * mRoot + j] * xChild[i];
-            }
-        }
-        StackRiskEntry childEntry;
-        childEntry.role = child.role;
-        childEntry.quoteDeltas = xChild;
-        for (const XccyPillar& pillar : child.pillars) {
-            const datetime::Date maturity =
-                pillar.foreignCalendar.adjust(pillar.maturity, pillar.foreignBusinessDayConvention);
-            const double t = datetime::yearFraction(referenceDate, maturity, root.zeroDayCounter());
-            const std::string tag = riskMaturityTag(maturity, t);
-            childEntry.quoteYears.push_back(static_cast<int>(std::lround(t)));
-            childEntry.quoteRoles.push_back(child.role);
-            childEntry.quoteBuckets.push_back(tag);
-            childEntry.quoteLabels.push_back("Xccy " + tag);
-        }
-        childEntries.push_back(std::move(childEntry));
-        const auto appendFactor = [&](const std::optional<std::vector<double>>& direct,
-                                      const std::vector<double>& factorCross, std::size_t nodes,
-                                      const auto& forecast, std::string_view tag, CurveRole role) {
-            if (nodes == 0) {
-                return;
-            }
-            StackRiskEntry entry;
-            entry.role = role;
-            entry.quoteDeltas.assign(nodes, 0.0);
-            if (direct) {
-                if (direct->size() != nodes + 1) {
-                    throw std::invalid_argument(
-                        "stackQuoteRiskXccy: forecast sensitivity size mismatch");
-                }
-                for (std::size_t k = 0; k < nodes; ++k) {
-                    entry.quoteDeltas[k] = (*direct)[k + 1];
-                }
-            }
-            for (std::size_t i = 0; i < n; ++i) {
-                for (std::size_t k = 0; k < nodes; ++k) {
-                    entry.quoteDeltas[k] -= factorCross[i * nodes + k] * xChild[i];
-                }
-            }
-            const std::vector<double> times = forecastNodeTimes(forecast);
-            const datetime::DayCounter& nodeDayCounter = forecastNodeDayCounter(forecast);
-            for (std::size_t k = 0; k < nodes; ++k) {
-                const datetime::Date nodeDate =
-                    forecastNodeDate(nodeDayCounter, referenceDate, times[k]);
-                const std::string bucket = riskMaturityTag(nodeDate, times[k]);
-                entry.quoteYears.push_back(static_cast<int>(std::lround(times[k])));
-                entry.quoteRoles.push_back(entry.role);
-                entry.quoteBuckets.push_back(bucket);
-                entry.quoteLabels.push_back(std::string(tag) + " " + bucket);
-            }
-            childEntries.push_back(std::move(entry));
-        };
-        appendFactor(child.dVdForeignForecast, fwdCross, p, *child.foreignForecast, "XccyFwd",
-                     child.foreignForecastRole);
-        appendFactor(child.dVdDomesticForecast, domCross, q, *child.domesticForecast, "XccyDom",
-                     child.domesticForecastRole);
+        splits.push_back(std::move(split));
     };
     for (const auto& variantChild : children) {
         std::visit(processChild, variantChild);
     }
+    const std::vector<StackRiskEntry> entries = stackQuoteRisk(inputs, referenceDate);
+    // Per-child split of a shared forecast factor: the shared solve gives the
+    // child quote delta x_c, and the child's own analytic rows over the factor
+    // block give `direct_c - G_c^T x_c`. The children's entries add back to the
+    // shared block residual.
+    const auto splitFactorEntry = [&](const StackRiskEntry& sharedEntry,
+                                      const StackRiskEntry& childEntry, const XccyChildSplit& split,
+                                      const StackCurveView& forecast,
+                                      const std::vector<double>& direct, CurveRole role) {
+        StackRiskEntry entry = sharedEntry;
+        entry.role = role;
+        for (QuotePoint& point : entry.points) {
+            point.role = role;
+        }
+        std::vector<double> gtx(forecast.size(), 0.0);
+        for (std::size_t j = 0; j < split.pillars.size(); ++j) {
+            const std::vector<XccyRowBlock> blocks = xccySwapJacobianRowsView(
+                *split.foreignDiscount, *split.foreignForecast, *split.domesticDiscount,
+                *split.domesticForecast, split.pillars[j], referenceDate,
+                split.domesticDiscount->zeroDayCounter());
+            for (const XccyRowBlock& block : blocks) {
+                if (block.curve->identity() != forecast.identity()) {
+                    continue;
+                }
+                for (std::size_t i = 0; i < block.row.size(); ++i) {
+                    gtx[i + 1] += block.row[i] * childEntry.points[j].delta;
+                }
+            }
+        }
+        for (std::size_t k = 0; k < entry.points.size(); ++k) {
+            entry.points[k].delta = direct[k + 1] - gtx[k + 1];
+        }
+        return entry;
+    };
     std::vector<StackRiskEntry> result;
-    StackRiskEntry rootEntry;
-    rootEntry.role = CurveRole::Discount;
-    rootEntry.quoteDeltas = quantape::math::solveDense(fRootTranspose, mRoot, rhs);
-    for (const CurvePillar& pillar : rootPillars) {
-        const datetime::Date maturity = pillarRiskMaturity(pillar);
-        const double t = datetime::yearFraction(referenceDate, maturity, root.zeroDayCounter());
-        const std::string tag = riskMaturityTag(maturity, t);
-        rootEntry.quoteYears.push_back(static_cast<int>(std::lround(t)));
-        rootEntry.quoteRoles.push_back(rootEntry.role);
-        rootEntry.quoteBuckets.push_back(tag);
-        rootEntry.quoteLabels.push_back(std::string(pillarKindName(pillar.kind)) + " " + tag);
-    }
-    result.push_back(std::move(rootEntry));
-    for (StackRiskEntry& entry : childEntries) {
-        result.push_back(std::move(entry));
+    result.reserve(1 + 3 * splits.size());
+    result.push_back(entries[0]);
+    for (const XccyChildSplit& split : splits) {
+        const StackRiskEntry& childEntry = entries[split.childInput];
+        result.push_back(childEntry);
+        if (split.hasForeignFactor) {
+            result.push_back(splitFactorEntry(entries[split.foreignFactor], childEntry, split,
+                                              *split.foreignForecast, split.foreignDirect,
+                                              split.foreignRole));
+        }
+        if (split.hasDomesticFactor) {
+            result.push_back(splitFactorEntry(entries[split.domesticFactor], childEntry, split,
+                                              *split.domesticForecast, split.domesticDirect,
+                                              split.domesticRole));
+        }
     }
     return result;
 }

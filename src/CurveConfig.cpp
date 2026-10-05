@@ -123,44 +123,211 @@ CurveKey asKey(const Json& node, const std::string& where) {
     return key;
 }
 
-PillarKind pillarKindFromName(std::string_view name, const std::string& where) {
+/// Shared kind map for both curve sides; `forecast` selects the forecast-only
+/// kinds and the error text, while the shared names always map the same way.
+PillarSpec::Kind pillarKindFromName(std::string_view name, bool forecast,
+                                    const std::string& where) {
     if (name == "Deposit") {
-        return PillarKind::Deposit;
-    }
-    if (name == "Repo") {
-        return PillarKind::Repo;
+        return PillarSpec::Kind::Deposit;
     }
     if (name == "Fra") {
-        return PillarKind::Fra;
+        return PillarSpec::Kind::Fra;
     }
     if (name == "Future") {
-        return PillarKind::Future;
+        return PillarSpec::Kind::Future;
+    }
+    if (forecast) {
+        if (name == "Irs") {
+            return PillarSpec::Kind::Irs;
+        }
+        if (name == "BasisSwap") {
+            return PillarSpec::Kind::BasisSwap;
+        }
+        fail(where, "unknown forecast pillar kind '" + std::string(name) +
+                        "' (expected Deposit, Fra, Future, Irs or BasisSwap)");
+    }
+    if (name == "Repo") {
+        return PillarSpec::Kind::Repo;
     }
     if (name == "OisSwap") {
-        return PillarKind::OisSwap;
+        return PillarSpec::Kind::OisSwap;
     }
     fail(where, "unknown pillar kind '" + std::string(name) +
                     "' (expected Deposit, Repo, Fra, Future or OisSwap)");
 }
 
-ForecastPillar::Kind forecastPillarKindFromName(std::string_view name, const std::string& where) {
-    if (name == "Deposit") {
-        return ForecastPillar::Kind::Deposit;
+FutureStyle futureStyleFromName(const std::string& style, const std::string& where) {
+    if (style == "Simple") {
+        return FutureStyle::Simple;
     }
-    if (name == "Fra") {
-        return ForecastPillar::Kind::Fra;
+    if (style == "Compounded") {
+        return FutureStyle::Compounded;
     }
-    if (name == "Future") {
-        return ForecastPillar::Kind::Future;
+    if (style == "Averaged") {
+        return FutureStyle::Averaged;
     }
-    if (name == "Irs") {
-        return ForecastPillar::Kind::Irs;
+    fail(where, "unknown future style '" + style + "' (expected Simple, Compounded or Averaged)");
+}
+
+AveragingStyle averagingStyleFromName(const std::string& name, const std::string& where) {
+    if (name == "Arithmetic") {
+        return AveragingStyle::Arithmetic;
     }
-    if (name == "BasisSwap") {
-        return ForecastPillar::Kind::BasisSwap;
+    if (name == "Compounded") {
+        return AveragingStyle::Compounded;
     }
-    fail(where, "unknown forecast pillar kind '" + std::string(name) +
-                    "' (expected Deposit, Fra, Future, Irs or BasisSwap)");
+    fail(where, "unknown averaging style '" + name + "' (expected Arithmetic or Compounded)");
+}
+
+/// Parse one pillar object shared by the `pillars` and `forecastPillars`
+/// arrays; `forecast` selects the accepted kinds, field aliases and
+/// kind-specific checks of the forecast side.
+PillarSpec parsePillarSpec(const Json& node, const std::string& where, bool forecast) {
+    PillarSpec pillar;
+    pillar.maturity = asDate(node, "maturity", where);
+    if (node.contains("start")) {
+        pillar.start = asDate(node, "start", where);
+    }
+    pillar.kind = pillarKindFromName(asString(node, "kind", where), forecast, where);
+    const PillarSpec::Kind kind = pillar.kind;
+    if (!forecast && (kind == PillarSpec::Kind::Fra || kind == PillarSpec::Kind::Future) &&
+        !node.contains("start")) {
+        fail(where, "Fra/Future pillars require a 'start' date");
+    }
+    if (forecast && kind == PillarSpec::Kind::Future && !node.contains("start")) {
+        fail(where, "Future forecast pillars require a 'start' date");
+    }
+    if (node.contains("quote")) {
+        pillar.quote = asDouble(node, "quote", where);
+    } else if (forecast && kind == PillarSpec::Kind::BasisSwap && node.contains("spread")) {
+        pillar.quote = asDouble(node, "spread", where);
+    } else {
+        fail(where, "missing field 'quote'");
+    }
+    if (node.contains("quoteDayCounter")) {
+        pillar.quoteDayCounter = dayCounterFromName(asString(node, "quoteDayCounter", where));
+    } else if (forecast && node.contains("dayCounter")) {
+        pillar.quoteDayCounter = dayCounterFromName(asString(node, "dayCounter", where));
+    } else if (forecast && node.contains("floatDayCounter")) {
+        pillar.quoteDayCounter = dayCounterFromName(asString(node, "floatDayCounter", where));
+    }
+    if (node.contains("calendar")) {
+        pillar.calendar = calendarFromName(asString(node, "calendar", where));
+    } else if (forecast && node.contains("floatCalendar")) {
+        pillar.calendar = calendarFromName(asString(node, "floatCalendar", where));
+    }
+    if (node.contains("businessDayConvention")) {
+        pillar.businessDayConvention =
+            conventionFromName(asString(node, "businessDayConvention", where));
+    }
+    if (node.contains("fixedTenor")) {
+        pillar.fixedTenor = asPeriod(node.at("fixedTenor"), where + ".fixedTenor");
+    }
+    if (forecast) {
+        if (node.contains("floatTenor")) {
+            pillar.floatTenor = asPeriod(node.at("floatTenor"), where + ".floatTenor");
+        }
+        if (node.contains("floatCalendar")) {
+            pillar.floatCalendar = calendarFromName(asString(node, "floatCalendar", where));
+        } else {
+            pillar.floatCalendar = pillar.calendar;
+        }
+        if (node.contains("fixedCalendar")) {
+            pillar.fixedCalendar = calendarFromName(asString(node, "fixedCalendar", where));
+        } else {
+            pillar.fixedCalendar = pillar.calendar;
+        }
+        if (node.contains("floatDayCounter")) {
+            pillar.floatDayCounter = dayCounterFromName(asString(node, "floatDayCounter", where));
+        } else {
+            pillar.floatDayCounter = pillar.quoteDayCounter;
+        }
+        if (node.contains("fixedDayCounter")) {
+            pillar.fixedDayCounter = dayCounterFromName(asString(node, "fixedDayCounter", where));
+        }
+    }
+    if (node.contains("firstFixing")) {
+        if (forecast) {
+            if (kind != PillarSpec::Kind::Irs) {
+                fail(where, "'firstFixing' is only valid for Irs forecast pillars");
+            }
+        } else if (kind != PillarSpec::Kind::OisSwap) {
+            fail(where, "'firstFixing' is only valid for OisSwap pillars");
+        }
+        pillar.firstCouponRate = asDouble(node, "firstFixing", where);
+        pillar.firstCouponFixed = true;
+    } else if (forecast && node.contains("firstCouponRate")) {
+        if (kind != PillarSpec::Kind::Irs) {
+            fail(where, "'firstCouponRate' is only valid for Irs forecast pillars");
+        }
+        pillar.firstCouponRate = asDouble(node, "firstCouponRate", where);
+        pillar.firstCouponFixed = true;
+    }
+    if (forecast && node.contains("firstCouponFixed")) {
+        if (kind != PillarSpec::Kind::Irs) {
+            fail(where, "'firstCouponFixed' is only valid for Irs forecast pillars");
+        }
+        pillar.firstCouponFixed = asBool(node, "firstCouponFixed", where);
+    }
+    if (!forecast && node.contains("fraConvexityExponent")) {
+        if (kind != PillarSpec::Kind::Fra) {
+            fail(where, "'fraConvexityExponent' is only valid for Fra pillars");
+        }
+        pillar.fraConvexityExponent = asDouble(node, "fraConvexityExponent", where);
+        pillar.fraConvexityExponentSet = true;
+    }
+    if (node.contains("convexityAdjustment")) {
+        if (kind != PillarSpec::Kind::Future) {
+            fail(where, forecast ? "'convexityAdjustment' is only valid for Future forecast pillars"
+                                 : "'convexityAdjustment' is only valid for Future pillars");
+        }
+        pillar.convexityAdjustment = asDouble(node, "convexityAdjustment", where);
+        pillar.convexityAdjustmentSet = true;
+    }
+    if (node.contains("style")) {
+        if (kind != PillarSpec::Kind::Future) {
+            fail(where, forecast ? "'style' is only valid for Future forecast pillars"
+                                 : "'style' is only valid for Future pillars");
+        }
+        pillar.futureStyle = futureStyleFromName(asString(node, "style", where), where);
+    }
+    if (node.contains("averaging")) {
+        if (kind != PillarSpec::Kind::Future) {
+            fail(where, forecast ? "'averaging' is only valid for Future forecast pillars"
+                                 : "'averaging' is only valid for Future pillars");
+        }
+        if (pillar.futureStyle != FutureStyle::Averaged) {
+            fail(where, forecast ? "'averaging' is only valid for Future forecast pillars with "
+                                   "'style': 'Averaged'"
+                                 : "'averaging' is only valid for Future pillars with 'style': "
+                                   "'Averaged'");
+        }
+        pillar.averagingStyle = averagingStyleFromName(asString(node, "averaging", where), where);
+    }
+    if (node.contains("paymentLag")) {
+        if (forecast) {
+            if (kind != PillarSpec::Kind::Irs) {
+                fail(where, "'paymentLag' is only valid for Irs forecast pillars");
+            }
+        } else if (kind != PillarSpec::Kind::OisSwap) {
+            fail(where, "'paymentLag' is only valid for OisSwap pillars");
+        }
+        pillar.paymentLag = asInt(node, "paymentLag", where);
+        if (pillar.paymentLag < 0) {
+            fail(where, "'paymentLag' must be non-negative");
+        }
+    }
+    if (forecast && node.contains("spreadOnParentLeg")) {
+        if (kind != PillarSpec::Kind::BasisSwap) {
+            fail(where, "'spreadOnParentLeg' is only valid for BasisSwap forecast pillars");
+        }
+        pillar.spreadOnParentLeg = asBool(node, "spreadOnParentLeg", where);
+    }
+    if (forecast && kind == PillarSpec::Kind::Irs &&
+        (!node.contains("floatTenor") || !node.contains("fixedTenor"))) {
+        fail(where, "Irs forecast pillars require 'floatTenor' and 'fixedTenor'");
+    }
+    return pillar;
 }
 
 InterpolationSpace spaceFromName(std::string_view name, const std::string& where) {
@@ -214,11 +381,19 @@ datetime::DayCounter dayCounterFromName(std::string_view name) {
     if (name == "30/360") {
         return datetime::DayCounter(DayCount::Thirty360US);
     }
+    if (name == "30/360 BondBasis" || name == "30/360 Bond Basis") {
+        return datetime::DayCounter(DayCount::Thirty360BondBasis);
+    }
+    if (name == "30E/360") {
+        return datetime::DayCounter(DayCount::ThirtyE360);
+    }
     if (name == "ACT/ACT") {
         return datetime::DayCounter(DayCount::ActualActualISDA);
     }
-    throw std::invalid_argument("CurveConfig: unknown day counter '" + std::string(name) +
-                                "' (expected ACT/360, ACT/365F, ACT/365.25, 30/360 or ACT/ACT)");
+    throw std::invalid_argument(
+        "CurveConfig: unknown day counter '" + std::string(name) +
+        "' (expected ACT/360, ACT/365F, ACT/365.25, 30/360, 30/360 BondBasis, 30E/360 or "
+        "ACT/ACT)");
 }
 
 std::string conventionName(datetime::BusinessDayConvention convention) {
@@ -348,6 +523,14 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
         if (spec.key.role != CurveRole::Discount && spec.key.role != CurveRole::Forecast &&
             spec.key.role != CurveRole::TenorBasis && spec.key.role != CurveRole::IborOisBasis) {
             fail(where, "curve role '" + roleName + "' is not configurable");
+        }
+        if (node.contains("parent")) {
+            spec.hasParent = true;
+            spec.parent = asKey(node.at("parent"), where + ".parent");
+        }
+        if (node.contains("discount")) {
+            spec.hasDiscount = true;
+            spec.discount = asKey(node.at("discount"), where + ".discount");
         }
         for (const CurveSpec& existing : stack.curves) {
             if (existing.key == spec.key) {
@@ -480,273 +663,19 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
         if (spec.bootstrapMethod != "IterativeSequential") {
             fail(where, "unsupported bootstrap method '" + spec.bootstrapMethod + "'");
         }
-        const Json emptyPillars = Json::array();
-        const Json& pillars = hasPillars ? node.at("pillars") : emptyPillars;
-        if (hasPillars && (!pillars.is_array() || pillars.empty())) {
-            fail(where, "field 'pillars' must be a non-empty array");
+        const bool forecast = spec.key.role == CurveRole::Forecast;
+        const char* listName = forecast ? "forecastPillars" : "pillars";
+        const Json& pillarNodes = require(node, listName, where);
+        if (!pillarNodes.is_array() || pillarNodes.empty()) {
+            fail(where, std::string("field '") + listName + "' must be a non-empty array");
         }
-        for (std::size_t k = 0; k < pillars.size(); ++k) {
-            const std::string pillarWhere = where + ".pillars[" + std::to_string(k) + "]";
-            const Json& pillarNode = pillars[k];
-            PillarSpec pillar;
-            pillar.maturity = asDate(pillarNode, "maturity", pillarWhere);
-            if (pillarNode.contains("start")) {
-                pillar.start = asDate(pillarNode, "start", pillarWhere);
-            }
-            pillar.kind =
-                pillarKindFromName(asString(pillarNode, "kind", pillarWhere), pillarWhere);
-            if ((pillar.kind == PillarKind::Fra || pillar.kind == PillarKind::Future) &&
-                !pillarNode.contains("start")) {
-                fail(pillarWhere, "Fra/Future pillars require a 'start' date");
-            }
-            pillar.quote = asDouble(pillarNode, "quote", pillarWhere);
-            if (pillarNode.contains("quoteDayCounter")) {
-                pillar.quoteDayCounter =
-                    dayCounterFromName(asString(pillarNode, "quoteDayCounter", pillarWhere));
-            }
-            if (pillarNode.contains("calendar")) {
-                pillar.calendar = calendarFromName(asString(pillarNode, "calendar", pillarWhere));
-            }
-            if (pillarNode.contains("businessDayConvention")) {
-                pillar.businessDayConvention =
-                    conventionFromName(asString(pillarNode, "businessDayConvention", pillarWhere));
-            }
-            if (pillarNode.contains("fixedTenor")) {
-                pillar.fixedTenor =
-                    asPeriod(pillarNode.at("fixedTenor"), pillarWhere + ".fixedTenor");
-            }
-            if (pillarNode.contains("firstFixing")) {
-                if (pillar.kind != PillarKind::OisSwap) {
-                    fail(pillarWhere, "'firstFixing' is only valid for OisSwap pillars");
-                }
-                pillar.firstCouponRate = asDouble(pillarNode, "firstFixing", pillarWhere);
-                pillar.firstCouponFixed = true;
-            }
-            if (pillarNode.contains("fraConvexityExponent")) {
-                if (pillar.kind != PillarKind::Fra) {
-                    fail(pillarWhere, "'fraConvexityExponent' is only valid for Fra pillars");
-                }
-                pillar.fraConvexityExponent =
-                    asDouble(pillarNode, "fraConvexityExponent", pillarWhere);
-                pillar.fraConvexityExponentSet = true;
-            }
-            if (pillarNode.contains("convexityAdjustment")) {
-                if (pillar.kind != PillarKind::Future) {
-                    fail(pillarWhere, "'convexityAdjustment' is only valid for Future pillars");
-                }
-                pillar.convexityAdjustment =
-                    asDouble(pillarNode, "convexityAdjustment", pillarWhere);
-                pillar.convexityAdjustmentSet = true;
-            }
-            if (pillarNode.contains("style")) {
-                if (pillar.kind != PillarKind::Future) {
-                    fail(pillarWhere, "'style' is only valid for Future pillars");
-                }
-                const std::string style = asString(pillarNode, "style", pillarWhere);
-                if (style == "Simple") {
-                    pillar.futureStyle = FutureStyle::Simple;
-                } else if (style == "Compounded") {
-                    pillar.futureStyle = FutureStyle::Compounded;
-                } else if (style == "Averaged") {
-                    pillar.futureStyle = FutureStyle::Averaged;
-                } else {
-                    fail(pillarWhere, "unknown future style '" + style +
-                                          "' (expected Simple, Compounded or Averaged)");
-                }
-            }
-            if (pillarNode.contains("averaging")) {
-                if (pillar.kind != PillarKind::Future) {
-                    fail(pillarWhere, "'averaging' is only valid for Future pillars");
-                }
-                if (pillar.futureStyle != FutureStyle::Averaged) {
-                    fail(pillarWhere,
-                         "'averaging' is only valid for Future pillars with 'style': 'Averaged'");
-                }
-                const std::string averaging = asString(pillarNode, "averaging", pillarWhere);
-                if (averaging == "Arithmetic") {
-                    pillar.averagingStyle = AveragingStyle::Arithmetic;
-                } else if (averaging == "Compounded") {
-                    pillar.averagingStyle = AveragingStyle::Compounded;
-                } else {
-                    fail(pillarWhere, "unknown averaging style '" + averaging +
-                                          "' (expected Arithmetic or Compounded)");
-                }
-            }
-            if (pillarNode.contains("paymentLag")) {
-                if (pillar.kind != PillarKind::OisSwap) {
-                    fail(pillarWhere, "'paymentLag' is only valid for OisSwap pillars");
-                }
-                pillar.paymentLag = asInt(pillarNode, "paymentLag", pillarWhere);
-                if (pillar.paymentLag < 0) {
-                    fail(pillarWhere, "'paymentLag' must be non-negative");
-                }
-            }
-            spec.pillars.push_back(pillar);
-        }
-        if (node.contains("forecastPillars")) {
-            const Json& forecastPillars = node.at("forecastPillars");
-            if (!forecastPillars.is_array() || forecastPillars.empty()) {
-                fail(where, "field 'forecastPillars' must be a non-empty array");
-            }
-            for (std::size_t k = 0; k < forecastPillars.size(); ++k) {
-                const std::string pillarWhere =
-                    where + ".forecastPillars[" + std::to_string(k) + "]";
-                const Json& pillarNode = forecastPillars[k];
-                ForecastPillarSpec pillar;
-                pillar.maturity = asDate(pillarNode, "maturity", pillarWhere);
-                if (pillarNode.contains("start")) {
-                    pillar.start = asDate(pillarNode, "start", pillarWhere);
-                }
-                pillar.kind = forecastPillarKindFromName(asString(pillarNode, "kind", pillarWhere),
-                                                         pillarWhere);
-                if (pillar.kind == ForecastPillar::Kind::Future && !pillarNode.contains("start")) {
-                    fail(pillarWhere, "Future forecast pillars require a 'start' date");
-                }
-                if (pillarNode.contains("quote")) {
-                    pillar.quote = asDouble(pillarNode, "quote", pillarWhere);
-                } else if (pillar.kind == ForecastPillar::Kind::BasisSwap &&
-                           pillarNode.contains("spread")) {
-                    pillar.quote = asDouble(pillarNode, "spread", pillarWhere);
-                } else {
-                    fail(pillarWhere, "missing field 'quote'");
-                }
-                if (pillarNode.contains("style")) {
-                    if (pillar.kind != ForecastPillar::Kind::Future) {
-                        fail(pillarWhere, "'style' is only valid for Future forecast pillars");
-                    }
-                    const std::string style = asString(pillarNode, "style", pillarWhere);
-                    if (style == "Simple") {
-                        pillar.futureStyle = FutureStyle::Simple;
-                    } else if (style == "Compounded") {
-                        pillar.futureStyle = FutureStyle::Compounded;
-                    } else if (style == "Averaged") {
-                        pillar.futureStyle = FutureStyle::Averaged;
-                    } else {
-                        fail(pillarWhere, "unknown future style '" + style +
-                                              "' (expected Simple, Compounded or Averaged)");
-                    }
-                }
-                if (pillarNode.contains("averaging")) {
-                    if (pillar.kind != ForecastPillar::Kind::Future) {
-                        fail(pillarWhere, "'averaging' is only valid for Future forecast pillars");
-                    }
-                    if (pillar.futureStyle != FutureStyle::Averaged) {
-                        fail(pillarWhere,
-                             "'averaging' is only valid for Future forecast pillars with "
-                             "'style': 'Averaged'");
-                    }
-                    const std::string averaging = asString(pillarNode, "averaging", pillarWhere);
-                    if (averaging == "Arithmetic") {
-                        pillar.averagingStyle = AveragingStyle::Arithmetic;
-                    } else if (averaging == "Compounded") {
-                        pillar.averagingStyle = AveragingStyle::Compounded;
-                    } else {
-                        fail(pillarWhere, "unknown averaging style '" + averaging +
-                                              "' (expected Arithmetic or Compounded)");
-                    }
-                }
-                if (pillarNode.contains("convexityAdjustment")) {
-                    if (pillar.kind != ForecastPillar::Kind::Future) {
-                        fail(pillarWhere,
-                             "'convexityAdjustment' is only valid for Future forecast pillars");
-                    }
-                    pillar.convexityAdjustment =
-                        asDouble(pillarNode, "convexityAdjustment", pillarWhere);
-                    pillar.convexityAdjustmentSet = true;
-                }
-                if (pillarNode.contains("calendar")) {
-                    pillar.calendar =
-                        calendarFromName(asString(pillarNode, "calendar", pillarWhere));
-                } else if (pillarNode.contains("floatCalendar")) {
-                    pillar.calendar =
-                        calendarFromName(asString(pillarNode, "floatCalendar", pillarWhere));
-                }
-                if (pillarNode.contains("quoteDayCounter")) {
-                    pillar.quoteDayCounter =
-                        dayCounterFromName(asString(pillarNode, "quoteDayCounter", pillarWhere));
-                } else if (pillarNode.contains("dayCounter")) {
-                    pillar.quoteDayCounter =
-                        dayCounterFromName(asString(pillarNode, "dayCounter", pillarWhere));
-                } else if (pillarNode.contains("floatDayCounter")) {
-                    pillar.quoteDayCounter =
-                        dayCounterFromName(asString(pillarNode, "floatDayCounter", pillarWhere));
-                }
-                if (pillarNode.contains("businessDayConvention")) {
-                    pillar.businessDayConvention = conventionFromName(
-                        asString(pillarNode, "businessDayConvention", pillarWhere));
-                }
-                if (pillarNode.contains("floatTenor")) {
-                    pillar.floatTenor =
-                        asPeriod(pillarNode.at("floatTenor"), pillarWhere + ".floatTenor");
-                }
-                if (pillarNode.contains("fixedTenor")) {
-                    pillar.fixedTenor =
-                        asPeriod(pillarNode.at("fixedTenor"), pillarWhere + ".fixedTenor");
-                }
-                if (pillarNode.contains("floatCalendar")) {
-                    pillar.floatCalendar =
-                        calendarFromName(asString(pillarNode, "floatCalendar", pillarWhere));
-                } else {
-                    pillar.floatCalendar = pillar.calendar;
-                }
-                if (pillarNode.contains("fixedCalendar")) {
-                    pillar.fixedCalendar =
-                        calendarFromName(asString(pillarNode, "fixedCalendar", pillarWhere));
-                } else {
-                    pillar.fixedCalendar = pillar.calendar;
-                }
-                if (pillarNode.contains("floatDayCounter")) {
-                    pillar.floatDayCounter =
-                        dayCounterFromName(asString(pillarNode, "floatDayCounter", pillarWhere));
-                } else {
-                    pillar.floatDayCounter = pillar.quoteDayCounter;
-                }
-                if (pillarNode.contains("fixedDayCounter")) {
-                    pillar.fixedDayCounter =
-                        dayCounterFromName(asString(pillarNode, "fixedDayCounter", pillarWhere));
-                }
-                if (pillarNode.contains("paymentLag")) {
-                    if (pillar.kind != ForecastPillar::Kind::Irs) {
-                        fail(pillarWhere, "'paymentLag' is only valid for Irs forecast pillars");
-                    }
-                    pillar.paymentLag = asInt(pillarNode, "paymentLag", pillarWhere);
-                    if (pillar.paymentLag < 0) {
-                        fail(pillarWhere, "'paymentLag' must be non-negative");
-                    }
-                }
-                if (pillarNode.contains("firstFixing")) {
-                    if (pillar.kind != ForecastPillar::Kind::Irs) {
-                        fail(pillarWhere, "'firstFixing' is only valid for Irs forecast pillars");
-                    }
-                    pillar.firstCouponRate = asDouble(pillarNode, "firstFixing", pillarWhere);
-                    pillar.firstCouponFixed = true;
-                } else if (pillarNode.contains("firstCouponRate")) {
-                    if (pillar.kind != ForecastPillar::Kind::Irs) {
-                        fail(pillarWhere,
-                             "'firstCouponRate' is only valid for Irs forecast pillars");
-                    }
-                    pillar.firstCouponRate = asDouble(pillarNode, "firstCouponRate", pillarWhere);
-                    pillar.firstCouponFixed = true;
-                }
-                if (pillarNode.contains("firstCouponFixed")) {
-                    if (pillar.kind != ForecastPillar::Kind::Irs) {
-                        fail(pillarWhere,
-                             "'firstCouponFixed' is only valid for Irs forecast pillars");
-                    }
-                    pillar.firstCouponFixed = asBool(pillarNode, "firstCouponFixed", pillarWhere);
-                }
-                if (pillarNode.contains("spreadOnParentLeg")) {
-                    if (pillar.kind != ForecastPillar::Kind::BasisSwap) {
-                        fail(pillarWhere,
-                             "'spreadOnParentLeg' is only valid for BasisSwap forecast pillars");
-                    }
-                    pillar.spreadOnParentLeg = asBool(pillarNode, "spreadOnParentLeg", pillarWhere);
-                }
-                if (pillar.kind == ForecastPillar::Kind::Irs &&
-                    (!pillarNode.contains("floatTenor") || !pillarNode.contains("fixedTenor"))) {
-                    fail(pillarWhere, "Irs forecast pillars require 'floatTenor' and 'fixedTenor'");
-                }
-                spec.forecastPillars.push_back(pillar);
+        for (std::size_t k = 0; k < pillarNodes.size(); ++k) {
+            const std::string pillarWhere = where + "." + listName + "[" + std::to_string(k) + "]";
+            PillarSpec pillar = parsePillarSpec(pillarNodes[k], pillarWhere, forecast);
+            if (forecast) {
+                spec.forecastPillars.push_back(std::move(pillar));
+            } else {
+                spec.pillars.push_back(std::move(pillar));
             }
         }
         stack.curves.push_back(std::move(spec));
@@ -783,6 +712,118 @@ const DiscountCurve<double>* resolveReference(const std::vector<CurveReference>&
         }
     }
     return nullptr;
+}
+
+PillarKind toDiscountKind(PillarSpec::Kind kind) {
+    switch (kind) {
+        case PillarSpec::Kind::Deposit:
+            return PillarKind::Deposit;
+        case PillarSpec::Kind::Repo:
+            return PillarKind::Repo;
+        case PillarSpec::Kind::Fra:
+            return PillarKind::Fra;
+        case PillarSpec::Kind::Future:
+            return PillarKind::Future;
+        case PillarSpec::Kind::OisSwap:
+            return PillarKind::OisSwap;
+        case PillarSpec::Kind::Irs:
+        case PillarSpec::Kind::BasisSwap:
+            break;
+    }
+    throw std::invalid_argument(
+        "CurveConfig: buildCurve: forecast pillar kind on a discount curve");
+}
+
+ForecastPillar::Kind toForecastKind(PillarSpec::Kind kind) {
+    switch (kind) {
+        case PillarSpec::Kind::Deposit:
+            return ForecastPillar::Kind::Deposit;
+        case PillarSpec::Kind::Fra:
+            return ForecastPillar::Kind::Fra;
+        case PillarSpec::Kind::Future:
+            return ForecastPillar::Kind::Future;
+        case PillarSpec::Kind::Irs:
+            return ForecastPillar::Kind::Irs;
+        case PillarSpec::Kind::BasisSwap:
+            return ForecastPillar::Kind::BasisSwap;
+        case PillarSpec::Kind::Repo:
+        case PillarSpec::Kind::OisSwap:
+            break;
+    }
+    throw std::invalid_argument(
+        "CurveConfig: buildForecastCurve: discount pillar kind on a forecast curve");
+}
+
+/// Discount-side mapping: the shared market fields plus the future options.
+CurvePillar toCurvePillar(const PillarSpec& pillar) {
+    CurvePillar out;
+    out.maturity = pillar.maturity;
+    out.start = pillar.start;
+    out.kind = toDiscountKind(pillar.kind);
+    out.quote = pillar.quote;
+    out.quoteDayCounter = pillar.quoteDayCounter;
+    out.calendar = pillar.calendar;
+    out.fixedTenor = pillar.fixedTenor;
+    out.paymentLag = pillar.paymentLag;
+    out.convexityAdjustment = pillar.convexityAdjustment;
+    out.futureStyle = pillar.futureStyle;
+    out.averagingStyle = pillar.averagingStyle;
+    out.firstCouponFixed = pillar.firstCouponFixed;
+    out.firstCouponRate = pillar.firstCouponRate;
+    out.businessDayConvention = pillar.businessDayConvention;
+    return out;
+}
+
+/// Forecast-side mapping: the kind selects which sub-struct receives the
+/// market fields; future options stay on the top-level pillar.
+ForecastPillar toForecastPillar(const PillarSpec& pillar) {
+    ForecastPillar out;
+    out.kind = toForecastKind(pillar.kind);
+    const auto copyMoneyMarketFields = [&] {
+        out.start = pillar.start;
+        out.maturity = pillar.maturity;
+        out.quote = pillar.quote;
+        out.quoteDayCounter = pillar.quoteDayCounter;
+        out.calendar = pillar.calendar;
+        out.businessDayConvention = pillar.businessDayConvention;
+    };
+    switch (out.kind) {
+        case ForecastPillar::Kind::Deposit:
+        case ForecastPillar::Kind::Fra:
+            copyMoneyMarketFields();
+            break;
+        case ForecastPillar::Kind::Future:
+            copyMoneyMarketFields();
+            out.convexityAdjustment = pillar.convexityAdjustment;
+            out.futureStyle = pillar.futureStyle;
+            out.averagingStyle = pillar.averagingStyle;
+            break;
+        case ForecastPillar::Kind::Irs:
+            out.irs.start = pillar.start;
+            out.irs.maturity = pillar.maturity;
+            out.irs.quote = pillar.quote;
+            out.irs.floatTenor = pillar.floatTenor;
+            out.irs.floatCalendar = pillar.floatCalendar;
+            out.irs.floatDayCounter = pillar.floatDayCounter;
+            out.irs.fixedTenor = pillar.fixedTenor;
+            out.irs.fixedCalendar = pillar.fixedCalendar;
+            out.irs.fixedDayCounter = pillar.fixedDayCounter;
+            out.irs.businessDayConvention = pillar.businessDayConvention;
+            out.irs.paymentLag = pillar.paymentLag;
+            out.irs.firstCouponFixed = pillar.firstCouponFixed;
+            out.irs.firstCouponRate = pillar.firstCouponRate;
+            break;
+        case ForecastPillar::Kind::BasisSwap:
+            out.basis.maturity = pillar.maturity;
+            out.basis.spread = pillar.quote;
+            out.basis.spreadOnParentLeg = pillar.spreadOnParentLeg;
+            out.basis.floatTenor = pillar.floatTenor;
+            out.basis.quoteDayCounter = pillar.quoteDayCounter;
+            out.basis.calendar = pillar.calendar;
+            out.basis.businessDayConvention = pillar.businessDayConvention;
+            break;
+    }
+    return out;
 }
 
 } // namespace
@@ -899,21 +940,7 @@ DiscountCurve<double> buildCurve(const CurveStackSpec& stack, const CurveSpec& s
     std::vector<std::size_t> modelFutures;
     pillars.reserve(spec.pillars.size());
     for (const PillarSpec& pillar : spec.pillars) {
-        CurvePillar out;
-        out.maturity = pillar.maturity;
-        out.start = pillar.start;
-        out.kind = pillar.kind;
-        out.quote = pillar.quote;
-        out.quoteDayCounter = pillar.quoteDayCounter;
-        out.calendar = pillar.calendar;
-        out.fixedTenor = pillar.fixedTenor;
-        out.paymentLag = pillar.paymentLag;
-        out.convexityAdjustment = pillar.convexityAdjustment;
-        out.futureStyle = pillar.futureStyle;
-        out.averagingStyle = pillar.averagingStyle;
-        out.firstCouponFixed = pillar.firstCouponFixed;
-        out.firstCouponRate = pillar.firstCouponRate;
-        out.businessDayConvention = pillar.businessDayConvention;
+        CurvePillar out = toCurvePillar(pillar);
         if (out.kind == PillarKind::Fra) {
             if (pillar.fraConvexityExponentSet) {
                 out.fraConvexityExponent = pillar.fraConvexityExponent;
@@ -959,11 +986,16 @@ DiscountCurve<double> buildCurve(const CurveStackSpec& stack, const CurveSpec& s
         "CurveConfig: futures convexity fixed point did not converge", bootstrap, verify));
 }
 
-SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveSpec& spec,
-                                       std::shared_ptr<const DiscountCurve<double>> parent,
-                                       const DiscountCurve<double>* discount,
-                                       const std::vector<CurveReference>& references,
-                                       std::vector<ForecastPillar>* filledPillars) {
+namespace detail {
+
+/// Shared forecast-curve body: validation, pillar mapping, convexity and the
+/// parent-generic bootstrap. Both public overloads forward here.
+template <typename ParentT>
+SpreadCurve<double, ParentT>
+buildForecastCurveImpl(const CurveStackSpec& stack, const CurveSpec& spec,
+                       std::shared_ptr<const ParentT> parent, const DiscountCurve<double>* discount,
+                       const std::vector<CurveReference>& references,
+                       std::vector<ForecastPillar>* filledPillars) {
     if (!parent) {
         throw std::invalid_argument("CurveConfig: buildForecastCurve: null parent");
     }
@@ -991,76 +1023,30 @@ SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveS
     std::vector<ForecastPillar> pillars;
     std::vector<std::size_t> modelFutures;
     pillars.reserve(spec.forecastPillars.size());
-    for (const ForecastPillarSpec& pillar : spec.forecastPillars) {
-        ForecastPillar out;
-        out.kind = pillar.kind;
-        switch (pillar.kind) {
-            case ForecastPillar::Kind::Deposit:
-            case ForecastPillar::Kind::Fra:
-                out.start = pillar.start;
-                out.maturity = pillar.maturity;
-                out.quote = pillar.quote;
-                out.quoteDayCounter = pillar.quoteDayCounter;
-                out.calendar = pillar.calendar;
-                out.businessDayConvention = pillar.businessDayConvention;
-                break;
-            case ForecastPillar::Kind::Future:
-                out.start = pillar.start;
-                out.maturity = pillar.maturity;
-                out.quote = pillar.quote;
-                out.convexityAdjustment = pillar.convexityAdjustment;
-                out.futureStyle = pillar.futureStyle;
-                out.averagingStyle = pillar.averagingStyle;
-                out.quoteDayCounter = pillar.quoteDayCounter;
-                out.calendar = pillar.calendar;
-                out.businessDayConvention = pillar.businessDayConvention;
-                if (pillar.convexityAdjustmentSet) {
-                    // Explicit market-marked adjustment.
-                } else if (spec.convexity.enabled) {
-                    modelFutures.push_back(pillars.size());
-                } else {
-                    detail::failMissingFutureConvexity("CurveConfig: buildForecastCurve: ");
-                }
-                break;
-            case ForecastPillar::Kind::Irs:
-                out.irs.start = pillar.start;
-                out.irs.maturity = pillar.maturity;
-                out.irs.quote = pillar.quote;
-                out.irs.floatTenor = pillar.floatTenor;
-                out.irs.floatCalendar = pillar.floatCalendar;
-                out.irs.floatDayCounter = pillar.floatDayCounter;
-                out.irs.fixedTenor = pillar.fixedTenor;
-                out.irs.fixedCalendar = pillar.fixedCalendar;
-                out.irs.fixedDayCounter = pillar.fixedDayCounter;
-                out.irs.businessDayConvention = pillar.businessDayConvention;
-                out.irs.paymentLag = pillar.paymentLag;
-                out.irs.firstCouponFixed = pillar.firstCouponFixed;
-                out.irs.firstCouponRate = pillar.firstCouponRate;
-                break;
-            case ForecastPillar::Kind::BasisSwap:
-                out.basis.maturity = pillar.maturity;
-                out.basis.spread = pillar.quote;
-                out.basis.spreadOnParentLeg = pillar.spreadOnParentLeg;
-                out.basis.floatTenor = pillar.floatTenor;
-                out.basis.quoteDayCounter = pillar.quoteDayCounter;
-                out.basis.calendar = pillar.calendar;
-                out.basis.businessDayConvention = pillar.businessDayConvention;
-                break;
+    for (const PillarSpec& pillar : spec.forecastPillars) {
+        ForecastPillar out = toForecastPillar(pillar);
+        if (out.kind == ForecastPillar::Kind::Future) {
+            if (pillar.convexityAdjustmentSet) {
+                // Explicit market-marked adjustment.
+            } else if (spec.convexity.enabled) {
+                modelFutures.push_back(pillars.size());
+            } else {
+                detail::failMissingFutureConvexity("CurveConfig: buildForecastCurve: ");
+            }
         }
         pillars.push_back(out);
     }
     const auto bootstrap = [&]() {
-        return bootstrapForecastCurve<DiscountCurve<double>>(parent, discount, stack.asOf,
-                                                             spec.zeroDayCounter, spec.scheme,
-                                                             pillars, spec.accuracy, spec.tension);
+        return bootstrapForecastCurve<ParentT>(parent, discount, stack.asOf, spec.zeroDayCounter,
+                                               spec.scheme, pillars, spec.accuracy, spec.tension);
     };
-    const auto finish = [&](SpreadCurve<double> curve) {
+    const auto finish = [&](SpreadCurve<double, ParentT> curve) {
         if (filledPillars != nullptr) {
             *filledPillars = pillars;
         }
         return curve;
     };
-    const auto verify = [&](const SpreadCurve<double>& curve, const std::size_t index) {
+    const auto verify = [&](const SpreadCurve<double, ParentT>& curve, const std::size_t index) {
         return impliedForecastQuote(curve, curve.parent(), pillars[index], stack.asOf,
                                     spec.zeroDayCounter) -
                pillars[index].quote;
@@ -1068,6 +1054,224 @@ SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveS
     return finish(detail::applyModelConvexity(
         stack, spec, pillars, references, modelFutures, "CurveConfig: buildForecastCurve: ",
         "CurveConfig: forecast futures convexity fixed point did not converge", bootstrap, verify));
+}
+
+} // namespace detail
+
+SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveSpec& spec,
+                                       std::shared_ptr<const DiscountCurve<double>> parent,
+                                       const DiscountCurve<double>* discount,
+                                       const std::vector<CurveReference>& references,
+                                       std::vector<ForecastPillar>* filledPillars) {
+    return detail::buildForecastCurveImpl<DiscountCurve<double>>(
+        stack, spec, std::move(parent), discount, references, filledPillars);
+}
+
+template <typename ParentT>
+    requires CurveNodeProvider<ParentT>
+SpreadCurve<double, ParentT> buildForecastCurve(const CurveStackSpec& stack, const CurveSpec& spec,
+                                                std::shared_ptr<const ParentT> parent,
+                                                const DiscountCurve<double>* discount,
+                                                const std::vector<CurveReference>& references,
+                                                std::vector<ForecastPillar>* filledPillars) {
+    return detail::buildForecastCurveImpl<ParentT>(stack, spec, std::move(parent), discount,
+                                                   references, filledPillars);
+}
+
+template SpreadCurve<double> buildForecastCurve<DiscountCurve<double>>(
+    const CurveStackSpec& stack, const CurveSpec& spec,
+    std::shared_ptr<const DiscountCurve<double>> parent, const DiscountCurve<double>* discount,
+    const std::vector<CurveReference>& references, std::vector<ForecastPillar>* filledPillars);
+
+template SpreadCurve<double, CurveHandle> buildForecastCurve<CurveHandle>(
+    const CurveStackSpec& stack, const CurveSpec& spec, std::shared_ptr<const CurveHandle> parent,
+    const DiscountCurve<double>* discount, const std::vector<CurveReference>& references,
+    std::vector<ForecastPillar>* filledPillars);
+
+template SpreadCurve<double, SpreadCurve<double, DiscountCurve<double>>>
+buildForecastCurve<SpreadCurve<double, DiscountCurve<double>>>(
+    const CurveStackSpec& stack, const CurveSpec& spec,
+    std::shared_ptr<const SpreadCurve<double, DiscountCurve<double>>> parent,
+    const DiscountCurve<double>* discount, const std::vector<CurveReference>& references,
+    std::vector<ForecastPillar>* filledPillars);
+
+template SpreadCurve<double, SpreadCurve<double, CurveHandle>>
+buildForecastCurve<SpreadCurve<double, CurveHandle>>(
+    const CurveStackSpec& stack, const CurveSpec& spec,
+    std::shared_ptr<const SpreadCurve<double, CurveHandle>> parent,
+    const DiscountCurve<double>* discount, const std::vector<CurveReference>& references,
+    std::vector<ForecastPillar>* filledPillars);
+
+namespace {
+
+constexpr std::size_t kNoCurve = static_cast<std::size_t>(-1);
+
+std::size_t findCurveIndex(const CurveStackSpec& stack, const CurveKey& key) {
+    for (std::size_t i = 0; i < stack.curves.size(); ++i) {
+        if (stack.curves[i].key == key) {
+            return i;
+        }
+    }
+    return kNoCurve;
+}
+
+std::string curvePathLabel(const CurveStackSpec& stack, const std::vector<std::size_t>& path) {
+    std::string out;
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        if (i != 0) {
+            out += " -> ";
+        }
+        out += keyLabel(stack.curves[path[i]].key);
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<BuiltCurve> buildStack(const CurveStackSpec& stack) {
+    const std::size_t count = stack.curves.size();
+    if (count == 0) {
+        throw std::invalid_argument("CurveConfig: buildStack: stack has no curves");
+    }
+    for (std::size_t i = 0; i < count; ++i) {
+        for (std::size_t j = i + 1; j < count; ++j) {
+            if (stack.curves[i].key == stack.curves[j].key) {
+                throw std::invalid_argument("CurveConfig: buildStack: duplicate curve key '" +
+                                            keyLabel(stack.curves[i].key) + "'");
+            }
+        }
+    }
+
+    std::vector<std::size_t> parentIndex(count, kNoCurve);
+    std::vector<std::size_t> discountIndex(count, kNoCurve);
+    std::vector<std::size_t> referenceIndex(count, kNoCurve);
+    for (std::size_t i = 0; i < count; ++i) {
+        const CurveSpec& spec = stack.curves[i];
+        const std::string where = "buildStack: curve '" + keyLabel(spec.key) + "'";
+        const bool forecast = spec.key.role == CurveRole::Forecast;
+        if (forecast && !spec.hasParent) {
+            throw std::invalid_argument("CurveConfig: " + where +
+                                        " is missing parent: forecast curves must declare a "
+                                        "'parent' curve");
+        }
+        if (!forecast && spec.hasParent) {
+            throw std::invalid_argument("CurveConfig: " + where +
+                                        " is not a forecast curve and must not declare a parent");
+        }
+        if (spec.hasParent) {
+            parentIndex[i] = findCurveIndex(stack, spec.parent);
+            if (parentIndex[i] == kNoCurve) {
+                throw std::invalid_argument("CurveConfig: " + where + " references parent curve '" +
+                                            keyLabel(spec.parent) + "' not found in the stack");
+            }
+            if (parentIndex[i] == i) {
+                throw std::invalid_argument("CurveConfig: " + where +
+                                            " cannot be its own parent (self-reference)");
+            }
+        }
+        if (spec.hasDiscount) {
+            if (!forecast) {
+                throw std::invalid_argument(
+                    "CurveConfig: " + where +
+                    " is not a forecast curve and must not declare a discount curve");
+            }
+            discountIndex[i] = findCurveIndex(stack, spec.discount);
+            if (discountIndex[i] == kNoCurve) {
+                throw std::invalid_argument("CurveConfig: " + where +
+                                            " references discount curve '" +
+                                            keyLabel(spec.discount) + "' not found in the stack");
+            }
+            if (discountIndex[i] == i) {
+                throw std::invalid_argument("CurveConfig: " + where +
+                                            " cannot discount on itself (self-reference)");
+            }
+            if (stack.curves[discountIndex[i]].key.role != CurveRole::Discount) {
+                throw std::invalid_argument(
+                    "CurveConfig: " + where + " references curve '" + keyLabel(spec.discount) +
+                    "' as exogenous discount curve: exogenous discount must be a discount curve");
+            }
+        }
+        if (spec.convexity.hasReference) {
+            referenceIndex[i] = findCurveIndex(stack, spec.convexity.referenceCurve);
+            if (referenceIndex[i] == kNoCurve) {
+                throw std::invalid_argument(
+                    "CurveConfig: " + where + " references convexity curve '" +
+                    keyLabel(spec.convexity.referenceCurve) + "' not found in the stack");
+            }
+            if (referenceIndex[i] == i) {
+                throw std::invalid_argument("CurveConfig: " + where +
+                                            " cannot be its own convexity reference "
+                                            "(self-reference)");
+            }
+            if (stack.curves[referenceIndex[i]].key.role != CurveRole::Discount) {
+                throw std::invalid_argument("CurveConfig: " + where + " references curve '" +
+                                            keyLabel(spec.convexity.referenceCurve) +
+                                            "': reference must be a discount curve");
+            }
+        }
+    }
+
+    std::vector<unsigned char> state(count, 0); // 0 unvisited, 1 on the path, 2 built
+    std::vector<std::shared_ptr<const DiscountCurve<double>>> discountCurves(count);
+    std::vector<std::shared_ptr<const CurveHandle>> handles(count);
+    std::vector<std::size_t> path;
+    std::vector<BuiltCurve> built;
+    built.reserve(count);
+
+    const auto buildOne = [&](auto&& self, const std::size_t index, const bool parentEdge) -> void {
+        if (state[index] == 2) {
+            return;
+        }
+        if (state[index] == 1) {
+            path.push_back(index);
+            const std::string where = parentEdge ? "parent graph contains a cycle: "
+                                                 : "dependency graph contains a cycle: ";
+            throw std::invalid_argument("CurveConfig: buildStack: " + where +
+                                        curvePathLabel(stack, path));
+        }
+        state[index] = 1;
+        path.push_back(index);
+        if (parentIndex[index] != kNoCurve) {
+            self(self, parentIndex[index], true);
+        }
+        if (discountIndex[index] != kNoCurve) {
+            self(self, discountIndex[index], false);
+        }
+        if (referenceIndex[index] != kNoCurve) {
+            self(self, referenceIndex[index], false);
+        }
+        std::vector<CurveReference> references;
+        references.reserve(built.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (state[i] == 2 && stack.curves[i].key.role == CurveRole::Discount) {
+                references.push_back(CurveReference{stack.curves[i].key, discountCurves[i].get()});
+            }
+        }
+        const CurveSpec& spec = stack.curves[index];
+        if (spec.key.role == CurveRole::Forecast) {
+            const std::shared_ptr<const CurveHandle>& parentHandle = handles[parentIndex[index]];
+            const DiscountCurve<double>* discount = discountIndex[index] != kNoCurve
+                                                        ? discountCurves[discountIndex[index]].get()
+                                                        : nullptr;
+            SpreadCurve<double, CurveHandle> forecast =
+                buildForecastCurve(stack, spec, parentHandle, discount, references);
+            handles[index] = CurveHandle::make(
+                std::make_shared<const SpreadCurve<double, CurveHandle>>(std::move(forecast)));
+        } else {
+            auto discountCurve =
+                std::make_shared<const DiscountCurve<double>>(buildCurve(stack, spec, references));
+            discountCurves[index] = discountCurve;
+            handles[index] = CurveHandle::make(std::move(discountCurve));
+        }
+        state[index] = 2;
+        path.pop_back();
+        built.push_back(BuiltCurve{spec.key, spec.key.role, handles[index]});
+    };
+
+    for (std::size_t i = 0; i < count; ++i) {
+        buildOne(buildOne, i, false);
+    }
+    return built;
 }
 
 } // namespace quantape::markets

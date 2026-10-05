@@ -5,15 +5,12 @@
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 
-#include <stan/math/rev/core/nested_rev_autodiff.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -48,7 +45,17 @@ namespace quantape::markets {
  *
  * The overlay satisfies the `CurveProvider` concept, can wrap any curve
  * provider (`DiscountCurve` or `SpreadCurve`), and is meant to be
- * materialized once per run like any other curve.
+ * materialized once per run like any other curve. A `double` overlay also
+ * satisfies the `CurveNodeProvider` concept: its native "nodes" are the
+ * exogenous amplitude parameters (persistent turn points in ascending time
+ * order, then funding bumps by start time, with node 0 reserved for the fixed
+ * `t = 0` origin), so `size()`, `times()` and `zeroNodeWeights()` expose the
+ * overlay parameters rather than a bootstrap grid. This makes an overlay
+ * usable wherever a `CurveNodeProvider` is required, such as a pricing curve
+ * or the parent of a chained forecast curve. The stack risk engine's
+ * `StackCurveView` columns are quote-Jacobian columns and deliberately do not
+ * model these exogenous factors: turn risk is reported by `turnOverlayRisk`,
+ * which differentiates the amplitudes on their own tape instead.
  *
  * @tparam DoubleT Numeric type (`double` or an AD scalar).
  * @tparam BaseT Wrapped curve type (defaults to `DiscountCurve<DoubleT>`).
@@ -89,6 +96,14 @@ public:
         }
         std::sort(m_bumps.begin(), m_bumps.end(),
                   [](const Bump& a, const Bump& b) { return a.begin < b.begin; });
+        m_nodeTimes.reserve(1 + m_turns.size() + m_bumps.size());
+        m_nodeTimes.push_back(0.0);
+        for (const Turn& turn : m_turns) {
+            m_nodeTimes.push_back(turn.first);
+        }
+        for (const Bump& bump : m_bumps) {
+            m_nodeTimes.push_back(bump.begin);
+        }
     }
 
     /// Zero rate with the turn jumps and funding bumps accumulated.
@@ -127,6 +142,54 @@ public:
         return (x2 - x1) / (t2 - t1);
     }
 
+    /// Native overlay node count: the reserved fixed `t = 0` node plus one
+    /// node per exogenous amplitude (turn points then funding bumps).
+    std::size_t size() const { return m_nodeTimes.size(); }
+
+    /// Native node times in node order: `0` for the reserved origin, then the
+    /// turn times, then the bump start times. A bump is a single amplitude
+    /// parameter, so only its start time is available as a coordinate; the
+    /// sequence is therefore not necessarily globally increasing. These are
+    /// the overlay's own parameters, not the base curve's node grid.
+    const std::vector<double>& times() const { return m_nodeTimes; }
+
+    /// Analytic sensitivity `d zero(t) / d amplitude_i` in node order: zero for
+    /// the reserved node, `turnTime / t` for a turn at or before `t`, and the
+    /// window overlap `[begin, end] ∩ [0, t]` divided by `t` for a bump. For
+    /// `t <= 0` the overlay adds nothing and every weight is zero. The weights
+    /// are exogenous-factor sensitivities, not quote-Jacobian columns.
+    void zeroNodeWeights(double t, std::vector<double>& weights) const {
+        weights.assign(m_nodeTimes.size(), 0.0);
+        if (!(t > 0.0)) {
+            return;
+        }
+        std::size_t node = 1;
+        for (const Turn& turn : m_turns) {
+            if (turn.first <= t) {
+                weights[node] = turn.first / t;
+            }
+            ++node;
+        }
+        for (const Bump& bump : m_bumps) {
+            const double active = activeWidth(bump, t);
+            if (active > 0.0) {
+                weights[node] = active / t;
+            }
+            ++node;
+        }
+    }
+
+    /// Zero clock of the wrapped curve: the overlay has no clock of its own.
+    /// Base providers without a clock fall back to the date-less default.
+    const datetime::DayCounter& zeroDayCounter() const {
+        if constexpr (requires { m_base->zeroDayCounter(); }) {
+            return m_base->zeroDayCounter();
+        } else {
+            static const datetime::DayCounter fallback{datetime::DayCount::Actual365Fixed};
+            return fallback;
+        }
+    }
+
     const BaseT& base() const { return *m_base; }
     const std::vector<Turn>& turns() const { return m_turns; }
     const std::vector<Bump>& bumps() const { return m_bumps; }
@@ -147,8 +210,9 @@ private:
     }
 
     std::shared_ptr<const BaseT> m_base;
-    std::vector<Turn> m_turns; ///< (turn time, amplitude)
-    std::vector<Bump> m_bumps; ///< flat forward windows
+    std::vector<Turn> m_turns;       ///< (turn time, amplitude)
+    std::vector<Bump> m_bumps;       ///< flat forward windows
+    std::vector<double> m_nodeTimes; ///< 0, turn times, bump start times
 };
 
 namespace detail {
@@ -270,72 +334,5 @@ struct TurnRiskEntry {
     std::string label;
     double delta = 0.0;
 };
-
-/// Reverse-mode turn risk through a turn overlay. The overlay amplitudes are
-/// exogenous risk factors outside the curve quote Jacobian: `value` is called
-/// once on an overlay whose amplitudes are independent AD parameters, and each
-/// returned entry carries the corresponding reverse-mode adjoint. The direct
-/// alternative marks the turn knots as ordinary curve quotes (`turnPillar`),
-/// so the two representations differ in what a "turn delta" is measured
-/// against: a rate factor here, a bootstrapped quote there.
-///
-/// `labels` match `turns` then `bumps` in input order. Returned entries are a
-/// single ascending-time merge of both lists: turn points by turn time,
-/// funding windows by begin, with turns ahead of bumps at equal times, so
-/// labels travel with their shifted amplitudes.
-///
-/// Tape ownership: the internal graph runs on its own nested
-/// `stan::math::nested_rev_autodiff` scope, so its variables are recovered on
-/// return and on throw and never accumulate on the caller's tape. `value` must
-/// return a reverse-mode scalar exposing `.grad()` (e.g. `stan::math::var`),
-/// not `fvar<var>`; capturing outer reverse-mode values in `value` works but
-/// leaves their adjoints to the caller's own accounting.
-template <typename AdScalar, typename BaseT, typename ValueFn>
-std::vector<TurnRiskEntry>
-turnOverlayRisk(const BaseT& base, const std::vector<std::pair<double, double>>& turns,
-                const std::vector<typename TurnOverlay<double, BaseT>::Bump>& bumps,
-                const std::vector<std::string>& labels, ValueFn&& value) {
-    using AdBaseT = typename detail::CurveRebind<AdScalar, BaseT>::Type;
-    using AdOverlay = TurnOverlay<AdScalar, AdBaseT>;
-    const std::size_t turnCount = turns.size();
-    if (labels.size() != turnCount + bumps.size()) {
-        throw std::invalid_argument("turnOverlayRisk: label count mismatch");
-    }
-    stan::math::nested_rev_autodiff nested;
-    std::vector<AdScalar> amplitudes;
-    amplitudes.reserve(labels.size());
-    std::vector<typename AdOverlay::Turn> adTurns;
-    adTurns.reserve(turnCount);
-    for (std::size_t i = 0; i < turnCount; ++i) {
-        amplitudes.push_back(AdScalar(turns[i].second));
-        adTurns.emplace_back(turns[i].first, amplitudes.back());
-    }
-    std::vector<typename AdOverlay::Bump> adBumps;
-    adBumps.reserve(bumps.size());
-    for (std::size_t j = 0; j < bumps.size(); ++j) {
-        amplitudes.push_back(AdScalar(bumps[j].amplitude));
-        adBumps.push_back(
-            typename AdOverlay::Bump{bumps[j].begin, bumps[j].end, amplitudes.back()});
-    }
-    std::vector<std::size_t> order(labels.size());
-    std::iota(order.begin(), order.end(), std::size_t{0});
-    const auto amplitudeTime = [&](std::size_t k) {
-        return k < turnCount ? turns[k].first : bumps[k - turnCount].begin;
-    };
-    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        return amplitudeTime(a) < amplitudeTime(b);
-    });
-    auto adBase =
-        std::make_shared<const AdBaseT>(detail::CurveRebind<AdScalar, BaseT>::convert(base));
-    const AdOverlay overlay(std::move(adBase), std::move(adTurns), std::move(adBumps));
-    auto objective = value(overlay);
-    objective.grad();
-    std::vector<TurnRiskEntry> entries;
-    entries.reserve(labels.size());
-    for (const std::size_t k : order) {
-        entries.push_back(TurnRiskEntry{labels[k], amplitudes[k].adj()});
-    }
-    return entries;
-}
 
 } // namespace quantape::markets
