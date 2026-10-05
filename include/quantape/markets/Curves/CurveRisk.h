@@ -1,5 +1,7 @@
 #pragma once
 
+#include "quantape/datetime/Calendar.h"
+#include "quantape/datetime/Schedule.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/math/LinearAlgebra/DenseSolve.h"
@@ -8,7 +10,9 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <deque>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -50,79 +54,135 @@ struct DenseLu {
 
 /// Factor `matrix` (row-major `dim x dim`) with partial pivoting, consuming
 /// the scratch copy. Throws when the matrix is singular.
-inline DenseLu factorDenseLu(std::vector<double> matrix, std::size_t dim) {
-    if (matrix.size() != dim * dim) {
-        throw std::invalid_argument("factorDenseLu: size mismatch");
-    }
-    DenseLu factors;
-    factors.dim = dim;
-    factors.pivots.resize(dim);
-    for (std::size_t k = 0; k < dim; ++k) {
-        std::size_t pivot = k;
-        double best = std::abs(matrix[k * dim + k]);
-        for (std::size_t i = k + 1; i < dim; ++i) {
-            const double candidate = std::abs(matrix[i * dim + k]);
-            if (candidate > best) {
-                best = candidate;
-                pivot = i;
-            }
-        }
-        if (!(best > 0.0)) {
-            throw std::invalid_argument("factorDenseLu: singular matrix");
-        }
-        factors.pivots[k] = pivot;
-        if (pivot != k) {
-            for (std::size_t j = k; j < dim; ++j) {
-                std::swap(matrix[k * dim + j], matrix[pivot * dim + j]);
-            }
-        }
-        const double diagonal = matrix[k * dim + k];
-        for (std::size_t i = k + 1; i < dim; ++i) {
-            const double factor = matrix[i * dim + k] / diagonal;
-            matrix[i * dim + k] = factor;
-            if (factor == 0.0) {
-                continue;
-            }
-            for (std::size_t j = k + 1; j < dim; ++j) {
-                matrix[i * dim + j] -= factor * matrix[k * dim + j];
-            }
-        }
-    }
-    factors.lu = std::move(matrix);
-    return factors;
-}
+DenseLu factorDenseLu(std::vector<double> matrix, std::size_t dim);
 
 /// Solve `A x = rhs` from a factorization: pivot swaps, forward substitution
 /// against the stored multipliers, then back substitution against U. The
 /// arithmetic follows `quantape::math::solveDense` step for step.
-inline std::vector<double> solveDenseLu(const DenseLu& factors, const std::vector<double>& rhs) {
-    const std::size_t dim = factors.dim;
-    if (rhs.size() != dim || factors.lu.size() != dim * dim) {
-        throw std::invalid_argument("solveDenseLu: size mismatch");
-    }
-    std::vector<double> x = rhs;
-    for (std::size_t k = 0; k < dim; ++k) {
-        const std::size_t pivot = factors.pivots[k];
-        if (pivot != k) {
-            std::swap(x[k], x[pivot]);
+std::vector<double> solveDenseLu(const DenseLu& factors, const std::vector<double>& rhs);
+
+/// Solve `A x = rhs` from a factorization into a caller-owned buffer; the
+/// buffer is resized to the factorization dimension and reused across solves
+/// so a full inverse costs one allocation instead of one per column.
+void solveDenseLuInto(const DenseLu& factors, const std::vector<double>& rhs,
+                      std::vector<double>& x);
+
+/// Cache key of a generated schedule: the constructor arguments that
+/// determine the dates, with the calendar identified by the address of its
+/// rule-set name (stable for each rule set, distinct between them).
+struct ScheduleKey {
+    std::int32_t effective = 0;
+    std::int32_t maturity = 0;
+    int tenorLength = 0;
+    datetime::TimeUnit tenorUnit = datetime::TimeUnit::Days;
+    const std::string* calendarName = nullptr;
+    datetime::BusinessDayConvention convention = datetime::BusinessDayConvention::Following;
+};
+
+/// Per-thread cache of generated forward schedules. The row builders rebuild
+/// the same schedule on every finite-difference assembly; the cache keeps one
+/// generated schedule per distinct key, so repeated bumps reuse the dates.
+class ScheduleCache {
+public:
+    const datetime::Schedule& get(const datetime::Date& effective, const datetime::Date& maturity,
+                                  const datetime::Period& tenor, const datetime::Calendar& calendar,
+                                  datetime::BusinessDayConvention convention) {
+        // A risk run cycles through a bounded set of schedules, so the cap only
+        // trips for a long-lived caller that keeps inventing new reference
+        // dates; dropping the entries then bounds the footprint.
+        if (m_entries.size() >= kMaxEntries) {
+            m_entries.clear();
         }
-        const double lead = x[k];
-        for (std::size_t i = k + 1; i < dim; ++i) {
-            const double lower = factors.lu[i * dim + k];
-            if (lower != 0.0) {
-                x[i] -= lower * lead;
+        const ScheduleKey key{effective.serial(), maturity.serial(), tenor.length(),
+                              tenor.unit(),       &calendar.name(),  convention};
+        const auto generate = [&] {
+            return datetime::Schedule(effective, maturity, tenor, calendar, convention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+        };
+        for (CachedSchedule& entry : m_entries) {
+            if (entry.key.effective != key.effective || entry.key.maturity != key.maturity ||
+                entry.key.tenorLength != key.tenorLength || entry.key.tenorUnit != key.tenorUnit ||
+                entry.key.calendarName != key.calendarName ||
+                entry.key.convention != key.convention) {
+                continue;
+            }
+            if (entry.calendarAddress == &calendar) {
+                return entry.schedule;
+            }
+            // A different object can share the rule-set name (for example
+            // after `withExtraHolidays`), so compare the two calendars on the
+            // dates that determine this schedule. A schedule rolls exactly the
+            // unadjusted dates, and those follow from date arithmetic alone,
+            // so equal rolled dates make the two calendars interchangeable for
+            // this request.
+            if (sameRolledDates(entry, calendar)) {
+                entry.calendarAddress = &calendar;
+                return entry.schedule;
+            }
+            entry.schedule = generate();
+            entry.calendar = calendar;
+            entry.calendarAddress = &calendar;
+            return entry.schedule;
+        }
+        CachedSchedule entry;
+        entry.key = key;
+        entry.calendar = calendar;
+        entry.calendarAddress = &calendar;
+        entry.schedule = generate();
+        m_entries.push_back(std::move(entry));
+        return m_entries.back().schedule;
+    }
+
+private:
+    static constexpr std::size_t kMaxEntries = 1024;
+
+    struct CachedSchedule {
+        ScheduleKey key;
+        datetime::Calendar calendar;
+        const datetime::Calendar* calendarAddress = nullptr;
+        datetime::Schedule schedule;
+    };
+
+    static bool sameRolledDates(const CachedSchedule& entry, const datetime::Calendar& calendar) {
+        const datetime::Schedule& schedule = entry.schedule;
+        const std::vector<datetime::Date>& unadjusted = schedule.unadjustedDates();
+        for (std::size_t i = 0; i < unadjusted.size(); ++i) {
+            const datetime::BusinessDayConvention convention =
+                i == 0 ? schedule.effectiveConvention()
+                       : (i + 1 == unadjusted.size() ? schedule.terminationConvention()
+                                                     : schedule.businessDayConvention());
+            if (entry.calendar.adjust(unadjusted[i], convention) !=
+                calendar.adjust(unadjusted[i], convention)) {
+                return false;
             }
         }
+        return true;
     }
-    for (std::size_t ii = dim; ii-- > 0;) {
-        double sum = x[ii];
-        for (std::size_t j = ii + 1; j < dim; ++j) {
-            sum -= factors.lu[ii * dim + j] * x[j];
-        }
-        x[ii] = sum / factors.lu[ii * dim + ii];
-    }
-    return x;
-}
+
+    // A deque keeps references to cached schedules stable while it grows, so
+    // two lookups in one row cannot dangle each other.
+    std::deque<CachedSchedule> m_entries;
+};
+
+/// Per-thread scratch vectors of the pillar row builder, so repeated rows
+/// reuse capacity instead of re-allocating the same working vectors.
+struct PillarRowScratch {
+    std::vector<double> weights;
+    std::vector<double> weights2;
+    std::vector<double> weightsStart;
+    std::vector<double> weightsEnd;
+    std::vector<double> payTimes;
+    std::vector<double> startTimes;
+    std::vector<double> endTimes;
+    std::vector<double> taus;
+    std::vector<double> payDf;
+    std::vector<double> startDf;
+    std::vector<double> endDf;
+    std::vector<double> rowFloating;
+    std::vector<double> rowAnnuity;
+    ScheduleCache schedules;
+};
 
 } // namespace detail
 
@@ -150,7 +210,8 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                        const CurveT& curve, std::vector<double>& row) {
     const std::size_t n = curve.size();
     row.assign(n - 1, 0.0); // solved nodes only (node 0 is fixed)
-    std::vector<double> weights;
+    static thread_local detail::PillarRowScratch scratch;
+    std::vector<double>& weights = scratch.weights;
     const auto accumulateInto = [&](std::vector<double>& target, double dRdD, double t, double df) {
         if (t <= 0.0) {
             return; // D(0) = 1 carries no node risk
@@ -190,7 +251,7 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                 return false;
             }
             curve.zeroNodeWeights(t1, weights);
-            std::vector<double> weights2;
+            std::vector<double>& weights2 = scratch.weights2;
             curve.zeroNodeWeights(t2, weights2);
             // dR/df = exp(C) for the shifted-lognormal convexity convention.
             const double scale = std::exp(pillar.fraConvexityExponent) * d1 / (tau * d2);
@@ -208,8 +269,8 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                 if (periods == 0) {
                     return false;
                 }
-                std::vector<double> weightsStart;
-                std::vector<double> weightsEnd;
+                std::vector<double>& weightsStart = scratch.weightsStart;
+                std::vector<double>& weightsEnd = scratch.weightsEnd;
                 for (std::size_t k = 0; k < periods; ++k) {
                     const double tau =
                         datetime::yearFraction(fixings[k], fixings[k + 1], pillar.quoteDayCounter);
@@ -251,7 +312,7 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                 return false;
             }
             curve.zeroNodeWeights(t1, weights);
-            std::vector<double> weights2;
+            std::vector<double>& weights2 = scratch.weights2;
             curve.zeroNodeWeights(t2, weights2);
             const double scale = d1 / (tau * d2);
             for (std::size_t i = 1; i < n; ++i) {
@@ -262,19 +323,25 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
         case PillarKind::OisSwap: {
             const datetime::Date effective =
                 pillar.start.serial() != 0 ? pillar.start : referenceDate;
-            const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
-                                              pillar.calendar, pillar.businessDayConvention,
-                                              datetime::DateGeneration::Forward, false,
-                                              datetime::BusinessDayConvention::Unadjusted);
+            const datetime::Schedule& schedule =
+                scratch.schedules.get(effective, pillar.maturity, pillar.fixedTenor,
+                                      pillar.calendar, pillar.businessDayConvention);
             const std::vector<datetime::Date>& dates = schedule.dates();
             const std::size_t payments = dates.size() - 1;
-            std::vector<double> payTimes(payments);
-            std::vector<double> startTimes(payments);
-            std::vector<double> endTimes(payments);
-            std::vector<double> taus(payments);
-            std::vector<double> payDf(payments);
-            std::vector<double> startDf(payments);
-            std::vector<double> endDf(payments);
+            std::vector<double>& payTimes = scratch.payTimes;
+            std::vector<double>& startTimes = scratch.startTimes;
+            std::vector<double>& endTimes = scratch.endTimes;
+            std::vector<double>& taus = scratch.taus;
+            std::vector<double>& payDf = scratch.payDf;
+            std::vector<double>& startDf = scratch.startDf;
+            std::vector<double>& endDf = scratch.endDf;
+            payTimes.resize(payments);
+            startTimes.resize(payments);
+            endTimes.resize(payments);
+            taus.resize(payments);
+            payDf.resize(payments);
+            startDf.resize(payments);
+            endDf.resize(payments);
             double annuity = 0.0;
             double floating = 0.0;
             for (std::size_t k = 0; k < payments; ++k) {
@@ -301,8 +368,10 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
             if (!(annuity > 0.0)) {
                 return false;
             }
-            std::vector<double> rowFloating(n - 1, 0.0);
-            std::vector<double> rowAnnuity(n - 1, 0.0);
+            std::vector<double>& rowFloating = scratch.rowFloating;
+            std::vector<double>& rowAnnuity = scratch.rowAnnuity;
+            rowFloating.assign(n - 1, 0.0);
+            rowAnnuity.assign(n - 1, 0.0);
             for (std::size_t k = 0; k < payments; ++k) {
                 if (k == 0 && pillar.firstCouponFixed) {
                     // Only the payment-date discounting varies for a fixed coupon.
@@ -404,27 +473,22 @@ QuoteGamma transformQuoteGamma(const CurveT& curve, const std::vector<CurvePilla
     const detail::DenseLu factors = detail::factorDenseLu(f, m);
     std::vector<double> jacobianInverse(m * m, 0.0);
     std::vector<double> unit(m, 0.0);
+    std::vector<double> solution;
     for (std::size_t column = 0; column < m; ++column) {
         std::fill(unit.begin(), unit.end(), 0.0);
         unit[column] = 1.0;
-        const std::vector<double> solution = detail::solveDenseLu(factors, unit);
+        detail::solveDenseLuInto(factors, unit, solution);
         for (std::size_t k = 0; k < m; ++k) {
             jacobianInverse[k * m + column] = solution[k];
         }
     }
     // H_r = J^T H_zeta J, restricting H_zeta to the solved nodes.
-    std::vector<double> restricted(m * m, 0.0);
-    for (std::size_t a = 0; a < m; ++a) {
-        for (std::size_t b = 0; b < m; ++b) {
-            restricted[a * m + b] = HVdZeros[(a + 1) * n + (b + 1)];
-        }
-    }
     std::vector<double> tmp(m * m, 0.0);
     for (std::size_t i = 0; i < m; ++i) {
         for (std::size_t b = 0; b < m; ++b) {
             double sum = 0.0;
             for (std::size_t a = 0; a < m; ++a) {
-                sum += restricted[i * m + a] * jacobianInverse[a * m + b];
+                sum += HVdZeros[(i + 1) * n + (a + 1)] * jacobianInverse[a * m + b];
             }
             tmp[i * m + b] = sum;
         }

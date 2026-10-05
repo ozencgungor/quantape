@@ -1,0 +1,62 @@
+{
+  "asOf": "2026-09-29",
+  "curves": [
+    {
+      "key": { "currency": "USD", "role": "Discount", "collateral": "USD" },
+      "zeroDayCounter": "ACT/365F",
+      "interpolation": { "space": "LogDiscount", "scheme": "Linear" },
+      "bootstrap": { "method": "IterativeSequential", "accuracy": 1e-14 },
+      "pillars": [
+        {
+          "maturity": "2027-03-29",
+          "kind": "Deposit",
+          "quote": 0.0432,
+          "quoteDayCounter": "ACT/360",
+          "calendar": "NoHolidays"
+        },
+        {
+          "maturity": "2027-09-29",
+          "kind": "OisSwap",
+          "quote": 0.0405,
+          "quoteDayCounter": "ACT/365F",
+          "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" },
+          "paymentLag": 2
+        },
+        {
+          "maturity": "2028-09-29",
+          "kind": "OisSwap",
+          "quote": 0.0395,
+          "quoteDayCounter": "ACT/365F",
+          "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" }
+        },
+        {
+          "maturity": "2029-09-29",
+          "kind": "OisSwap",
+          "quote": 0.039,
+          "quoteDayCounter": "ACT/365F",
+          "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" },
+          "businessDayConvention": "Following"
+        },
+        {
+          "maturity": "2031-09-29",
+          "kind": "OisSwap",
+          "quote": 0.0385,
+          "quoteDayCounter": "ACT/365F",
+          "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" }
+        },
+        {
+          "maturity": "2036-09-29",
+          "kind": "OisSwap",
+          "quote": 0.039,
+          "quoteDayCounter": "ACT/365F",
+          "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" }
+        }
+      ]
+    }
+  ]
+}

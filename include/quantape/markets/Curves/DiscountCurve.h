@@ -87,8 +87,14 @@ constexpr std::string_view interpolationSchemeName(InterpolationScheme scheme) n
     return "Unknown";
 }
 
+namespace detail {
+struct CurveTrialUpdater;
+}
+
 template <typename DoubleT>
 class DiscountCurve {
+    friend struct detail::CurveTrialUpdater;
+
 public:
     /// Times constructor (analysis / benchmarks; no calendar dates involved).
     DiscountCurve(std::vector<double> times, std::vector<DoubleT> zeros,
@@ -243,16 +249,14 @@ public:
     /// the batch entry point behind `CurveOnGrid` materialization.
     std::vector<DoubleT> spaceValues(const std::vector<double>& times) const {
         std::vector<DoubleT> out;
-        out.reserve(times.size());
-        const std::size_t lastSegment = m_times.size() - 2;
-        std::size_t seg = 0;
-        for (const double t : times) {
-            while (seg < lastSegment && t >= m_times[seg + 1]) {
-                ++seg;
-            }
-            out.push_back(m_state.valueOnGrid(m_times, m_values, seg, t));
-        }
+        m_state.gridValues(m_times, m_values, times, out);
         return out;
+    }
+
+    /// Space values at `times` written into a caller-owned buffer (resized to
+    /// `times.size()`); allocation-free when `out` already has capacity.
+    void spaceValuesInto(const std::vector<double>& times, std::vector<DoubleT>& out) const {
+        m_state.gridValues(m_times, m_values, times, out);
     }
 
     // Compatibility aliases: the migrated dividend/FX consumers used the
@@ -336,21 +340,30 @@ private:
         if (m_scheme == InterpolationScheme::TensionSpline && !(m_tension > 0.0)) {
             throw std::invalid_argument("DiscountCurve: TensionSpline needs a positive tension");
         }
-        m_values.resize(m_zeros.size());
-        for (std::size_t i = 0; i < m_zeros.size(); ++i) {
-            m_values[i] =
-                m_space == InterpolationSpace::Zero ? m_zeros[i] : m_zeros[i] * m_times[i];
-        }
         if (m_scheme == InterpolationScheme::MixedLinearCubic) {
             // Short trial curves used inside bootstrap may not have enough
             // segments for the configured switch: degenerate to linear.
             const int maxIndex = static_cast<int>(m_times.size()) - 1;
             m_switchIndex = std::max(1, std::min(m_switchIndex, maxIndex));
         }
+        rebuildValuesAndState();
+    }
+
+    /// Recompute the space values and refresh the scheme state from the
+    /// current node values (the node grid is unchanged).
+    void rebuildValuesAndState() {
+        m_values.resize(m_zeros.size());
+        for (std::size_t i = 0; i < m_zeros.size(); ++i) {
+            m_values[i] =
+                m_space == InterpolationSpace::Zero ? m_zeros[i] : m_zeros[i] * m_times[i];
+        }
+        if (m_scheme == InterpolationScheme::Linear) {
+            m_state.updateLinear(m_times, m_values);
+            return;
+        }
         using SchemeState = detail::CurveSchemeState<DoubleT>;
         switch (m_scheme) {
             case InterpolationScheme::Linear:
-                m_state = SchemeState::makeLinear(m_times, m_values);
                 break;
             case InterpolationScheme::Akima:
                 m_state = SchemeState::makeAkima(m_times, m_values);
@@ -369,6 +382,15 @@ private:
                     m_times, m_values, static_cast<std::size_t>(m_switchIndex));
                 break;
         }
+    }
+
+    /// Trial-curve update used by the bootstrap: replace one node value and
+    /// refresh the state, reusing the existing buffers.
+    void setNodeValue(std::size_t index, double value) {
+        m_zeros[index] = DoubleT(value);
+        m_values[index] =
+            m_space == InterpolationSpace::Zero ? DoubleT(value) : DoubleT(value) * m_times[index];
+        rebuildValuesAndState();
     }
 
     /// Space value (zero rate or log discount) with scheme-consistent
@@ -400,5 +422,15 @@ private:
     InterpolationSpace m_space = InterpolationSpace::LogDiscount;
     InterpolationScheme m_scheme = InterpolationScheme::Linear;
 };
+
+namespace detail {
+/// Bootstrap-only access to the in-place trial-curve node update.
+struct CurveTrialUpdater {
+    template <typename DoubleT>
+    static void setNode(DiscountCurve<DoubleT>& curve, std::size_t index, double value) {
+        curve.setNodeValue(index, value);
+    }
+};
+} // namespace detail
 
 } // namespace quantape::markets

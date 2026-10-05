@@ -457,6 +457,48 @@ public:
             m_storage);
     }
 
+    /// Space values at a sorted grid: one `std::visit` for the whole batch and
+    /// one monotone segment pass, so no per-point variant dispatch.
+    void gridValues(const std::vector<double>& times, const std::vector<DoubleT>& values,
+                    const std::vector<double>& grid, std::vector<DoubleT>& out) const {
+        out.resize(grid.size());
+        if (grid.empty()) {
+            return;
+        }
+        const std::size_t lastSegment = times.size() - 2;
+        std::visit(
+            [&](const auto& state) {
+                using State = std::decay_t<decltype(state)>;
+                std::size_t segment = 0;
+                if constexpr (std::is_same_v<State, LinearSchemeState<DoubleT>>) {
+                    for (std::size_t k = 0; k < grid.size(); ++k) {
+                        const double t = grid[k];
+                        while (segment < lastSegment && t >= times[segment + 1]) {
+                            ++segment;
+                        }
+                        out[k] = schemeValueOnSegment(state, times, values, segment, t);
+                    }
+                } else {
+                    for (std::size_t k = 0; k < grid.size(); ++k) {
+                        const double t = grid[k];
+                        if (t <= times.front()) {
+                            out[k] = values.front() + (t - times.front()) * state.firstSlope;
+                            continue;
+                        }
+                        if (t >= times.back()) {
+                            out[k] = values.back() + (t - times.back()) * state.lastSlope;
+                            continue;
+                        }
+                        while (segment < lastSegment && t >= times[segment + 1]) {
+                            ++segment;
+                        }
+                        out[k] = schemeValueOnSegment(state, times, values, segment, t);
+                    }
+                }
+            },
+            m_storage);
+    }
+
     /// Space value with a caller-supplied segment (batch materialization).
     DoubleT valueOnGrid(const std::vector<double>& times, const std::vector<DoubleT>& values,
                         std::size_t segment, double t) const {
@@ -537,6 +579,24 @@ public:
         state.lastSlopeGradient[n - 2] = -1.0 / hLast;
         state.lastSlopeGradient[n - 1] = 1.0 / hLast;
         return CurveSchemeState(Storage(std::move(state)));
+    }
+
+    /// Refresh the linear state in place after node values changed without
+    /// changing the node grid (trial-curve updates inside the bootstrap).
+    void updateLinear(const std::vector<double>& times, const std::vector<DoubleT>& values) {
+        LinearSchemeState<DoubleT>* state = std::get_if<LinearSchemeState<DoubleT>>(&m_storage);
+        if (state == nullptr) {
+            m_storage = Storage(LinearSchemeState<DoubleT>{});
+            state = std::get_if<LinearSchemeState<DoubleT>>(&m_storage);
+        }
+        const std::size_t n = times.size();
+        const double hFirst = times[1] - times[0];
+        const double hLast = times[n - 1] - times[n - 2];
+        state->firstSlope = (values[1] - values[0]) / hFirst;
+        state->lastSlope = (values[n - 1] - values[n - 2]) / hLast;
+        state->lastSlopeGradient.assign(n, 0.0);
+        state->lastSlopeGradient[n - 2] = -1.0 / hLast;
+        state->lastSlopeGradient[n - 1] = 1.0 / hLast;
     }
 
     static CurveSchemeState makeAkima(const std::vector<double>& times,

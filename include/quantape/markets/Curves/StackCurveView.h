@@ -142,20 +142,28 @@ public:
     const Curve& concreteParent() const { return m_curve; }
 
     Ptr rebuildWithNode(std::size_t node, double delta, const Ptr& parentOverride) const override {
-        const Ptr& parentRef = parentOverride ? parentOverride : m_parent;
+        const DiscountCurve<double>& spreadNodes = m_curve.spreadNodes();
+        std::vector<double> spreads = spreadNodes.zeros();
+        spreads[node] += delta;
+        if (!parentOverride) {
+            // The parent is unchanged by a child-node bump, so the rebuilt
+            // spread curve shares the existing parent object instead of
+            // copying the whole parent curve; its view identity therefore
+            // still matches the parent block already in the stack.
+            return StackCurveView::makeOwned(Curve(m_curve.parentPointer(), spreadNodes.times(),
+                                                   std::move(spreads), spreadNodes.scheme(),
+                                                   spreadNodes.tension()));
+        }
         const auto parentAdapter =
-            std::dynamic_pointer_cast<const StackCurveViewOf<ParentT>>(parentRef);
+            std::dynamic_pointer_cast<const StackCurveViewOf<ParentT>>(parentOverride);
         if (parentAdapter == nullptr) {
             throw std::invalid_argument(
                 "StackCurveViewOf<SpreadCurve>::rebuildWithNode: parent view type mismatch");
         }
-        const DiscountCurve<double>& spreadNodes = m_curve.spreadNodes();
-        std::vector<double> spreads = spreadNodes.zeros();
-        spreads[node] += delta;
         // Spread nodes have no date constructor: the spread grid is carried by
         // times while the date metadata (reference date and zero clock) lives
-        // on the parent copy, which is re-bound through the parent override or
-        // the adapter's own parent and therefore keeps its own reconstruction.
+        // on the parent copy, which is re-bound through the parent override
+        // and therefore keeps its own reconstruction.
         return StackCurveView::makeOwned(
             Curve(std::make_shared<ParentT>(parentAdapter->concreteParent()), spreadNodes.times(),
                   std::move(spreads), spreadNodes.scheme(), spreadNodes.tension()));
@@ -223,17 +231,13 @@ inline bool sameCurveValuesCore(const LeftT& left, const void* leftIdentity, con
 /// zero-node weights at every segment midpoint. The midpoint weights
 /// fingerprint the interpolation space, scheme, tension and switch index, so
 /// curves that only share their node values are not interchangeable.
-inline bool sameCurveValues(const DiscountCurve<double>& left, const DiscountCurve<double>& right) {
-    return detail::sameCurveValuesCore(left, &left, right, &right);
-}
+bool sameCurveValues(const DiscountCurve<double>& left, const DiscountCurve<double>& right);
 
 /// Discount-function equality of two views: the same underlying object or the
 /// same node grid with equal discount factors at every node and equal zero-node
 /// weights at every segment midpoint. The midpoint weights fingerprint the
 /// interpolation space, scheme, tension and switch index, so views that only
 /// share their node values are not interchangeable.
-inline bool sameCurveView(const StackCurveView& left, const StackCurveView& right) {
-    return detail::sameCurveValuesCore(left, left.identity(), right, right.identity());
-}
+bool sameCurveView(const StackCurveView& left, const StackCurveView& right);
 
 } // namespace quantape::markets

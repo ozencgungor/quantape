@@ -167,6 +167,28 @@ public:
 
     std::size_t factorCount() const { return m_factorCount; }
 
+    /// Block fill with the step-dependent key salt hoisted out of the path
+    /// loop (the path salt advances by addition); the per-draw key is
+    /// identical to `keyFor`, so fills stay bitwise equal to per-path fills.
+    void fill(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
+              Eigen::MatrixXd& out) const {
+        constexpr std::uint64_t kPathSalt = 0x9E3779B97F4A7C15ULL;
+        constexpr std::uint64_t kIndexSalt = 0xBF58476D1CE4E5B9ULL;
+        out.resize(static_cast<Eigen::Index>(m_factorCount), static_cast<Eigen::Index>(nPaths));
+        const std::uint64_t indexBase =
+            static_cast<std::uint64_t>(step) * static_cast<std::uint64_t>(m_factorCount);
+        for (std::size_t j = 0; j < m_factorCount; ++j) {
+            const std::uint64_t indexSalt = (indexBase + j) * kIndexSalt;
+            std::uint64_t pathSalt = static_cast<std::uint64_t>(pathBegin) * kPathSalt;
+            for (std::size_t p = 0; p < nPaths; ++p) {
+                const std::uint64_t key = splitmix64(m_seed ^ pathSalt ^ indexSalt);
+                out(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)) =
+                    Sampler::sample(key);
+                pathSalt += kPathSalt;
+            }
+        }
+    }
+
     void fillPath(std::size_t pathIndex, std::size_t step, Eigen::MatrixXd& out,
                   std::size_t col) const {
         for (std::size_t i = 0; i < m_factorCount; ++i) {

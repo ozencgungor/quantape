@@ -8,9 +8,7 @@
 
 #include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
-#include "quantape/markets/Curves/CurveRiskReport.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
-#include "quantape/markets/Curves/StackRisk.h"
 #include "quantape/markets/Curves/TurnOverlay.h"
 #include "quantape/util/Check.h"
 

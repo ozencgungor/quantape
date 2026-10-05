@@ -2,12 +2,15 @@
 //
 // Measures per-draw / per-path-step costs (streamed, so large path tensors
 // are not allocated), parallel-schedule scaling, and pathwise-gradient
-// costs (per-path var tapes + tape size per path); the sampling-profiler
-// target for optimization work:
+// costs (per-path var tapes + tape size per path). Each case is run `reps`
+// times after a warmup; the report shows p50/p99 wall time, throughput in
+// millions of units/s and allocations made during the timed region:
 //   ./build/bench_sde [reps]
 //   /usr/bin/sample bench_sde 5 -file /tmp/prof.txt
 #include "quantape/math/StanMath.h"
 
+#include "quantape/format/Number.h"
+#include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/ForwardStan.h"
 #include "quantape/mc/Gradients.h"
@@ -29,13 +32,18 @@
 #include <Eigen/Dense>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <cstdio>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <new>
 #include <random>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -51,19 +59,195 @@ using quantape::processes::HestonQeProcess;
 
 namespace {
 
-double bench_us(const char* name, double per_unit, int reps, const std::function<double()>& fn) {
-    fn(); // warmup
-    const auto t0 = std::chrono::steady_clock::now();
-    double sink = 0.0;
-    for (int i = 0; i < reps; ++i) {
-        sink += fn();
+// ── allocation counters (compile-time opt-in, see bench_sde_alloc) ──
+//
+// Eigen and the Stan arena allocate through malloc, not operator new, so
+// counting every allocation needs the malloc/free symbols replaced; that
+// replaces the system allocator fast path and distorts timings badly (the
+// per-step buffers make millions of tiny allocations). The counters and
+// overrides therefore live behind QUANTAPE_SDE_ALLOC_COUNTS and are built
+// into the separate bench_sde_alloc target, whose allocation column is the
+// metric and whose timing column is not comparable to bench_sde.
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS)
+std::atomic<std::uint64_t> g_allocations{0};
+std::atomic<std::uint64_t> g_allocatedBytes{0};
+
+void countAllocation(std::size_t bytes) {
+    g_allocations.fetch_add(1, std::memory_order_relaxed);
+    g_allocatedBytes.fetch_add(bytes, std::memory_order_relaxed);
+}
+#endif
+
+volatile double g_sink = 0.0;
+
+} // namespace
+
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS) && defined(__APPLE__)
+#include <malloc/malloc.h>
+
+// Eigen and the Stan arena call malloc/free from header code instantiated in
+// this executable; defining the symbols here counts those allocations too.
+extern "C" void* malloc(std::size_t size) {
+    countAllocation(size);
+    return malloc_zone_malloc(malloc_default_zone(), size);
+}
+extern "C" void free(void* pointer) {
+    if (pointer != nullptr) {
+        malloc_zone_free(malloc_default_zone(), pointer);
     }
-    const auto t1 = std::chrono::steady_clock::now();
-    const double us = std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
-    std::printf("%-42s %10.1f us/run   %7.2f ns/unit   (sink %.3e)\n", name, us,
-                per_unit > 0.0 ? us * 1000.0 / per_unit : 0.0, sink);
-    std::fflush(stdout);
-    return us;
+}
+#endif
+
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS)
+void* operator new(std::size_t size) {
+    countAllocation(size);
+#if defined(__APPLE__)
+    void* p = malloc_zone_malloc(malloc_default_zone(), size);
+#else
+    void* p = std::malloc(size);
+#endif
+    if (p != nullptr) {
+        return p;
+    }
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) {
+    countAllocation(size);
+#if defined(__APPLE__)
+    void* p = malloc_zone_malloc(malloc_default_zone(), size);
+#else
+    void* p = std::malloc(size);
+#endif
+    if (p != nullptr) {
+        return p;
+    }
+    throw std::bad_alloc();
+}
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    countAllocation(size);
+    void* p = nullptr;
+    if (posix_memalign(&p, static_cast<std::size_t>(alignment), size) == 0) {
+        return p;
+    }
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    return ::operator new(size, alignment);
+}
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    countAllocation(size);
+#if defined(__APPLE__)
+    return malloc_zone_malloc(malloc_default_zone(), size);
+#else
+    return std::malloc(size);
+#endif
+}
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+    return ::operator new(size, std::nothrow);
+}
+void operator delete(void* p) noexcept {
+#if defined(__APPLE__)
+    if (p != nullptr) {
+        malloc_zone_free(malloc_default_zone(), p);
+    }
+#else
+    std::free(p);
+#endif
+}
+void operator delete[](void* p) noexcept {
+    ::operator delete(p);
+}
+void operator delete(void* p, std::size_t) noexcept {
+    ::operator delete(p);
+}
+void operator delete[](void* p, std::size_t) noexcept {
+    ::operator delete(p);
+}
+void operator delete(void* p, std::align_val_t) noexcept {
+#if defined(__APPLE__)
+    if (p != nullptr) {
+        malloc_zone_free(malloc_default_zone(), p);
+    }
+#else
+    std::free(p);
+#endif
+}
+void operator delete[](void* p, std::align_val_t) noexcept {
+    ::operator delete(p);
+}
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept {
+    ::operator delete(p);
+}
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept {
+    ::operator delete(p);
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept {
+    ::operator delete(p);
+}
+void operator delete[](void* p, const std::nothrow_t&) noexcept {
+    ::operator delete(p);
+}
+#endif // QUANTAPE_SDE_ALLOC_COUNTS
+
+namespace {
+
+struct Timing {
+    double p50Us = 0.0;
+    double p99Us = 0.0;
+    double meanUs = 0.0;
+    std::uint64_t allocations = 0;
+    std::uint64_t allocatedBytes = 0;
+};
+
+/// `per_unit` is paths or path-steps, used for ns/unit and Munit/s.
+void bench_us(const std::string& name, double per_unit, int reps,
+              const std::function<double()>& fn) {
+    fn(); // warmup (also pre-touches allocations that repeat per run)
+    std::vector<double> samples;
+    samples.reserve(static_cast<std::size_t>(reps));
+    Timing timing;
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS)
+    timing.allocations = UINT64_MAX;
+#endif
+    for (int i = 0; i < reps; ++i) {
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS)
+        g_allocations.store(0, std::memory_order_relaxed);
+        g_allocatedBytes.store(0, std::memory_order_relaxed);
+#endif
+        const auto t0 = std::chrono::steady_clock::now();
+        g_sink = fn();
+        const auto t1 = std::chrono::steady_clock::now();
+        samples.push_back(std::chrono::duration<double, std::micro>(t1 - t0).count());
+#if defined(QUANTAPE_SDE_ALLOC_COUNTS)
+        const std::uint64_t allocations = g_allocations.load(std::memory_order_relaxed);
+        if (allocations < timing.allocations) {
+            timing.allocations = allocations;
+            timing.allocatedBytes = g_allocatedBytes.load(std::memory_order_relaxed);
+        }
+#endif
+    }
+    std::sort(samples.begin(), samples.end());
+    const auto quantile = [&](double q) {
+        const std::size_t index =
+            static_cast<std::size_t>(std::ceil(q * static_cast<double>(samples.size()))) - 1;
+        return samples[std::min(index, samples.size() - 1)];
+    };
+    timing.p50Us = quantile(0.5);
+    timing.p99Us = quantile(0.99);
+    double sum = 0.0;
+    for (double sample : samples) {
+        sum += sample;
+    }
+    timing.meanUs = sum / static_cast<double>(samples.size());
+    const double nsPerUnit = per_unit > 0.0 ? timing.meanUs * 1000.0 / per_unit : 0.0;
+    const double mUnitsPerSecond = per_unit > 0.0 ? per_unit / timing.meanUs : 0.0;
+    QTA_LOG_INFO("bench",
+                 "{}  p50 {} us  p99 {} us  {} ns/unit  {} Munit/s  allocs {}  {} KB  sink {}",
+                 name, quantape::format::num(timing.p50Us, 6),
+                 quantape::format::num(timing.p99Us, 6), quantape::format::num(nsPerUnit, 3),
+                 quantape::format::num(mUnitsPerSecond, 3), timing.allocations,
+                 quantape::format::num(static_cast<double>(timing.allocatedBytes) / 1024.0, 3),
+                 quantape::format::num(static_cast<double>(g_sink), 6));
 }
 
 struct LinearModel {
@@ -276,8 +460,8 @@ int main(int argc, char** argv) {
         const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
         const IidGaussianSource<> source(1, 7);
         const auto x0 = Eigen::VectorXd::Constant(1, 100.0);
-        std::printf("shard %zu/%zu: paths [%zu, %zu)\n", shardIndex, shardCount, begin,
-                    begin + count);
+        QTA_LOG_INFO("bench", "shard {}/{}: paths [{}, {})", shardIndex, shardCount, begin,
+                     begin + count);
         bench_us("gradient euler gbm shard (sequential)", double(count), reps, [&] {
             const auto s = quantape::mc::simulateGradientSamples(
                 simulator, x0, theta, quantape::mc::driftOf(GbmThetaModel{}),
@@ -288,7 +472,8 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    std::printf("SDE engine benchmark, reps=%d%s\n", reps, onlyGrad ? " (gradients only)" : "");
+    QTA_LOG_INFO("bench", "SDE engine benchmark, reps={}{}", reps,
+                 onlyGrad ? " (gradients only)" : "");
 
     if (!onlyGrad) {
         // ── 1. Source: keyed draws ──
@@ -318,9 +503,8 @@ int main(int argc, char** argv) {
                  {std::size_t(1024), std::size_t(4096), std::size_t(16384)}) {
                 const SdeSimulator<double> simulator(grid, theta);
                 const IidGaussianSource<> source(1, 7);
-                char name[96];
-                std::snprintf(name, sizeof(name), "euler gbm stream 100k x 252 (block %zu)",
-                              static_cast<std::size_t>(blockSize));
+                const std::string name =
+                    "euler gbm stream 100k x 252 (block " + std::to_string(blockSize) + ")";
                 bench_us(name, static_cast<double>(nPaths * nSteps), reps, [&] {
                     double checksum = 0.0;
                     simulator.simulateBlocks(
@@ -512,8 +696,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "double euler stream %zux252 (parallel)", nPaths);
+            const std::string name =
+                "double euler stream " + std::to_string(nPaths) + "x252 (parallel)";
             bench_us(name, double(nPaths * nSteps), reps, [&] {
                 std::vector<double> partials(nBlocks, 0.0);
                 simulator.simulateBlocks(
@@ -533,8 +717,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (parallel)", nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (parallel)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradient(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -545,8 +729,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Milstein> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient milstein gbm %zux252 (parallel)", nPaths);
+            const std::string name =
+                "gradient milstein gbm " + std::to_string(nPaths) + "x252 (parallel)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradient(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -557,8 +741,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (forward, N=3)", nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (forward, N=3)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientForward<3>(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -569,8 +753,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (stan fvar fwd)", nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (stan fvar fwd)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientStanForward(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -581,9 +765,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Milstein> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient milstein gbm %zux252 (forward, N=3)",
-                          nPaths);
+            const std::string name =
+                "gradient milstein gbm " + std::to_string(nPaths) + "x252 (forward, N=3)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientForward<3>(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -594,9 +777,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (forward block64)",
-                          nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (forward block64)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientForwardBlock<3>(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -627,8 +809,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (lean reverse)", nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (lean reverse)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientLean(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -639,9 +821,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Milstein> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient milstein gbm %zux252 (lean reverse)",
-                          nPaths);
+            const std::string name =
+                "gradient milstein gbm " + std::to_string(nPaths) + "x252 (lean reverse)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientLean(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -652,8 +833,8 @@ int main(int argc, char** argv) {
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(1, 7);
-            char name[96];
-            std::snprintf(name, sizeof(name), "gradient euler gbm %zux252 (checkpointed)", nPaths);
+            const std::string name =
+                "gradient euler gbm " + std::to_string(nPaths) + "x252 (checkpointed)";
             bench_us(name, double(nPaths), reps, [&] {
                 const auto g = quantape::mc::simulateGradientCheckpointed(
                     simulator, x0, theta, quantape::mc::driftOf(model),
@@ -691,8 +872,9 @@ int main(int argc, char** argv) {
                 thetaVars);
             stan::math::var y = payoff.template operator()<stan::math::var>(path);
             const std::size_t nodes = stan::math::nested_size();
-            std::printf("tape nodes/path (euler gbm 252 steps): %zu (~%.1f KB at 64 B/node)\n",
-                        nodes, static_cast<double>(nodes) * 64.0 / 1024.0);
+            QTA_LOG_INFO("bench", "tape nodes/path (euler gbm 252 steps): {} (~{} KB at 64 B/node)",
+                         nodes,
+                         quantape::format::num(static_cast<double>(nodes) * 64.0 / 1024.0, 4));
             y.grad();
         }
         {
@@ -707,8 +889,9 @@ int main(int argc, char** argv) {
                 thetaVars);
             stan::math::var y = payoff.template operator()<stan::math::var>(path);
             const std::size_t nodes = stan::math::nested_size();
-            std::printf("tape nodes/path (milstein gbm 252 steps): %zu (~%.1f KB at 64 B/node)\n",
-                        nodes, static_cast<double>(nodes) * 64.0 / 1024.0);
+            QTA_LOG_INFO(
+                "bench", "tape nodes/path (milstein gbm 252 steps): {} (~{} KB at 64 B/node)",
+                nodes, quantape::format::num(static_cast<double>(nodes) * 64.0 / 1024.0, 4));
             y.grad();
         }
         {
@@ -767,9 +950,10 @@ int main(int argc, char** argv) {
             simulator.template stepPath<stan::math::var>(
                 x, xNext, 0, 0, source, quantape::mc::driftOf(model),
                 quantape::mc::diffusionOf(model), thetaVars, z, uniforms, scratch);
-            std::printf("checkpointed step tape nodes: %zu (~%.1f KB at 64 B/node)\n",
-                        stan::math::nested_size(),
-                        static_cast<double>(stan::math::nested_size()) * 64.0 / 1024.0);
+            QTA_LOG_INFO("bench", "checkpointed step tape nodes: {} (~{} KB at 64 B/node)",
+                         stan::math::nested_size(),
+                         quantape::format::num(
+                             static_cast<double>(stan::math::nested_size()) * 64.0 / 1024.0, 4));
         }
     }
 
@@ -784,12 +968,12 @@ int main(int argc, char** argv) {
         const std::vector<std::vector<double>> thetaSteps(nSteps, theta);
         Eigen::VectorXd x0 = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(dims), 0.03);
         const MultiFactorModel model;
-        char name[128];
 
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
             const IidGaussianSource<> source(factors, 7);
-            std::snprintf(name, sizeof(name), "mf d=%zu q=%zu double stream 2kx252", dims, factors);
+            const std::string name = "mf d=" + std::to_string(dims) +
+                                     " q=" + std::to_string(factors) + " double stream 2kx252";
             bench_us(name, double(nPaths * nSteps), reps, [&] {
                 double checksum = 0.0;
                 simulator.simulateBlocks(
@@ -815,8 +999,9 @@ int main(int argc, char** argv) {
             const std::size_t leanNodes = quantape::mc::leanPathTapeNodes(
                 simulator, x0, theta, quantape::mc::driftOf(model),
                 quantape::mc::diffusionOf(model), source, TerminalCallPayoff{0.018}, 0);
-            std::printf("mf lean tape nodes/path (252 steps): %zu (~%.1f KB at 48 B/node)\n",
-                        leanNodes, static_cast<double>(leanNodes) * 48.0 / 1024.0);
+            QTA_LOG_INFO("bench", "mf lean tape nodes/path (252 steps): {} (~{} KB at 48 B/node)",
+                         leanNodes,
+                         quantape::format::num(static_cast<double>(leanNodes) * 48.0 / 1024.0, 4));
         }
         {
             const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
@@ -885,9 +1070,9 @@ int main(int argc, char** argv) {
         }
         const quantape::mc::SobolSource sobolSource(generator, 1, nSteps, 0);
 
-        std::printf("sobol source: %s, %u dims\n",
-                    tablePath.empty() ? "fixture" : "configured table",
-                    generator->preparedDimension());
+        QTA_LOG_INFO("bench", "sobol source: {}, {} dims",
+                     tablePath.empty() ? "fixture" : "configured table",
+                     generator->preparedDimension());
         {
             Eigen::MatrixXd z;
             bench_us("sobol source fill q=1 20k paths", double(nPaths), reps, [&] {

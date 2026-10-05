@@ -79,11 +79,13 @@ void simulatePathDerivatives(const SdeSimulator<double, Scheme>& simulator,
         throw std::invalid_argument("simulatePathDerivatives: x0 must be non-empty");
     }
 
-    // Tangent path: column j holds one independent parameter direction.
-    std::vector<StateMatrix<double>> tangents(
-        nSteps + 1, StateMatrix<double>::Zero(d, static_cast<Eigen::Index>(nParameters)));
+    const Eigen::Index nParams = static_cast<Eigen::Index>(nParameters);
+    // Tangent path: one contiguous (nSteps + 1) * d x (d + p) buffer (row
+    // block k holds dX_k), so the pass allocates once instead of per step.
+    Eigen::MatrixXd tangents =
+        Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(nSteps + 1) * d, nParams);
     for (Eigen::Index i = 0; i < d; ++i) {
-        tangents[0](i, i) = 1.0; // ∂x0/∂x0 = I; ∂x0/∂θ = 0
+        tangents(i, i) = 1.0; // ∂x0/∂x0 = I; ∂x0/∂θ = 0
     }
 
     // Sweep buffers constructed once per path (dims fixed across sweeps).
@@ -109,15 +111,23 @@ void simulatePathDerivatives(const SdeSimulator<double, Scheme>& simulator,
         for (std::size_t k = 0; k < nSteps; ++k) {
             simulator.template stepPath<Dual>(x, xNext, k, pathIndex, source, drift, diffusion,
                                               thetaDual, z, uniforms, scratch);
+            const Eigen::Index rowOffset = (static_cast<Eigen::Index>(k) + 1) * d;
             for (Eigen::Index i = 0; i < d; ++i) {
-                tangents[k + 1](i, static_cast<Eigen::Index>(j)) = xNext(i, 0).d_;
+                tangents(rowOffset + i, static_cast<Eigen::Index>(j)) = xNext(i, 0).d_;
             }
             x.swap(xNext);
         }
     }
 
+    StateMatrix<double> stepBlock(d, nParams);
     for (std::size_t k = 0; k <= nSteps; ++k) {
-        sink(k, tangents[k]);
+        const Eigen::Index rowOffset = static_cast<Eigen::Index>(k) * d;
+        for (Eigen::Index j = 0; j < nParams; ++j) {
+            for (Eigen::Index i = 0; i < d; ++i) {
+                stepBlock(i, j) = tangents(rowOffset + i, j);
+            }
+        }
+        sink(k, stepBlock);
     }
 }
 

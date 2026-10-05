@@ -44,26 +44,27 @@ CurveOnGrid<DoubleT> materialize(const DiscountCurve<DoubleT>& curve,
     CurveOnGrid<DoubleT> out;
     out.times = times;
     const std::size_t n = times.size();
-    out.discount.reserve(n);
-    out.zero.reserve(n);
-    if (n > 1) {
-        out.forward.reserve(n - 1);
-    }
     if (n == 0) {
         return out;
     }
-    const std::vector<DoubleT> values = curve.spaceValues(times);
+    out.discount.resize(n);
+    out.zero.resize(n);
+    if (n > 1) {
+        out.forward.resize(n - 1);
+    }
+    std::vector<DoubleT> values;
+    curve.spaceValuesInto(times, values);
     const bool zeroSpace = curve.space() == InterpolationSpace::Zero;
     for (std::size_t k = 0; k < n; ++k) {
         const double t = times[k];
-        out.discount.push_back(curve.discountFromSpace(values[k], t));
-        out.zero.push_back(zeroSpace ? values[k] : (t > 0.0 ? values[k] / t : curve.zero(0.0)));
+        out.discount[k] = curve.discountFromSpace(values[k], t);
+        out.zero[k] = zeroSpace ? values[k] : (t > 0.0 ? values[k] / t : curve.zero(0.0));
     }
     for (std::size_t k = 0; k + 1 < n; ++k) {
         const double dt = times[k + 1] - times[k];
         const DoubleT x0 = zeroSpace ? values[k] * times[k] : values[k];
         const DoubleT x1 = zeroSpace ? values[k + 1] * times[k + 1] : values[k + 1];
-        out.forward.push_back((x1 - x0) / dt);
+        out.forward[k] = (x1 - x0) / dt;
     }
     return out;
 }

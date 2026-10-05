@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -691,6 +692,599 @@ constexpr std::string_view forecastPillarKindName(ForecastPillar::Kind kind) noe
     return "Unknown";
 }
 
+namespace detail {
+
+/// Precomputed deposit/repo quote inputs: accrual year fraction and zero time.
+struct DepositQuoteTimes {
+    double tau = 0.0;
+    double t = 0.0;
+};
+
+/// Precomputed FRA quote inputs.
+struct FraQuoteTimes {
+    double t1 = 0.0;
+    double t2 = 0.0;
+    double tau = 0.0;
+    double convexityExponent = 0.0;
+};
+
+/// Precomputed future quote inputs for every underlying style. Simple and
+/// compounded futures use `t1`/`t2`/`tau`; the averaged styles carry the
+/// fixing grid times (with per-fixing accruals for the arithmetic mean).
+struct FutureQuoteTimes {
+    enum class Style : std::uint8_t { Simple, AveragedArithmetic, AveragedCompounded };
+    Style style = Style::Simple;
+    double t1 = 0.0;
+    double t2 = 0.0;
+    double tau = 0.0;
+    double convexity = 0.0;
+    std::vector<double> previousTimes;
+    std::vector<double> currentTimes;
+    std::vector<double> accrualTaus;
+};
+
+/// Precomputed quote inputs of one OIS coupon.
+struct OisCouponTimes {
+    double tau = 0.0;
+    double tPay = 0.0;
+    double tStart = 0.0;
+    double tEnd = 0.0;
+    bool firstFixed = false;
+    double firstRate = 0.0;
+};
+
+/// Everything a discount-curve bootstrap residual needs for one pillar. The
+/// schedule and date arithmetic are resolved once when the bootstrap starts;
+/// each root-find step only evaluates the trial curve at the stored times.
+struct PillarQuoteTimes {
+    PillarKind kind = PillarKind::Deposit;
+    DepositQuoteTimes deposit;
+    FraQuoteTimes fra;
+    FutureQuoteTimes future;
+    std::vector<OisCouponTimes> oisCoupons;
+};
+
+/// Precomputed simple-forward quote inputs (deposit and FRA forecast pillars).
+struct SimpleForwardQuoteTimes {
+    double t1 = 0.0;
+    double t2 = 0.0;
+    double tau = 0.0;
+};
+
+/// Precomputed quote inputs of one IRS float coupon.
+struct IrsFloatCouponTimes {
+    double tau = 0.0;
+    double tPay = 0.0;
+    double tPrevious = 0.0;
+    double tAccrual = 0.0;
+    bool firstFixed = false;
+    double firstRate = 0.0;
+};
+
+/// Precomputed quote inputs of one fixed-leg annuity coupon.
+struct IrsAnnuityCouponTimes {
+    double tau = 0.0;
+    double tPay = 0.0;
+};
+
+/// Precomputed quote inputs of one basis-swap coupon.
+struct BasisCouponTimes {
+    double tau = 0.0;
+    double tPrev = 0.0;
+    double t = 0.0;
+};
+
+/// Everything a forecast-curve bootstrap residual needs for one pillar.
+struct ForecastQuoteTimes {
+    ForecastPillar::Kind kind = ForecastPillar::Kind::Deposit;
+    SimpleForwardQuoteTimes simple;
+    FutureQuoteTimes future;
+    std::vector<IrsFloatCouponTimes> floatCoupons;
+    std::vector<IrsAnnuityCouponTimes> annuityCoupons;
+    std::vector<BasisCouponTimes> basisCoupons;
+    bool spreadOnParentLeg = true;
+};
+
+inline DepositQuoteTimes makeDepositQuoteTimes(const CurvePillar& pillar,
+                                               const datetime::Date& referenceDate,
+                                               const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date maturity = adjustedMaturity(pillar);
+    DepositQuoteTimes times;
+    times.tau = datetime::yearFraction(referenceDate, maturity, pillar.quoteDayCounter);
+    if (!(times.tau > 0.0)) {
+        throw std::invalid_argument("impliedQuote: non-positive deposit accrual");
+    }
+    times.t = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
+    return times;
+}
+
+inline FraQuoteTimes makeFraQuoteTimes(const CurvePillar& pillar,
+                                       const datetime::Date& referenceDate,
+                                       const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date start = adjustedStart(pillar);
+    const datetime::Date maturity = adjustedMaturity(pillar);
+    FraQuoteTimes times;
+    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
+    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
+    times.tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
+    times.convexityExponent = pillar.fraConvexityExponent;
+    if (!(times.tau > 0.0)) {
+        throw std::invalid_argument("impliedQuote: non-positive FRA accrual");
+    }
+    if (!(times.t1 >= 0.0)) {
+        throw std::invalid_argument("impliedQuote: FRA start before the reference date");
+    }
+    return times;
+}
+
+inline FutureQuoteTimes makeFutureQuoteTimes(
+    const datetime::Date& start, const datetime::Date& maturity, const datetime::Calendar& calendar,
+    const datetime::DayCounter& quoteDayCounter, FutureStyle futureStyle,
+    AveragingStyle averagingStyle, double convexityAdjustment, const datetime::Date& referenceDate,
+    const datetime::DayCounter& zeroDayCounter, std::string_view context) {
+    FutureQuoteTimes times;
+    times.convexity = convexityAdjustment;
+    if (futureStyle == FutureStyle::Averaged && averagingStyle == AveragingStyle::Compounded) {
+        times.style = FutureQuoteTimes::Style::AveragedCompounded;
+        const std::vector<datetime::Date> fixings = businessDayFixings(calendar, start, maturity);
+        if (fixings.size() < 2) {
+            throw std::invalid_argument(std::string(context) +
+                                        ": empty averaged futures reference period");
+        }
+        times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
+        times.tau = datetime::yearFraction(start, maturity, quoteDayCounter);
+        if (!(times.tau > 0.0)) {
+            throw std::invalid_argument(std::string(context) + ": non-positive futures accrual");
+        }
+        if (!(times.t1 >= 0.0)) {
+            throw std::invalid_argument(std::string(context) +
+                                        ": futures fixing before the reference date");
+        }
+        times.previousTimes.reserve(fixings.size() - 1);
+        times.currentTimes.reserve(fixings.size() - 1);
+        for (std::size_t k = 1; k < fixings.size(); ++k) {
+            times.previousTimes.push_back(
+                datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter));
+            times.currentTimes.push_back(
+                datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter));
+        }
+        return times;
+    }
+    if (futureStyle == FutureStyle::Averaged) {
+        times.style = FutureQuoteTimes::Style::AveragedArithmetic;
+        const std::vector<datetime::Date> fixings = businessDayFixings(calendar, start, maturity);
+        if (fixings.size() < 2) {
+            throw std::invalid_argument(std::string(context) +
+                                        ": empty averaged futures reference period");
+        }
+        times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
+        if (!(times.t1 >= 0.0)) {
+            throw std::invalid_argument(std::string(context) +
+                                        ": futures fixing before the reference date");
+        }
+        times.previousTimes.reserve(fixings.size() - 1);
+        times.currentTimes.reserve(fixings.size() - 1);
+        times.accrualTaus.reserve(fixings.size() - 1);
+        for (std::size_t k = 1; k < fixings.size(); ++k) {
+            const double tau = datetime::yearFraction(fixings[k - 1], fixings[k], quoteDayCounter);
+            if (!(tau > 0.0)) {
+                throw std::invalid_argument(std::string(context) +
+                                            ": non-positive averaged futures accrual");
+            }
+            times.previousTimes.push_back(
+                datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter));
+            times.currentTimes.push_back(
+                datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter));
+            times.accrualTaus.push_back(tau);
+        }
+        return times;
+    }
+    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
+    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
+    times.tau = datetime::yearFraction(start, maturity, quoteDayCounter);
+    if (!(times.tau > 0.0)) {
+        throw std::invalid_argument(std::string(context) + ": non-positive futures accrual");
+    }
+    if (!(times.t1 >= 0.0)) {
+        throw std::invalid_argument(std::string(context) +
+                                    ": futures fixing before the reference date");
+    }
+    return times;
+}
+
+inline std::vector<OisCouponTimes> makeOisCouponTimes(const CurvePillar& pillar,
+                                                      const datetime::Date& referenceDate,
+                                                      const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
+                                      pillar.calendar, pillar.businessDayConvention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    std::vector<OisCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        OisCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedQuote: non-positive OIS accrual");
+        }
+        const datetime::Date payDate = pillar.calendar.advance(
+            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
+            pillar.businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        if (k == 1 && pillar.firstCouponFixed) {
+            coupon.firstFixed = true;
+            coupon.firstRate = pillar.firstCouponRate;
+        } else {
+            coupon.tStart = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+            coupon.tEnd = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+            if (!(coupon.tStart >= 0.0) || !(coupon.tEnd > 0.0)) {
+                throw std::invalid_argument(
+                    "impliedQuote: coupons before the reference date must be fixed");
+            }
+        }
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+inline PillarQuoteTimes makePillarQuoteTimes(const CurvePillar& pillar,
+                                             const datetime::Date& referenceDate,
+                                             const datetime::DayCounter& zeroDayCounter) {
+    PillarQuoteTimes times;
+    times.kind = pillar.kind;
+    switch (pillar.kind) {
+        case PillarKind::Repo:
+        case PillarKind::Deposit:
+            times.deposit = makeDepositQuoteTimes(pillar, referenceDate, zeroDayCounter);
+            break;
+        case PillarKind::Fra:
+            times.fra = makeFraQuoteTimes(pillar, referenceDate, zeroDayCounter);
+            break;
+        case PillarKind::Future:
+            times.future = makeFutureQuoteTimes(pillar.start, pillar.maturity, pillar.calendar,
+                                                pillar.quoteDayCounter, pillar.futureStyle,
+                                                pillar.averagingStyle, pillar.convexityAdjustment,
+                                                referenceDate, zeroDayCounter, "impliedQuote");
+            break;
+        case PillarKind::OisSwap:
+            times.oisCoupons = makeOisCouponTimes(pillar, referenceDate, zeroDayCounter);
+            break;
+    }
+    return times;
+}
+
+/// Discount-curve quote from precomputed times; the arithmetic mirrors
+/// `impliedQuote` exactly.
+template <typename DoubleT>
+inline DoubleT evaluatePillarQuote(const PillarQuoteTimes& times,
+                                   const DiscountCurve<DoubleT>& curve) {
+    switch (times.kind) {
+        case PillarKind::Repo:
+        case PillarKind::Deposit:
+            return (1.0 / curve.discount(times.deposit.t) - 1.0) / times.deposit.tau;
+        case PillarKind::Fra: {
+            const FraQuoteTimes& fra = times.fra;
+            const DoubleT forward =
+                (curve.discount(fra.t1) / curve.discount(fra.t2) - 1.0) / fra.tau;
+            if (fra.convexityExponent == 0.0) {
+                return forward;
+            }
+            using std::exp;
+            return ((1.0 + forward * fra.tau) * exp(fra.convexityExponent) - 1.0) / fra.tau;
+        }
+        case PillarKind::Future: {
+            const FutureQuoteTimes& future = times.future;
+            if (future.style == FutureQuoteTimes::Style::AveragedCompounded) {
+                DoubleT accumulated = 1.0;
+                DoubleT previousDiscount = 0.0;
+                bool hasPrevious = false;
+                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
+                    if (!hasPrevious) {
+                        previousDiscount = curve.discount(future.previousTimes[k]);
+                    }
+                    const DoubleT currentDiscount = curve.discount(future.currentTimes[k]);
+                    accumulated *= previousDiscount / currentDiscount;
+                    previousDiscount = currentDiscount;
+                    hasPrevious = true;
+                }
+                return (accumulated - 1.0) / future.tau + future.convexity;
+            }
+            if (future.style == FutureQuoteTimes::Style::AveragedArithmetic) {
+                DoubleT sum = 0.0;
+                DoubleT previousDiscount = 0.0;
+                bool hasPrevious = false;
+                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
+                    if (!hasPrevious) {
+                        previousDiscount = curve.discount(future.previousTimes[k]);
+                    }
+                    const DoubleT currentDiscount = curve.discount(future.currentTimes[k]);
+                    sum += (previousDiscount / currentDiscount - 1.0) / future.accrualTaus[k];
+                    previousDiscount = currentDiscount;
+                    hasPrevious = true;
+                }
+                return sum / static_cast<double>(future.previousTimes.size()) + future.convexity;
+            }
+            return (curve.discount(future.t1) / curve.discount(future.t2) - 1.0) / future.tau +
+                   future.convexity;
+        }
+        case PillarKind::OisSwap: {
+            DoubleT annuity = 0.0;
+            DoubleT floating = 0.0;
+            DoubleT startDiscount = 0.0;
+            bool hasStart = false;
+            for (const OisCouponTimes& coupon : times.oisCoupons) {
+                const DoubleT discountPay = curve.discount(coupon.tPay);
+                annuity += coupon.tau * discountPay;
+                if (coupon.firstFixed) {
+                    floating += discountPay * coupon.tau * coupon.firstRate;
+                    hasStart = false;
+                    continue;
+                }
+                const DoubleT couponStart =
+                    hasStart ? startDiscount : curve.discount(coupon.tStart);
+                const DoubleT discountEnd = curve.discount(coupon.tEnd);
+                floating += discountPay * (couponStart / discountEnd - 1.0);
+                startDiscount = discountEnd;
+                hasStart = true;
+            }
+            if (!(annuity > 0.0)) {
+                throw std::invalid_argument("impliedQuote: non-positive OIS annuity");
+            }
+            return floating / annuity;
+        }
+    }
+    throw std::invalid_argument("impliedQuote: unknown pillar kind");
+}
+
+inline SimpleForwardQuoteTimes
+makeSimpleForwardQuoteTimes(const ForecastPillar& pillar, const datetime::Date& referenceDate,
+                            const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Date maturity =
+        pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
+    SimpleForwardQuoteTimes times;
+    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
+    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
+    times.tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
+    if (!(times.tau > 0.0)) {
+        throw std::invalid_argument("impliedSimpleForward: non-positive accrual");
+    }
+    if (!(times.t1 >= 0.0)) {
+        throw std::invalid_argument("impliedSimpleForward: start before the reference date");
+    }
+    return times;
+}
+
+inline std::vector<IrsFloatCouponTimes>
+makeIrsFloatCouponTimes(const IrsPillar& pillar, const datetime::Date& referenceDate,
+                        const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Schedule floatSchedule(effective, pillar.maturity, pillar.floatTenor,
+                                           pillar.floatCalendar, pillar.businessDayConvention,
+                                           datetime::DateGeneration::Forward, false,
+                                           datetime::BusinessDayConvention::Unadjusted);
+    const std::vector<datetime::Date>& dates = floatSchedule.dates();
+    std::vector<IrsFloatCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        IrsFloatCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.floatDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedIrsRate: non-positive float accrual");
+        }
+        const datetime::Date payDate = pillar.floatCalendar.advance(
+            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
+            pillar.businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        if (k == 1 && pillar.firstCouponFixed) {
+            coupon.firstFixed = true;
+            coupon.firstRate = pillar.firstCouponRate;
+        } else {
+            coupon.tPrevious = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+            coupon.tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+            if (!(coupon.tPrevious >= 0.0) || !(coupon.tAccrual > 0.0)) {
+                throw std::invalid_argument(
+                    "impliedIrsRate: coupons before the reference date must be fixed");
+            }
+        }
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+inline std::vector<IrsAnnuityCouponTimes>
+makeIrsAnnuityCouponTimes(const IrsPillar& pillar, const datetime::Date& referenceDate,
+                          const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
+                                      pillar.fixedCalendar, pillar.businessDayConvention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    std::vector<IrsAnnuityCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        IrsAnnuityCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.fixedDayCounter);
+        const datetime::Date payDate = pillar.fixedCalendar.advance(
+            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
+            pillar.businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+inline std::vector<BasisCouponTimes>
+makeBasisCouponTimes(const BasisPillar& pillar, const datetime::Date& referenceDate,
+                     const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Schedule schedule(referenceDate, pillar.maturity, pillar.floatTenor,
+                                      pillar.calendar, pillar.businessDayConvention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    std::vector<BasisCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        BasisCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedBasisSpread: non-positive float accrual");
+        }
+        coupon.tPrev = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+        coupon.t = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+        if (!(coupon.tPrev >= 0.0) || !(coupon.t > 0.0)) {
+            throw std::invalid_argument(
+                "impliedBasisSpread: coupons before the reference date must be fixed");
+        }
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+inline ForecastQuoteTimes makeForecastQuoteTimes(const ForecastPillar& pillar,
+                                                 const datetime::Date& referenceDate,
+                                                 const datetime::DayCounter& zeroDayCounter) {
+    ForecastQuoteTimes times;
+    times.kind = pillar.kind;
+    switch (pillar.kind) {
+        case ForecastPillar::Kind::Deposit:
+        case ForecastPillar::Kind::Fra:
+            times.simple = makeSimpleForwardQuoteTimes(pillar, referenceDate, zeroDayCounter);
+            break;
+        case ForecastPillar::Kind::Future:
+            times.future = makeFutureQuoteTimes(
+                pillar.start, pillar.maturity, pillar.calendar, pillar.quoteDayCounter,
+                pillar.futureStyle, pillar.averagingStyle, pillar.convexityAdjustment,
+                referenceDate, zeroDayCounter, "impliedForecastFuture");
+            break;
+        case ForecastPillar::Kind::Irs:
+            times.floatCoupons = makeIrsFloatCouponTimes(pillar.irs, referenceDate, zeroDayCounter);
+            times.annuityCoupons =
+                makeIrsAnnuityCouponTimes(pillar.irs, referenceDate, zeroDayCounter);
+            break;
+        case ForecastPillar::Kind::BasisSwap:
+            times.basisCoupons = makeBasisCouponTimes(pillar.basis, referenceDate, zeroDayCounter);
+            times.spreadOnParentLeg = pillar.basis.spreadOnParentLeg;
+            break;
+    }
+    return times;
+}
+
+/// Forecast-curve quote from precomputed times; the arithmetic mirrors
+/// `impliedForecastQuote` and its swap helpers exactly.
+template <typename ForecastT, typename DiscountT>
+inline double evaluateForecastQuote(const ForecastQuoteTimes& times, const ForecastT& forecast,
+                                    const DiscountT& discounting) {
+    switch (times.kind) {
+        case ForecastPillar::Kind::Deposit:
+        case ForecastPillar::Kind::Fra: {
+            const SimpleForwardQuoteTimes& simple = times.simple;
+            return (forecast.discount(simple.t1) / forecast.discount(simple.t2) - 1.0) / simple.tau;
+        }
+        case ForecastPillar::Kind::Future: {
+            const FutureQuoteTimes& future = times.future;
+            if (future.style == FutureQuoteTimes::Style::AveragedCompounded) {
+                double accumulated = 1.0;
+                double previousDiscount = 0.0;
+                bool hasPrevious = false;
+                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
+                    if (!hasPrevious) {
+                        previousDiscount = forecast.discount(future.previousTimes[k]);
+                    }
+                    const double currentDiscount = forecast.discount(future.currentTimes[k]);
+                    accumulated *= previousDiscount / currentDiscount;
+                    previousDiscount = currentDiscount;
+                    hasPrevious = true;
+                }
+                return (accumulated - 1.0) / future.tau + future.convexity;
+            }
+            if (future.style == FutureQuoteTimes::Style::AveragedArithmetic) {
+                double sum = 0.0;
+                double previousDiscount = 0.0;
+                bool hasPrevious = false;
+                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
+                    if (!hasPrevious) {
+                        previousDiscount = forecast.discount(future.previousTimes[k]);
+                    }
+                    const double currentDiscount = forecast.discount(future.currentTimes[k]);
+                    sum += (previousDiscount / currentDiscount - 1.0) / future.accrualTaus[k];
+                    previousDiscount = currentDiscount;
+                    hasPrevious = true;
+                }
+                return sum / static_cast<double>(future.previousTimes.size()) + future.convexity;
+            }
+            return (forecast.discount(future.t1) / forecast.discount(future.t2) - 1.0) /
+                       future.tau +
+                   future.convexity;
+        }
+        case ForecastPillar::Kind::Irs: {
+            double floatPv = 0.0;
+            double previousAccrualDiscount = 0.0;
+            bool hasPrevious = false;
+            for (const IrsFloatCouponTimes& coupon : times.floatCoupons) {
+                const double discountPay = discounting.discount(coupon.tPay);
+                if (coupon.firstFixed) {
+                    floatPv += coupon.tau * discountPay * coupon.firstRate;
+                    hasPrevious = false;
+                    continue;
+                }
+                const double previousDiscount =
+                    hasPrevious ? previousAccrualDiscount : forecast.discount(coupon.tPrevious);
+                const double accrualDiscount = forecast.discount(coupon.tAccrual);
+                const double forward = (previousDiscount / accrualDiscount - 1.0) / coupon.tau;
+                floatPv += coupon.tau * discountPay * forward;
+                previousAccrualDiscount = accrualDiscount;
+                hasPrevious = true;
+            }
+            double annuity = 0.0;
+            for (const IrsAnnuityCouponTimes& coupon : times.annuityCoupons) {
+                annuity += coupon.tau * discounting.discount(coupon.tPay);
+            }
+            if (!(annuity > 0.0)) {
+                throw std::invalid_argument("impliedIrsRate: non-positive fixed annuity");
+            }
+            return floatPv / annuity;
+        }
+        case ForecastPillar::Kind::BasisSwap: {
+            const auto& parentForecast = forecast.parent();
+            double weightedChild = 0.0;
+            double weightedParent = 0.0;
+            double annuity = 0.0;
+            double previousChild = 0.0;
+            double previousParent = 0.0;
+            bool hasPrevious = false;
+            for (const BasisCouponTimes& coupon : times.basisCoupons) {
+                const double df = discounting.discount(coupon.t);
+                const double childAtPrevious =
+                    hasPrevious ? previousChild : forecast.discount(coupon.tPrev);
+                const double childAtCoupon = forecast.discount(coupon.t);
+                const double parentAtPrevious =
+                    hasPrevious ? previousParent : parentForecast.discount(coupon.tPrev);
+                const double parentAtCoupon = parentForecast.discount(coupon.t);
+                const double forwardChild = (childAtPrevious / childAtCoupon - 1.0) / coupon.tau;
+                const double forwardParent = (parentAtPrevious / parentAtCoupon - 1.0) / coupon.tau;
+                weightedChild += coupon.tau * df * forwardChild;
+                weightedParent += coupon.tau * df * forwardParent;
+                annuity += coupon.tau * df;
+                previousChild = childAtCoupon;
+                previousParent = parentAtCoupon;
+                hasPrevious = true;
+            }
+            if (!(annuity > 0.0)) {
+                throw std::invalid_argument("impliedBasisSpread: non-positive annuity");
+            }
+            const double level = (weightedChild - weightedParent) / annuity;
+            return times.spreadOnParentLeg ? level : -level;
+        }
+    }
+    throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
+}
+
+} // namespace detail
+
 /// Simple forward of the forecast curve over the pillar's accrual period:
 /// `r = (D_f(t1) / D_f(t2) - 1) / tau` with zero times measured from the
 /// reference date.
@@ -857,13 +1451,6 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
     if (pillars.empty()) {
         throw std::invalid_argument("bootstrapForecastCurve: no pillars");
     }
-    const auto forecastQuote = [&](const auto& curve, const ForecastPillar& pillar) {
-        if (discountCurve != nullptr) {
-            return impliedForecastQuote(curve, *discountCurve, pillar, referenceDate,
-                                        zeroDayCounter);
-        }
-        return impliedForecastQuote(curve, *parent, pillar, referenceDate, zeroDayCounter);
-    };
     const std::size_t count = pillars.size();
     const auto nodeDate = [](const ForecastPillar& pillar) {
         return forecastPillarRiskMaturity(pillar);
@@ -876,26 +1463,52 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
                 "bootstrapForecastCurve: maturities must be strictly increasing");
         }
     }
+    std::vector<detail::ForecastQuoteTimes> quoteTimes(count);
+    std::vector<double> targets(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        quoteTimes[i] = detail::makeForecastQuoteTimes(pillars[i], referenceDate, zeroDayCounter);
+        targets[i] = forecastPillarTarget(pillars[i]);
+    }
+    const auto quoteTrial = [&](const auto& trial, std::size_t i) {
+        if (discountCurve != nullptr) {
+            return detail::evaluateForecastQuote(quoteTimes[i], trial, *discountCurve);
+        }
+        return detail::evaluateForecastQuote(quoteTimes[i], trial, *parent);
+    };
 
     const quantape::math::BrentSolver<double> solver;
     std::vector<double> spreads(count, 0.0);
-    const auto target = [](const ForecastPillar& pillar) { return forecastPillarTarget(pillar); };
+    std::vector<double> trialTimes;
+    std::vector<double> trialSpreads;
     const auto solveNodes = [&](bool multiPass) {
         for (int pass = 0; pass < (multiPass ? 50 : 1); ++pass) {
             const std::vector<double> previous = spreads;
             double lastMove = 0.0;
             for (std::size_t i = 0; i < count; ++i) {
                 const std::size_t lastNode = multiPass && pass == 0 ? i : count - 1;
+                bool cacheValid = false;
+                double cachedX = 0.0;
+                double cachedF = 0.0;
                 const auto residual = [&](double trialSpread) {
-                    std::vector<double> trialTimes{0.0};
-                    std::vector<double> trialSpreads{0.0};
+                    if (cacheValid && trialSpread == cachedX) {
+                        return cachedF;
+                    }
+                    trialTimes.assign(1, 0.0);
+                    trialSpreads.assign(1, 0.0);
+                    if (trialTimes.capacity() < lastNode + 2) {
+                        trialTimes.reserve(lastNode + 2);
+                        trialSpreads.reserve(lastNode + 2);
+                    }
                     for (std::size_t j = 0; j <= lastNode; ++j) {
                         trialTimes.push_back(nodeTimes[j]);
                         trialSpreads.push_back(j == i ? trialSpread : spreads[j]);
                     }
                     const SpreadCurve<double, ParentT> trial(parent, trialTimes, trialSpreads,
                                                              scheme, tension);
-                    return forecastQuote(trial, pillars[i]) - target(pillars[i]);
+                    cachedF = quoteTrial(trial, i) - targets[i];
+                    cachedX = trialSpread;
+                    cacheValid = true;
+                    return cachedF;
                 };
                 const double guess = i == 0 ? 0.0 : spreads[i - 1];
                 double halfWidth = 0.005;
@@ -931,6 +1544,8 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
     const auto worstResidual = [&]() {
         std::vector<double> times{0.0};
         std::vector<double> values{0.0};
+        times.reserve(count + 1);
+        values.reserve(count + 1);
         for (std::size_t i = 0; i < count; ++i) {
             times.push_back(nodeTimes[i]);
             values.push_back(spreads[i]);
@@ -938,7 +1553,7 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
         const SpreadCurve<double, ParentT> curve(parent, times, values, scheme, tension);
         double worst = 0.0;
         for (std::size_t i = 0; i < count; ++i) {
-            const double check = forecastQuote(curve, pillars[i]) - target(pillars[i]);
+            const double check = quoteTrial(curve, i) - targets[i];
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {
@@ -956,6 +1571,8 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
     }
     std::vector<double> times{0.0};
     std::vector<double> values{0.0};
+    times.reserve(count + 1);
+    values.reserve(count + 1);
     for (std::size_t i = 0; i < count; ++i) {
         times.push_back(nodeTimes[i]);
         values.push_back(spreads[i]);
@@ -1038,9 +1655,24 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
         }
         maturityDates[i] = maturity;
     }
+    // The trial curves are constructed from raw times, so their zero clock is
+    // the times-constructor default (ACT/365F); the whole-grid check runs on a
+    // date-constructed curve and uses the caller's clock. Precomputing both
+    // keeps the solve and the check on their original clocks.
+    const datetime::DayCounter trialZeroDayCounter(datetime::DayCount::Actual365Fixed);
+    std::vector<detail::PillarQuoteTimes> solveQuoteTimes(count);
+    std::vector<detail::PillarQuoteTimes> checkQuoteTimes(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        solveQuoteTimes[i] =
+            detail::makePillarQuoteTimes(pillars[i], referenceDate, trialZeroDayCounter);
+        checkQuoteTimes[i] =
+            detail::makePillarQuoteTimes(pillars[i], referenceDate, zeroDayCounter);
+    }
 
     const quantape::math::BrentSolver<double> solver;
     std::vector<double> zeros(count, 0.0);
+    std::vector<double> trialTimes;
+    std::vector<double> trialZeros;
     const auto solveNodes = [&](bool multiPass) {
         for (int pass = 0; pass < (multiPass ? 50 : 1); ++pass) {
             const std::vector<double> previous = zeros;
@@ -1048,16 +1680,34 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
             for (std::size_t i = 0; i < count; ++i) {
                 const CurvePillar& pillar = pillars[i];
                 const std::size_t lastNode = multiPass && pass == 0 ? i : count - 1;
+                bool cacheValid = false;
+                double cachedX = 0.0;
+                double cachedF = 0.0;
+                std::optional<DiscountCurve<double>> trialCurve;
                 const auto residual = [&](double trialZero) {
-                    std::vector<double> trialTimes{0.0};
-                    std::vector<double> trialZeros{0.0};
-                    for (std::size_t j = 0; j <= lastNode; ++j) {
-                        trialTimes.push_back(nodeTimes[j]);
-                        trialZeros.push_back(j == i ? trialZero : zeros[j]);
+                    if (cacheValid && trialZero == cachedX) {
+                        return cachedF;
                     }
-                    const DiscountCurve<double> trial(trialTimes, trialZeros, space, scheme,
-                                                      tension, switchIndex);
-                    return impliedQuote(pillar, referenceDate, trial) - pillar.quote;
+                    if (!trialCurve.has_value()) {
+                        trialTimes.assign(1, 0.0);
+                        trialZeros.assign(1, 0.0);
+                        if (trialTimes.capacity() < lastNode + 2) {
+                            trialTimes.reserve(lastNode + 2);
+                            trialZeros.reserve(lastNode + 2);
+                        }
+                        for (std::size_t j = 0; j <= lastNode; ++j) {
+                            trialTimes.push_back(nodeTimes[j]);
+                            trialZeros.push_back(zeros[j]);
+                        }
+                        trialCurve.emplace(trialTimes, trialZeros, space, scheme, tension,
+                                           switchIndex);
+                    }
+                    detail::CurveTrialUpdater::setNode(*trialCurve, i + 1, trialZero);
+                    cachedF =
+                        detail::evaluatePillarQuote(solveQuoteTimes[i], *trialCurve) - pillar.quote;
+                    cachedX = trialZero;
+                    cacheValid = true;
+                    return cachedF;
                 };
 
                 const double guess = i == 0 ? 0.0 : zeros[i - 1];
@@ -1095,7 +1745,8 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
                                           space, scheme, tension, switchIndex);
         double worst = 0.0;
         for (std::size_t i = 0; i < count; ++i) {
-            const double check = impliedQuote(pillars[i], referenceDate, curve) - pillars[i].quote;
+            const double check =
+                detail::evaluatePillarQuote(checkQuoteTimes[i], curve) - pillars[i].quote;
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {

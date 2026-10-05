@@ -188,9 +188,12 @@ inline GradientEstimate reduceGradientSamples(const GradientSamples& samples) {
     for (std::size_t path = 0; path < nPaths; ++path) {
         const double dv = samples.values[path] - estimate.value;
         sumValueSq += dv * dv;
-        const Eigen::VectorXd dg =
-            samples.gradients.col(static_cast<Eigen::Index>(path)) - estimate.gradient;
-        sumGradSq += dg.cwiseProduct(dg);
+        const Eigen::Index col = static_cast<Eigen::Index>(path);
+        // In-place per-sensitivity pass: no (d + p) temporary per path.
+        for (Eigen::Index i = 0; i < static_cast<Eigen::Index>(nSensitivities); ++i) {
+            const double dg = samples.gradients(i, col) - estimate.gradient(i);
+            sumGradSq(i) += dg * dg;
+        }
     }
     if (nPaths > 1) {
         estimate.valueStdError = std::sqrt(sumValueSq / (n - 1.0) / n);

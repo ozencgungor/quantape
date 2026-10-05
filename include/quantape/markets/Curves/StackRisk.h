@@ -1,7 +1,9 @@
 #pragma once
 
+#include "quantape/datetime/Date.h"
+#include "quantape/datetime/DayCounter.h"
+#include "quantape/markets/Curves/Curve.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
-#include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/CurveRiskReport.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/StackCurveView.h"
@@ -10,16 +12,11 @@
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
 #include "quantape/markets/Curves/XccyRisk.h"
 
-#include <algorithm>
-#include <cmath>
 #include <cstddef>
-#include <cstdint>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -108,23 +105,8 @@ struct QuotePoint {
 /// Throws unless every point carries a label, a maturity-tag bucket and a
 /// finite delta; `expected` optionally pins the point count. Consuming a point
 /// vector through this gate keeps partial metadata out of every aggregation.
-inline void validateQuotePoints(const std::vector<QuotePoint>& points,
-                                std::optional<std::size_t> expected = std::nullopt) {
-    if (expected.has_value() && points.size() != *expected) {
-        throw std::invalid_argument("validateQuotePoints: point count mismatch");
-    }
-    for (const QuotePoint& point : points) {
-        if (point.label.empty()) {
-            throw std::invalid_argument("validateQuotePoints: empty quote label");
-        }
-        if (point.bucket.empty()) {
-            throw std::invalid_argument("validateQuotePoints: empty quote bucket");
-        }
-        if (!std::isfinite(point.delta)) {
-            throw std::invalid_argument("validateQuotePoints: non-finite quote delta");
-        }
-    }
-}
+void validateQuotePoints(const std::vector<QuotePoint>& points,
+                         std::optional<std::size_t> expected = std::nullopt);
 
 /// One curve's quote rows: the curve role plus the per-quote points in
 /// `stackQuoteRisk` entry order. A direct turn knot keeps its bootstrap column
@@ -139,59 +121,22 @@ struct StackRiskEntry {
 /// Role buckets of a stack risk table. Sums each quote under its own role, so
 /// direct turn knots report under `TurnOverlay` while the rest of their curve
 /// keeps the curve role, and the buckets add back up to the full table.
-inline std::vector<RiskBucket> stackRoleBuckets(const std::vector<StackRiskEntry>& entries) {
-    std::vector<RiskBucket> buckets;
-    const auto add = [&](std::string_view label, double delta) {
-        for (RiskBucket& bucket : buckets) {
-            if (bucket.label == label) {
-                bucket.delta += delta;
-                return;
-            }
-        }
-        buckets.push_back(RiskBucket{std::string(label), delta});
-    };
-    for (const StackRiskEntry& entry : entries) {
-        entry.validate();
-        for (const QuotePoint& point : entry.points) {
-            add(curveRoleName(point.role), point.delta);
-        }
-    }
-    return buckets;
-}
+std::vector<RiskBucket> stackRoleBuckets(const std::vector<StackRiskEntry>& entries);
 
 /// Overlay turn risk merged into a role-bucket list. Overlay turn amplitudes
 /// are exogenous factors outside the quote Jacobian, so `stackRoleBuckets`
 /// alone understates the `TurnOverlay` role; every `TurnRiskEntry` delta folds
 /// into the `TurnOverlay` role bucket (or `role` when given), keeping role
 /// sums complete. Labels stay on the original turn entries.
-inline std::vector<RiskBucket> addTurnRiskBuckets(std::vector<RiskBucket> buckets,
-                                                  const std::vector<TurnRiskEntry>& turns,
-                                                  CurveRole role = CurveRole::TurnOverlay) {
-    if (turns.empty()) {
-        return buckets;
-    }
-    double total = 0.0;
-    for (const TurnRiskEntry& turn : turns) {
-        total += turn.delta;
-    }
-    const std::string label(curveRoleName(role));
-    for (RiskBucket& bucket : buckets) {
-        if (bucket.label == label) {
-            bucket.delta += total;
-            return buckets;
-        }
-    }
-    buckets.push_back(RiskBucket{label, total});
-    return buckets;
-}
+std::vector<RiskBucket> addTurnRiskBuckets(std::vector<RiskBucket> buckets,
+                                           const std::vector<TurnRiskEntry>& turns,
+                                           CurveRole role = CurveRole::TurnOverlay);
 
 /// Role buckets of a stack risk table with exogenous overlay turn risk folded
 /// in; equivalent to `addTurnRiskBuckets(stackRoleBuckets(entries), turns)`.
-inline std::vector<RiskBucket> addTurnRiskBuckets(const std::vector<StackRiskEntry>& entries,
-                                                  const std::vector<TurnRiskEntry>& turns,
-                                                  CurveRole role = CurveRole::TurnOverlay) {
-    return addTurnRiskBuckets(stackRoleBuckets(entries), turns, role);
-}
+std::vector<RiskBucket> addTurnRiskBuckets(const std::vector<StackRiskEntry>& entries,
+                                           const std::vector<TurnRiskEntry>& turns,
+                                           CurveRole role = CurveRole::TurnOverlay);
 
 /// Stack-level quote Hessian in quote space, row-major `dim x dim`.
 struct StackQuoteGamma {
@@ -230,443 +175,63 @@ struct StackChildInput {
 /// Depth-1 stack input list: the root discount curve as the first block and
 /// one additive spread child per element, each parented on the root. Shared by
 /// the legacy delta and gamma wrappers so both adapt the same way.
-inline std::vector<StackCurveInput> makeDepth1Inputs(const DiscountCurve<double>& root,
-                                                     const std::vector<CurvePillar>& rootPillars,
-                                                     const std::vector<double>& dVdRoot,
-                                                     const std::vector<StackChildInput>& children) {
-    const StackCurveView::Ptr rootView = StackCurveView::make(root);
-    std::vector<StackCurveInput> inputs;
-    inputs.reserve(children.size() + 1);
-    StackCurveInput rootInput;
-    rootInput.curve = rootView;
-    rootInput.role = CurveRole::Discount;
-    rootInput.discountPillars = rootPillars;
-    rootInput.dVdNodes = dVdRoot;
-    inputs.push_back(std::move(rootInput));
-    for (const StackChildInput& child : children) {
-        if (child.curve == nullptr) {
-            throw std::invalid_argument("makeDepth1Inputs: malformed child input");
-        }
-        StackCurveInput input;
-        input.curve = StackCurveView::make(*child.curve);
-        input.role = child.role;
-        input.forecastPillars = child.pillars;
-        input.dVdNodes = child.dVdSpread;
-        if (child.discountCurve != nullptr) {
-            input.discount = sameCurveValues(*child.discountCurve, root)
-                                 ? rootView
-                                 : StackCurveView::make(*child.discountCurve);
-        }
-        inputs.push_back(std::move(input));
-    }
-    return inputs;
-}
+std::vector<StackCurveInput> makeDepth1Inputs(const DiscountCurve<double>& root,
+                                              const std::vector<CurvePillar>& rootPillars,
+                                              const std::vector<double>& dVdRoot,
+                                              const std::vector<StackChildInput>& children);
 
 /// Quote points of one stack input in `stackQuoteRisk` entry order. A direct
 /// turn knot keeps its bootstrap column but reports under `TurnOverlay` with a
 /// `Turn <date>` label. The caller fills each point's `delta`.
-inline void appendStackQuoteMetadata(const StackCurveInput& input,
-                                     const datetime::Date& referenceDate,
-                                     std::vector<QuotePoint>& points) {
-    if (!input.discountPillars.empty()) {
-        for (const CurvePillar& pillar : input.discountPillars) {
-            const datetime::Date maturity = pillarRiskMaturity(pillar);
-            const double t =
-                datetime::yearFraction(referenceDate, maturity, input.curve->zeroDayCounter());
-            const std::string tag = riskMaturityTag(maturity, t);
-            points.push_back(QuotePoint{std::string(pillarKindName(pillar.kind)) + " " + tag, tag,
-                                        static_cast<int>(std::lround(t)), input.role, 0.0});
-        }
-        return;
-    }
-    for (const ForecastPillar& pillar : input.forecastPillars) {
-        const datetime::Date maturity = forecastPillarRiskMaturity(pillar);
-        const double t =
-            datetime::yearFraction(referenceDate, maturity, input.curve->zeroDayCounter());
-        const int year = static_cast<int>(std::lround(t));
-        const CurveRole role = pillar.turnPillar ? CurveRole::TurnOverlay : input.role;
-        if (pillar.turnPillar) {
-            const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-            const std::string label = "Turn " + start.toIso();
-            points.push_back(QuotePoint{label, label, year, role, 0.0});
-        } else {
-            const std::string tag = riskMaturityTag(maturity, t);
-            points.push_back(
-                QuotePoint{std::string(forecastPillarKindName(pillar.kind)) + " " + tag, tag, year,
-                           role, 0.0});
-        }
-    }
-}
+void appendStackQuoteMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
+                              std::vector<QuotePoint>& points);
 
 /// Quote points of a cross-currency child input: one `Xccy <tag>` point per
 /// pillar, aged on the domestic discount block's zero clock. The caller fills
 /// each point's `delta`.
-inline void appendXccyQuoteMetadata(const StackCurveInput& input,
-                                    const datetime::Date& referenceDate,
-                                    std::vector<QuotePoint>& points) {
-    const datetime::DayCounter& zeroDayCounter = input.xccy->domesticDiscount->zeroDayCounter();
-    for (const XccyPillar& pillar : input.xccyPillars) {
-        const datetime::Date maturity =
-            pillar.foreignCalendar.adjust(pillar.maturity, pillar.foreignBusinessDayConvention);
-        const double t = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-        const std::string tag = riskMaturityTag(maturity, t);
-        points.push_back(
-            QuotePoint{"Xccy " + tag, tag, static_cast<int>(std::lround(t)), input.role, 0.0});
-    }
-}
+void appendXccyQuoteMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
+                             std::vector<QuotePoint>& points);
 
-/// Calendar date of a native forecast node time (definition below).
-inline datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,
-                                       const datetime::Date& referenceDate, double t);
+/// Calendar date of a native forecast node time.
+datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,
+                                const datetime::Date& referenceDate, double t);
 
 /// Quote points of a factor block: one `<prefix> <tag>` point per solved node,
 /// aged on the factor's own node clock. The caller fills each point's `delta`.
-inline void appendFactorMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
-                                 std::vector<QuotePoint>& points) {
-    const std::vector<double>& times = input.curve->times();
-    for (std::size_t i = 1; i < input.curve->size(); ++i) {
-        const datetime::Date nodeDate =
-            forecastNodeDate(input.factor->nodeDayCounter, referenceDate, times[i]);
-        const std::string bucket = riskMaturityTag(nodeDate, times[i]);
-        points.push_back(QuotePoint{input.factor->labelPrefix + " " + bucket, bucket,
-                                    static_cast<int>(std::lround(times[i])), input.role, 0.0});
-    }
-}
+void appendFactorMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
+                          std::vector<QuotePoint>& points);
 
 /// Assemble the stack quote Jacobian `F = d r / d zeta` (row-major `dim x dim`)
 /// and the per-curve node block offsets. Every instrument row is assembled
 /// analytically over the view-native node coordinates; cross-currency child
 /// rows arrive per block and are placed by view identity, and factor blocks
 /// contribute identity rows so their solved value is the node-space residual.
-inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInput>& curves,
-                                                 const datetime::Date& referenceDate) {
-    if (curves.empty()) {
-        throw std::invalid_argument("assembleStackQuoteSystem: no curves");
-    }
-    StackQuoteSystem system;
-    system.offsets.assign(curves.size(), 0);
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        const StackCurveInput& input = curves[k];
-        if (input.curve == nullptr || input.dVdNodes.size() != input.curve->size()) {
-            throw std::invalid_argument("assembleStackQuoteSystem: malformed curve input");
-        }
-        const bool hasDiscount = !input.discountPillars.empty();
-        const bool hasForecast = !input.forecastPillars.empty();
-        const bool hasXccy = input.xccy.has_value();
-        const bool hasFactor = input.factor.has_value();
-        const int modes =
-            (hasDiscount ? 1 : 0) + (hasForecast ? 1 : 0) + (hasXccy ? 1 : 0) + (hasFactor ? 1 : 0);
-        if (modes != 1) {
-            throw std::invalid_argument(
-                "assembleStackQuoteSystem: exactly one pillar set must be non-empty");
-        }
-        const std::size_t rows = hasDiscount   ? input.discountPillars.size()
-                                 : hasForecast ? input.forecastPillars.size()
-                                 : hasXccy     ? input.xccyPillars.size()
-                                               : input.curve->size() - 1;
-        if (hasXccy) {
-            if (input.xccyPillars.empty() || input.xccyPillars.size() + 1 != input.curve->size()) {
-                throw std::invalid_argument(
-                    "assembleStackQuoteSystem: xccy pillars must match the curve nodes");
-            }
-            if (input.xccy->foreignForecast == nullptr || input.xccy->domesticForecast == nullptr ||
-                input.xccy->domesticDiscount == nullptr) {
-                throw std::invalid_argument(
-                    "assembleStackQuoteSystem: malformed xccy row references");
-            }
-        } else if (rows + 1 != input.curve->size()) {
-            throw std::invalid_argument(
-                "assembleStackQuoteSystem: pillars must match the curve nodes");
-        }
-        if (hasForecast && input.curve->parentView() == nullptr) {
-            throw std::invalid_argument(
-                "assembleStackQuoteSystem: forecast curve without a parent");
-        }
-        system.offsets[k] = system.dim;
-        system.dim += input.curve->size() - 1;
-    }
-    const std::size_t dim = system.dim;
-    // Curve matching walks every stack input and fingerprints interpolation
-    // weights, so memoize the result per view identity: each ancestor of each
-    // instrument row maps to the same block for the whole assembly.
-    std::unordered_map<const void*, std::size_t> matchedBlocks;
-    const auto matchCurve = [&](const StackCurveView& view) -> std::size_t {
-        const auto cached = matchedBlocks.find(view.identity());
-        if (cached != matchedBlocks.end()) {
-            return cached->second;
-        }
-        for (std::size_t m = 0; m < curves.size(); ++m) {
-            if (sameCurveView(*curves[m].curve, view)) {
-                matchedBlocks.emplace(view.identity(), m);
-                return m;
-            }
-        }
-        throw std::invalid_argument("assembleStackQuoteSystem: curve is not part of the stack");
-    };
-    // Cross-currency rows bind their referenced blocks by view identity, so a
-    // discount block and a forecast block on equal curve values stay distinct,
-    // and a forecast curve that happens to be the child's own discount
-    // function keeps its own block. A rebuilt ancestor copy (a gamma bump
-    // re-binds a forecast parent by value) falls back to discount-function
-    // equality, since only the stack can supply the parent's block.
-    const auto matchIdentity = [&](const StackCurveView& view) -> std::size_t {
-        for (std::size_t m = 0; m < curves.size(); ++m) {
-            if (curves[m].curve->identity() == view.identity()) {
-                return m;
-            }
-        }
-        for (std::size_t m = 0; m < curves.size(); ++m) {
-            if (sameCurveView(*curves[m].curve, view)) {
-                return m;
-            }
-        }
-        throw std::invalid_argument(
-            "assembleStackQuoteSystem: xccy row block is not part of the stack");
-    };
-    system.jacobian.assign(dim * dim, 0.0);
-    std::vector<double> scratch;
-    std::size_t row = 0;
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        const StackCurveInput& input = curves[k];
-        if (input.factor) {
-            for (std::size_t i = 0; i + 1 < input.curve->size(); ++i) {
-                system.jacobian[row * dim + system.offsets[k] + i] = 1.0;
-                ++row;
-            }
-            continue;
-        }
-        if (input.xccy) {
-            const XccyRowInput& refs = *input.xccy;
-            for (const XccyPillar& pillar : input.xccyPillars) {
-                const std::vector<XccyRowBlock> blocks = xccySwapJacobianRowsView(
-                    *input.curve, *refs.foreignForecast, *refs.domesticDiscount,
-                    *refs.domesticForecast, pillar, referenceDate,
-                    refs.domesticDiscount->zeroDayCounter());
-                for (const XccyRowBlock& block : blocks) {
-                    const std::size_t target = matchIdentity(*block.curve);
-                    for (std::size_t i = 0; i < block.row.size(); ++i) {
-                        system.jacobian[row * dim + system.offsets[target] + i] += block.row[i];
-                    }
-                }
-                ++row;
-            }
-            continue;
-        }
-        if (!input.discountPillars.empty()) {
-            for (const CurvePillar& pillar : input.discountPillars) {
-                if (!discountPillarJacobianRow(pillar, referenceDate, *input.curve, scratch)) {
-                    throw std::invalid_argument("assembleStackQuoteSystem: degenerate pillar");
-                }
-                for (std::size_t i = 0; i < scratch.size(); ++i) {
-                    system.jacobian[row * dim + system.offsets[k] + i] = scratch[i];
-                }
-                ++row;
-            }
-            continue;
-        }
-        const StackCurveView& parent = *input.curve->parentView();
-        const StackCurveView& discount = input.discount ? *input.discount : parent;
-        const auto assembleRows = [&](const ForecastPillar& pillar,
-                                      const StackCurveView* parentWeights,
-                                      const StackCurveView* discountWeights,
-                                      std::vector<double>& ownRow, std::vector<double>& parentRow,
-                                      std::vector<double>& discountRow) {
-            switch (pillar.kind) {
-                case ForecastPillar::Kind::Irs:
-                    irsSwapJacobianRowsView(*input.curve, parent, discount, pillar.irs,
-                                            referenceDate, ownRow, parentRow, discountRow,
-                                            parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::Deposit:
-                case ForecastPillar::Kind::Fra:
-                    forecastSimpleJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                   referenceDate, ownRow, parentRow, discountRow,
-                                                   parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::Future:
-                    forecastFutureJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                   referenceDate, ownRow, parentRow, discountRow,
-                                                   parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::BasisSwap:
-                    basisSwapJacobianRowsView(*input.curve, parent, discount, pillar.basis,
-                                              referenceDate, ownRow, parentRow, discountRow,
-                                              parentWeights, discountWeights);
-                    return;
-            }
-            throw std::invalid_argument("assembleStackQuoteSystem: unknown forecast pillar kind");
-        };
-        for (const ForecastPillar& pillar : input.forecastPillars) {
-            std::vector<double> ownRow;
-            std::vector<double> parentRow;
-            std::vector<double> discountRow;
-            assembleRows(pillar, nullptr, nullptr, ownRow, parentRow, discountRow);
-            for (std::size_t i = 0; i < ownRow.size(); ++i) {
-                system.jacobian[row * dim + system.offsets[k] + i] = ownRow[i];
-            }
-            // The native pass already assembled the forecast-parent row on the
-            // parent grid and the discount row on the discount grid; the first
-            // ancestor of each chain is exactly that view, so reuse those rows
-            // instead of assembling them a second time.
-            bool reuseParentRow = true;
-            // A depth-2 grandchild moves with every curve on its parent chain,
-            // so the forecast-parent partial is expressed on each ancestor's
-            // node grid as well.
-            for (const StackCurveView* ancestor = &parent; ancestor != nullptr;
-                 ancestor = ancestor->parentView()) {
-                const std::size_t block = matchCurve(*ancestor);
-                if (!reuseParentRow) {
-                    assembleRows(pillar, ancestor, nullptr, ownRow, parentRow, discountRow);
-                }
-                for (std::size_t i = 0; i < parentRow.size(); ++i) {
-                    system.jacobian[row * dim + system.offsets[block] + i] += parentRow[i];
-                }
-                reuseParentRow = false;
-            }
-            // Likewise for the discount curve's own parent chain.
-            bool reuseDiscountRow = true;
-            for (const StackCurveView* ancestor = &discount; ancestor != nullptr;
-                 ancestor = ancestor->parentView()) {
-                const std::size_t block = matchCurve(*ancestor);
-                if (!reuseDiscountRow) {
-                    assembleRows(pillar, nullptr, ancestor, ownRow, parentRow, discountRow);
-                }
-                for (std::size_t i = 0; i < discountRow.size(); ++i) {
-                    system.jacobian[row * dim + system.offsets[block] + i] += discountRow[i];
-                }
-                reuseDiscountRow = false;
-            }
-            ++row;
-        }
-    }
-    return system;
-}
+StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInput>& curves,
+                                          const datetime::Date& referenceDate);
 
 /// Rebuild every curve view after bumping one native node of the stack. The
 /// bumped input receives the node bump; every other input whose parent
 /// identity chain reaches a bumped view is rebuilt with the bumped parent,
 /// discount views are re-pointed at the bumped curve they reference, and
 /// cross-currency block references follow their rebuilt views.
-inline std::vector<StackCurveInput> bumpStackInputs(const std::vector<StackCurveInput>& curves,
-                                                    std::size_t bumpedCurve, std::size_t node,
-                                                    double delta) {
-    std::vector<StackCurveInput> result = curves;
-    std::vector<StackCurveView::Ptr> views(curves.size());
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        views[k] = curves[k].curve;
-    }
-    std::unordered_map<const void*, StackCurveView::Ptr> rebuilt;
-    views[bumpedCurve] = curves[bumpedCurve].curve->rebuildWithNode(node, delta, nullptr);
-    rebuilt[curves[bumpedCurve].curve->identity()] = views[bumpedCurve];
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (std::size_t k = 0; k < curves.size(); ++k) {
-            if (k == bumpedCurve || views[k] != curves[k].curve) {
-                continue;
-            }
-            const StackCurveView* parent = curves[k].curve->parentView();
-            if (parent == nullptr) {
-                continue;
-            }
-            const auto found = rebuilt.find(parent->identity());
-            if (found != rebuilt.end()) {
-                views[k] = curves[k].curve->rebuildWithNode(0, 0.0, found->second);
-                rebuilt[curves[k].curve->identity()] = views[k];
-                changed = true;
-            }
-        }
-    }
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        result[k].curve = views[k];
-        if (curves[k].discount == nullptr) {
-            continue;
-        }
-        const auto found = rebuilt.find(curves[k].discount->identity());
-        if (found != rebuilt.end()) {
-            result[k].discount = found->second;
-            continue;
-        }
-        for (const StackCurveView* ancestor = curves[k].discount->parentView(); ancestor != nullptr;
-             ancestor = ancestor->parentView()) {
-            const auto ancestorFound = rebuilt.find(ancestor->identity());
-            if (ancestorFound != rebuilt.end()) {
-                result[k].discount =
-                    curves[k].discount->rebuildWithNode(0, 0.0, ancestorFound->second);
-                break;
-            }
-        }
-    }
-    for (StackCurveInput& input : result) {
-        if (!input.xccy) {
-            continue;
-        }
-        const auto repoint = [&](StackCurveView::Ptr& reference) {
-            const auto found = rebuilt.find(reference->identity());
-            if (found != rebuilt.end()) {
-                reference = found->second;
-            }
-        };
-        repoint(input.xccy->foreignForecast);
-        repoint(input.xccy->domesticForecast);
-        repoint(input.xccy->domesticDiscount);
-    }
-    return result;
-}
+std::vector<StackCurveInput> bumpStackInputs(const std::vector<StackCurveInput>& curves,
+                                             std::size_t bumpedCurve, std::size_t node,
+                                             double delta);
 
 /// Total quote risk over an arbitrary curve tree. Every instrument row is
 /// assembled analytically over the view-native node coordinates, and the full
 /// system `F^T x = g` is solved densely, so curve depth and exogenous
 /// discounting only change which column block a row term lands in.
-inline std::vector<StackRiskEntry> stackQuoteRisk(const std::vector<StackCurveInput>& curves,
-                                                  const datetime::Date& referenceDate) {
-    const StackQuoteSystem system = assembleStackQuoteSystem(curves, referenceDate);
-    const std::size_t dim = system.dim;
-    const std::vector<std::size_t>& offset = system.offsets;
-    const std::vector<double>& f = system.jacobian;
-    std::vector<double> fTranspose(dim * dim);
-    for (std::size_t i = 0; i < dim; ++i) {
-        for (std::size_t j = 0; j < dim; ++j) {
-            fTranspose[j * dim + i] = f[i * dim + j];
-        }
-    }
-    std::vector<double> g(dim);
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        for (std::size_t i = 1; i < curves[k].curve->size(); ++i) {
-            g[offset[k] + i - 1] = curves[k].dVdNodes[i];
-        }
-    }
-    const std::vector<double> x = quantape::math::solveDense(std::move(fTranspose), dim, g);
-    std::vector<StackRiskEntry> result;
-    result.reserve(curves.size());
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        const StackCurveInput& input = curves[k];
-        StackRiskEntry entry;
-        entry.role = input.role;
-        if (input.factor) {
-            appendFactorMetadata(input, referenceDate, entry.points);
-        } else if (input.xccy) {
-            appendXccyQuoteMetadata(input, referenceDate, entry.points);
-        } else {
-            appendStackQuoteMetadata(input, referenceDate, entry.points);
-        }
-        for (std::size_t i = 0; i < entry.points.size(); ++i) {
-            entry.points[i].delta = x[offset[k] + i];
-        }
-        result.push_back(std::move(entry));
-    }
-    return result;
-}
+std::vector<StackRiskEntry> stackQuoteRisk(const std::vector<StackCurveInput>& curves,
+                                           const datetime::Date& referenceDate);
 
 /// Depth-1 convenience overload: the root plus additive spread children whose
 /// parents must be the root curve. Implemented over the general engine.
-inline std::vector<StackRiskEntry> stackQuoteRisk(const DiscountCurve<double>& root,
-                                                  const std::vector<CurvePillar>& rootPillars,
-                                                  const std::vector<double>& dVdRoot,
-                                                  const std::vector<StackChildInput>& children,
-                                                  const datetime::Date& referenceDate) {
-    return stackQuoteRisk(makeDepth1Inputs(root, rootPillars, dVdRoot, children), referenceDate);
-}
+std::vector<StackRiskEntry> stackQuoteRisk(const DiscountCurve<double>& root,
+                                           const std::vector<CurvePillar>& rootPillars,
+                                           const std::vector<double>& dVdRoot,
+                                           const std::vector<StackChildInput>& children,
+                                           const datetime::Date& referenceDate);
 
 /**
  * @brief Exact quote-space stack gamma.
@@ -690,150 +255,21 @@ inline std::vector<StackRiskEntry> stackQuoteRisk(const DiscountCurve<double>& r
  * central-difference pass applies. The result is symmetrized to absorb dense-
  * product round-off.
  */
-inline StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curves,
-                                       const std::vector<double>& HZeta,
-                                       const datetime::Date& referenceDate) {
-    const StackQuoteSystem system = assembleStackQuoteSystem(curves, referenceDate);
-    const std::size_t dim = system.dim;
-    if (HZeta.size() != dim * dim) {
-        throw std::invalid_argument("stackQuoteGamma: HZeta size mismatch");
-    }
-    const std::vector<std::size_t>& offset = system.offsets;
-    const std::vector<double>& f = system.jacobian;
-    // J = F^{-1} by one partial-pivoted LU factorization plus dim
-    // back-substitutions, instead of dim independent dense solves.
-    const detail::DenseLu factors = detail::factorDenseLu(f, dim);
-    std::vector<double> jacobian(dim * dim, 0.0);
-    std::vector<double> unit(dim, 0.0);
-    for (std::size_t column = 0; column < dim; ++column) {
-        std::fill(unit.begin(), unit.end(), 0.0);
-        unit[column] = 1.0;
-        const std::vector<double> solution = detail::solveDenseLu(factors, unit);
-        for (std::size_t k = 0; k < dim; ++k) {
-            jacobian[k * dim + column] = solution[k];
-        }
-    }
-    // Node gradient and quote-space delta x = J^T g.
-    std::vector<double> g(dim, 0.0);
-    for (std::size_t k = 0; k < curves.size(); ++k) {
-        for (std::size_t i = 1; i < curves[k].curve->size(); ++i) {
-            g[offset[k] + i - 1] = curves[k].dVdNodes[i];
-        }
-    }
-    std::vector<double> x(dim, 0.0);
-    for (std::size_t a = 0; a < dim; ++a) {
-        double sum = 0.0;
-        for (std::size_t i = 0; i < dim; ++i) {
-            sum += jacobian[i * dim + a] * g[i];
-        }
-        x[a] = sum;
-    }
-    // weighted[c][k] = sum_r x_r dF[r][c] / dzeta_k, accumulated bump by bump.
-    const double step = 1e-6;
-    std::vector<double> weighted(dim * dim, 0.0);
-    for (std::size_t j = 0; j < curves.size(); ++j) {
-        for (std::size_t i = 1; i < curves[j].curve->size(); ++i) {
-            const std::size_t bump = offset[j] + i - 1;
-            const StackQuoteSystem plusSystem =
-                assembleStackQuoteSystem(bumpStackInputs(curves, j, i, step), referenceDate);
-            const StackQuoteSystem minusSystem =
-                assembleStackQuoteSystem(bumpStackInputs(curves, j, i, -step), referenceDate);
-            for (std::size_t column = 0; column < dim; ++column) {
-                for (std::size_t r = 0; r < dim; ++r) {
-                    const double curvature = (plusSystem.jacobian[r * dim + column] -
-                                              minusSystem.jacobian[r * dim + column]) /
-                                             (2.0 * step);
-                    weighted[column * dim + bump] += x[r] * curvature;
-                }
-            }
-        }
-    }
-    // H_r = J^T (HZeta - M) J.
-    std::vector<double> combined = HZeta;
-    for (std::size_t k = 0; k < combined.size(); ++k) {
-        combined[k] -= weighted[k];
-    }
-    std::vector<double> tmp(dim * dim, 0.0);
-    for (std::size_t i = 0; i < dim; ++i) {
-        for (std::size_t b = 0; b < dim; ++b) {
-            double sum = 0.0;
-            for (std::size_t a = 0; a < dim; ++a) {
-                sum += combined[i * dim + a] * jacobian[a * dim + b];
-            }
-            tmp[i * dim + b] = sum;
-        }
-    }
-    StackQuoteGamma result;
-    result.dim = dim;
-    result.hessian.assign(dim * dim, 0.0);
-    for (std::size_t i = 0; i < dim; ++i) {
-        for (std::size_t b = 0; b < dim; ++b) {
-            double sum = 0.0;
-            for (std::size_t a = 0; a < dim; ++a) {
-                sum += jacobian[a * dim + i] * tmp[a * dim + b];
-            }
-            result.hessian[i * dim + b] = sum;
-        }
-    }
-    // Symmetrize: round-off in the dense products can leave an asymmetric
-    // residual even though the exact transform is symmetric.
-    for (std::size_t i = 0; i < dim; ++i) {
-        for (std::size_t j = i + 1; j < dim; ++j) {
-            const double symmetric =
-                0.5 * (result.hessian[i * dim + j] + result.hessian[j * dim + i]);
-            result.hessian[i * dim + j] = symmetric;
-            result.hessian[j * dim + i] = symmetric;
-        }
-    }
-    for (const StackCurveInput& input : curves) {
-        if (input.factor) {
-            appendFactorMetadata(input, referenceDate, result.points);
-        } else if (input.xccy) {
-            appendXccyQuoteMetadata(input, referenceDate, result.points);
-        } else {
-            appendStackQuoteMetadata(input, referenceDate, result.points);
-        }
-    }
-    for (std::size_t i = 0; i < dim; ++i) {
-        result.points[i].delta = result.hessian[i * dim + i];
-    }
-    result.validate();
-    return result;
-}
+StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curves,
+                                const std::vector<double>& HZeta,
+                                const datetime::Date& referenceDate);
 
 /// Depth-1 convenience overload: the root plus additive spread children whose
 /// parents must be the root curve. Builds the depth-1 input list like the
 /// legacy `stackQuoteRisk` and delegates to the general engine.
-inline StackQuoteGamma
+StackQuoteGamma
 stackQuoteGamma(const DiscountCurve<double>& root, const std::vector<CurvePillar>& rootPillars,
                 const std::vector<double>& dVdRoot, const std::vector<double>& HZeta,
-                const datetime::Date& referenceDate, const std::vector<StackChildInput>& children) {
-    return stackQuoteGamma(makeDepth1Inputs(root, rootPillars, dVdRoot, children), HZeta,
-                           referenceDate);
-}
+                const datetime::Date& referenceDate, const std::vector<StackChildInput>& children);
 
 /// Maturity-tag ladder across all curves of the stack (sums quote deltas by
 /// maturity tag for every entry).
-inline std::vector<RiskBucket> stackYearLadder(const std::vector<StackRiskEntry>& entries) {
-    std::vector<RiskBucket> buckets;
-    for (const StackRiskEntry& entry : entries) {
-        entry.validate();
-        for (const QuotePoint& point : entry.points) {
-            bool merged = false;
-            for (RiskBucket& bucket : buckets) {
-                if (bucket.label == point.bucket) {
-                    bucket.delta += point.delta;
-                    merged = true;
-                    break;
-                }
-            }
-            if (!merged) {
-                buckets.push_back(RiskBucket{point.bucket, point.delta});
-            }
-        }
-    }
-    return buckets;
-}
+std::vector<RiskBucket> stackYearLadder(const std::vector<StackRiskEntry>& entries);
 
 /// Number of solved nodes of a forecast provider (`SpreadCurve` exposes its
 /// spread nodes, `DiscountCurve` its zero nodes).
@@ -853,32 +289,6 @@ inline const datetime::DayCounter& forecastNodeDayCounter(const XccyForecastCurv
     } else {
         return forecast.spreadNodes().zeroDayCounter();
     }
-}
-
-/// Calendar date of a native forecast node time. The curves store only times on
-/// their zero clock, so the integer day denominator of the common Actual
-/// conventions is inverted exactly; for other conventions the round-tripped
-/// ACT/365F offset is used, which only affects tag rounding below one year.
-inline datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,
-                                       const datetime::Date& referenceDate, double t) {
-    double daysPerYear = 365.0;
-    switch (zeroDayCounter.convention()) {
-        case datetime::DayCount::Actual360:
-            daysPerYear = 360.0;
-            break;
-        case datetime::DayCount::Actual364:
-            daysPerYear = 364.0;
-            break;
-        case datetime::DayCount::Actual365Fixed:
-            daysPerYear = 365.0;
-            break;
-        case datetime::DayCount::Actual366:
-            daysPerYear = 366.0;
-            break;
-        default:
-            break;
-    }
-    return referenceDate.plusDays(static_cast<std::int32_t>(std::lround(t * daysPerYear)));
 }
 
 /// Assemble F (xccy quote × foreign nodes), C (× root nodes), G (× foreign
@@ -903,14 +313,24 @@ inline void assembleXccyJacobianFull(const DiscountCurve<double>& foreignDiscoun
     c.assign(n * m, 0.0);
     g.assign(n * p, 0.0);
     h.assign(n * q, 0.0);
+    // The per-row views are identical for every pillar, so wrap each curve
+    // once and reuse the views across the whole block instead of rebuilding
+    // four views inside every row.
+    const StackCurveView::Ptr foreignDiscountView = StackCurveView::make(foreignDiscount);
+    const StackCurveView::Ptr foreignForecastView = StackCurveView::make(foreignForecast);
+    const StackCurveView::Ptr domesticDiscountView = StackCurveView::make(domesticDiscount);
+    const StackCurveView::Ptr domesticForecastView = StackCurveView::make(domesticForecast);
     std::vector<double> fRow;
     std::vector<double> cRow;
     std::vector<double> gRow;
     std::vector<double> hRow;
     for (std::size_t j = 0; j < n; ++j) {
-        xccySwapJacobianRows(foreignDiscount, foreignForecast, domesticDiscount, domesticForecast,
-                             pillars[j], referenceDate, domesticDiscount.zeroDayCounter(), fRow,
-                             cRow, gRow, hRow);
+        const std::vector<XccyRowBlock> blocks = xccySwapJacobianRowsView(
+            *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
+            *domesticForecastView, pillars[j], referenceDate, domesticDiscount.zeroDayCounter());
+        detail::mapXccyRowBlocks(blocks, *foreignDiscountView, *domesticDiscountView,
+                                 *foreignForecastView, *domesticForecastView, fRow, cRow, gRow,
+                                 hRow);
         for (std::size_t i = 0; i < n; ++i) {
             f[j * n + i] = fRow[i];
         }

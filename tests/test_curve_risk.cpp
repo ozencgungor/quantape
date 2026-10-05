@@ -5,6 +5,7 @@
 #include "quantape/markets/Curves/CurveRiskReport.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/StackRisk.h"
+#include "quantape/markets/Curves/StackRiskRows.h"
 #include "quantape/util/Check.h"
 
 #include <algorithm>

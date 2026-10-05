@@ -43,6 +43,7 @@ struct Euler {
     struct Scratch {
         StateMatrix<Scalar> driftBuf;
         StateMatrix<Scalar> gBuf;
+        Eigen::Matrix<Scalar, 1, Eigen::Dynamic> zScaled; ///< reused (1 x B) noise row
         Scratch(Eigen::Index nDims, Eigen::Index nPaths)
             : driftBuf(nDims, nPaths), gBuf(nDims, nPaths) {}
     };
@@ -68,11 +69,11 @@ struct Euler {
         const Scalar sqrtDt(std::sqrt(dt));
         for (std::size_t j = 0; j < q; ++j) {
             diffusion(x, t, theta, j, scratch.gBuf);
-            Eigen::Matrix<Scalar, 1, Eigen::Dynamic> zj =
-                z.row(static_cast<Eigen::Index>(j)).template cast<Scalar>();
-            zj *= sqrtDt;
-            // xNext(:,p) += gBuf(:,p) * zj(p)
-            xNext.array() += scratch.gBuf.array().rowwise() * zj.array();
+            // Scaled noise row in caller-reused scratch: same values as a
+            // fresh temporary, zero per-step allocation after the first use.
+            scratch.zScaled = z.row(static_cast<Eigen::Index>(j)).template cast<Scalar>() * sqrtDt;
+            // xNext(:,p) += gBuf(:,p) * zScaled(p)
+            xNext.array() += scratch.gBuf.array().rowwise() * scratch.zScaled.array();
         }
     }
 };
@@ -85,6 +86,7 @@ struct PredictorCorrector {
         StateMatrix<Scalar> driftRight;
         StateMatrix<Scalar> gBuf;
         StateMatrix<Scalar> xPredict;
+        Eigen::Matrix<Scalar, 1, Eigen::Dynamic> zScaled; ///< reused (1 x B) noise row
         Scratch(Eigen::Index nDims, Eigen::Index nPaths)
             : driftLeft(nDims, nPaths), driftRight(nDims, nPaths), gBuf(nDims, nPaths),
               xPredict(nDims, nPaths) {}
@@ -113,10 +115,8 @@ struct PredictorCorrector {
         const Scalar sqrtDt(std::sqrt(dt));
         for (std::size_t j = 0; j < q; ++j) {
             diffusion(x, t, theta, j, scratch.gBuf);
-            Eigen::Matrix<Scalar, 1, Eigen::Dynamic> zj =
-                z.row(static_cast<Eigen::Index>(j)).template cast<Scalar>();
-            zj *= sqrtDt;
-            xNext.array() += scratch.gBuf.array().rowwise() * zj.array();
+            scratch.zScaled = z.row(static_cast<Eigen::Index>(j)).template cast<Scalar>() * sqrtDt;
+            xNext.array() += scratch.gBuf.array().rowwise() * scratch.zScaled.array();
         }
     }
 };
