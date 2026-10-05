@@ -21,6 +21,7 @@
 #include "Optimization/AugLag.h"
 #include "Optimization/Constraint.h"
 #include "Optimization/LBFGS.h"
+#include "Optimization/LevenbergMarquardt.h"
 #include "Optimization/LineSearch.h"
 #include "Optimization/OptimizerPrimitives.h"
 #include "Optimization/QpSolver.h"

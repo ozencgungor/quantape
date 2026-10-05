@@ -160,4 +160,21 @@ FetchContent_MakeAvailable(zmij)
 # costs a little table-init time at first use.
 target_compile_definitions(zmij PUBLIC ZMIJ_USE_CONSTEXPR=0)
 
+# ----------------------------------------------------------------------------
+# nlohmann/json (human-editable curve/quote configuration; loader TU only)
+# ----------------------------------------------------------------------------
+if(EXISTS ${THIRD_PARTY_DIR}/nlohmann/nlohmann/json.hpp)
+    # Offline-friendly path: a single header already present in third-party/.
+    add_library(nlohmann_json INTERFACE)
+    target_include_directories(nlohmann_json INTERFACE ${THIRD_PARTY_DIR}/nlohmann)
+    add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+    message(STATUS "Using existing nlohmann/json in third-party/")
+elseif(NOT TARGET nlohmann_json::nlohmann_json)
+    message(STATUS "Downloading nlohmann/json...")
+    FetchContent_Declare(nlohmann_json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 find_package(Threads REQUIRED)

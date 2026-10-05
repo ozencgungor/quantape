@@ -221,11 +221,7 @@ LogLinearInterpolation<stan::math::var>::derivativeFixedImpl(stan::math::var x) 
     double x2 = this->m_x[i + 1];
     double xv = this->extractDouble(x);
     double inv_dx = 1.0 / (x2 - x1);
-    double t = (xv - x1) * inv_dx * (x2 - x1); // == (xv - x1) / (x2 - x1)
-    // Simplify: t = (xv - x1) / (x2 - x1)
-    t = (xv - x1) * inv_dx * (x2 - x1);
-    // Actually: inv_dx = 1/(x2-x1), so t = (xv-x1)/(x2-x1)
-    t = (xv - x1) / (x2 - x1);
+    const double t = (xv - x1) / (x2 - x1);
 
     double y0 = this->m_y[i].val();
     double y1 = this->m_y[i + 1].val();
@@ -354,13 +350,14 @@ LogLinearInterpolation<stan::math::fvar<stan::math::var>>::derivativeFixedImpl(
     double g1 = f_val * inv_dx / y1 * (t * dL + 1.0);
 
     // 2nd-order (Hessian of f' w.r.t. y_i, y_{i+1})
-    // d2f'/dy_i^2 = f*inv_dx/y_i^2 * [((1-t)*dL - 1)*((1-t) - 1) - (-1)]
-    //            = f*inv_dx/y_i^2 * [((1-t)*dL - 1)*(-t) + 1]
+    // d2f'/dy_i^2     = f*inv_dx/y_i^2 * (-t*a0 - (1-t))
+    // d2f'/dy_{i+1}^2 = f*inv_dx/y_{i+1}^2 * ((t-1)*a1 + t)
+    // d2f'/(dy_i dy_{i+1}) = f*inv_dx/(y_i*y_{i+1}) * ((1-t)*a1 - t)
     double a0 = (1.0 - t) * dL - 1.0;
     double a1 = t * dL + 1.0;
-    double h00 = f_val * inv_dx / (y0 * y0) * (a0 * (-t) + 1.0);
-    double h11 = f_val * inv_dx / (y1 * y1) * (a1 * (t - 1.0) - 1.0);
-    double h01 = f_val * inv_dx / (y0 * y1) * (a0 * t);
+    double h00 = f_val * inv_dx / (y0 * y0) * (-t * a0 - (1.0 - t));
+    double h11 = f_val * inv_dx / (y1 * y1) * ((t - 1.0) * a1 + t);
+    double h01 = f_val * inv_dx / (y0 * y1) * ((1.0 - t) * a1 - t);
 
     var yiv = yi.val_, yi1v = yi1.val_;
 

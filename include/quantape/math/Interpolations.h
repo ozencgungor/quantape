@@ -55,8 +55,11 @@
 
 // 1D interpolations
 #include "Interpolations/CubicInterpolation.h"
+#include "Interpolations/HymanSplineInterpolation.h"
 #include "Interpolations/LinearInterpolation.h"
 #include "Interpolations/LogLinearInterpolation.h"
+#include "Interpolations/MonotoneCubicInterpolation.h"
+#include "Interpolations/TensionSplineInterpolation.h"
 
 // 2D interpolations
 #include "Interpolations/BicubicInterpolation.h"

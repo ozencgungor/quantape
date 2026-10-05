@@ -1,7 +1,7 @@
 #ifndef FXRATE_H
 #define FXRATE_H
 
-#include "quantape/markets/Curves/IRCurve.h"
+#include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Descriptors/FXDescriptor.h"
 
 #include <memory>
@@ -42,11 +42,11 @@ public:
      * @param foreignCurve Foreign currency interest rate curve
      * @param descriptor FX metadata
      */
-    FXRate(DoubleT spot, const IRCurve<DoubleT>& domesticCurve,
-           const IRCurve<DoubleT>& foreignCurve, const FXDescriptor& descriptor = FXDescriptor())
+    FXRate(DoubleT spot, const DiscountCurve<DoubleT>& domesticCurve,
+           const DiscountCurve<DoubleT>& foreignCurve, const FXDescriptor& descriptor = FXDescriptor())
         : m_spot(spot), m_descriptor(descriptor), m_hasCurves(true),
-          m_domesticCurve(std::make_unique<IRCurve<DoubleT>>(domesticCurve)),
-          m_foreignCurve(std::make_unique<IRCurve<DoubleT>>(foreignCurve)) {
+          m_domesticCurve(std::make_unique<DiscountCurve<DoubleT>>(domesticCurve)),
+          m_foreignCurve(std::make_unique<DiscountCurve<DoubleT>>(foreignCurve)) {
         // Validate spot is positive
         if (value_impl(spot) <= 0.0) {
             throw std::runtime_error("FXRate: spot rate must be positive");
@@ -156,9 +156,9 @@ public:
     /**
      * @brief Set interest rate curves
      */
-    void setCurves(const IRCurve<DoubleT>& domesticCurve, const IRCurve<DoubleT>& foreignCurve) {
-        m_domesticCurve = std::make_unique<IRCurve<DoubleT>>(domesticCurve);
-        m_foreignCurve = std::make_unique<IRCurve<DoubleT>>(foreignCurve);
+    void setCurves(const DiscountCurve<DoubleT>& domesticCurve, const DiscountCurve<DoubleT>& foreignCurve) {
+        m_domesticCurve = std::make_unique<DiscountCurve<DoubleT>>(domesticCurve);
+        m_foreignCurve = std::make_unique<DiscountCurve<DoubleT>>(foreignCurve);
         m_hasCurves = true;
     }
 
@@ -175,14 +175,14 @@ public:
     /**
      * @brief Get domestic curve (if available)
      */
-    const IRCurve<DoubleT>* domesticCurve() const {
+    const DiscountCurve<DoubleT>* domesticCurve() const {
         return m_hasCurves ? m_domesticCurve.get() : nullptr;
     }
 
     /**
      * @brief Get foreign curve (if available)
      */
-    const IRCurve<DoubleT>* foreignCurve() const {
+    const DiscountCurve<DoubleT>* foreignCurve() const {
         return m_hasCurves ? m_foreignCurve.get() : nullptr;
     }
 
@@ -190,8 +190,8 @@ private:
     DoubleT m_spot;
     FXDescriptor m_descriptor;
     bool m_hasCurves;
-    std::unique_ptr<IRCurve<DoubleT>> m_domesticCurve;
-    std::unique_ptr<IRCurve<DoubleT>> m_foreignCurve;
+    std::unique_ptr<DiscountCurve<DoubleT>> m_domesticCurve;
+    std::unique_ptr<DiscountCurve<DoubleT>> m_foreignCurve;
 
     /**
      * @brief Extract value for validation (handles both double and AD types)

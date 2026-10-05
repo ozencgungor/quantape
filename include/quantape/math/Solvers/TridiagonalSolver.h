@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "SolverPrimitives.h"
@@ -68,6 +69,25 @@ public:
         }
 
         return x;
+    }
+
+    /**
+     * @brief Solve with passive double coefficients and an AD right-hand side
+     *
+     * Convenience overload for callers whose diagonals are grid data (pure
+     * double) while the right-hand side carries the AD leaves, e.g. the
+     * tension spline node values. The diagonals are promoted to DoubleT
+     * internally; the all-DoubleT overload above keeps working for fully AD
+     * coefficient vectors. Constrained out for DoubleT = double, where it
+     * would duplicate the signature above.
+     */
+    static std::vector<DoubleT> solve(const std::vector<double>& a, const std::vector<double>& b,
+                                      const std::vector<double>& c, const std::vector<DoubleT>& d)
+        requires(!std::is_same_v<DoubleT, double>)
+    {
+        return solve(std::vector<DoubleT>(a.begin(), a.end()),
+                     std::vector<DoubleT>(b.begin(), b.end()),
+                     std::vector<DoubleT>(c.begin(), c.end()), d);
     }
 };
 } // namespace quantape::math

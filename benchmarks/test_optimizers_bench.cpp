@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
         quantape::math::IftResult ift;
         std::vector<double> dp;
         quantape::math::iftUnconstrained(obj, x_hat, m, dp, ift);
-        return ift.condition_number;
+        return ift.conditionNumber;
     });
     bench("IFT KKT combined n=2", reps, [&] {
         stan::math::recover_memory();
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
         std::vector<double> dp, dl, dn;
         quantape::math::iftKkt(SepQuad2Arg{}, X0Cap2Arg{}, SumOne2Arg{}, none2, x_hat, m, {2.4},
                                {-1.2}, dp, dl, dn, ift);
-        return ift.condition_number + dp[0] + dl[0] + dn[1];
+        return ift.conditionNumber + dp[0] + dl[0] + dn[1];
     });
     bench("minimizeDifferential KKT n=2", reps, [&] {
         stan::math::recover_memory();

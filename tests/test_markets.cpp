@@ -6,10 +6,14 @@
  * and market data objects with both double and AD types.
  */
 
+#include "quantape/math/Autodiff/PrimalExtraction.h"
+#include "quantape/math/StanMath.h"
 #include "quantape/markets/MarketData.h"
 
+#include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 #include "quantape/log/Log.h"
@@ -24,7 +28,7 @@ void testIRCurve() {
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0, 10.0};
     std::vector<double> rates = {0.01, 0.015, 0.02, 0.025, 0.03};
     IRCurveDescriptor desc("USD", "OIS", "2024-01-01");
-    IRCurve<double> curve(tenors, rates, desc);
+    DiscountCurve<double> curve(tenors, rates);
 
     QTA_LOG_INFO("test", "Curve: {}", desc.identifier());
 
@@ -49,7 +53,8 @@ void testYieldCurve() {
     std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0};
     std::vector<double> yields = {0.015, 0.018, 0.02, 0.022};
     YieldCurveDescriptor desc("USD", "SPX_DIV", "2024-01-01", "DIVIDEND");
-    YieldCurve<double> divCurve(tenors, yields, desc);
+    DiscountCurve<double> divCurve(tenors, yields, InterpolationSpace::Zero,
+                                   InterpolationScheme::Linear);
 
     QTA_LOG_INFO("test", "Curve: {}", desc.identifier());
 
@@ -81,6 +86,21 @@ void testSurvivalProbabilityCurve() {
         QTA_LOG_INFO("test", "  t={}: SP={}, PD={}, avg hazard={}", quantape::util::num(t),
                      quantape::util::num(sp), quantape::util::num(pd), quantape::util::num(avgHazard));
     }
+
+    // AD compile/value check: the curve instantiates and evaluates for the
+    // nested `fvar<var>` scalar, including after a move.
+    using FvarVar = stan::math::fvar<stan::math::var>;
+    SurvivalProbabilityCurve<FvarVar> adCurve(tenors, survProbs, desc);
+    const FvarVar adSp = adCurve.survivalProb(FvarVar(2.0));
+    quantape::util::checkClose("fvar<var> survival prob", quantape::math::detail::primalValue(adSp),
+                               spCurve.survivalProb(2.0), 1e-12);
+
+    SurvivalProbabilityCurve<FvarVar> movedCurve(std::move(adCurve));
+    const FvarVar movedSp = movedCurve.survivalProb(FvarVar(2.0));
+    quantape::util::checkClose("moved fvar<var> survival prob",
+                               quantape::math::detail::primalValue(movedSp),
+                               spCurve.survivalProb(2.0), 1e-12);
+    stan::math::recover_memory();
 }
 
 void testEQDData() {
@@ -94,8 +114,9 @@ void testEQDData() {
     YieldCurveDescriptor divDesc("USD", "SPX_DIV", "2024-01-01", "DIVIDEND");
     IRCurveDescriptor rateDesc("USD", "OIS", "2024-01-01");
 
-    YieldCurve<double> divCurve(tenors, divYields, divDesc);
-    IRCurve<double> rateCurve(tenors, rates, rateDesc);
+    DiscountCurve<double> divCurve(tenors, divYields, InterpolationSpace::Zero,
+                                   InterpolationScheme::Linear);
+    DiscountCurve<double> rateCurve(tenors, rates);
 
     // Create equity data
     double spot = 4500.0;
@@ -163,8 +184,8 @@ void testFXRate() {
     IRCurveDescriptor usdDesc("USD", "OIS", "2024-01-01");
     IRCurveDescriptor eurDesc("EUR", "ESTR", "2024-01-01");
 
-    IRCurve<double> usdCurve(tenors, usdRates, usdDesc);
-    IRCurve<double> eurCurve(tenors, eurRates, eurDesc);
+    DiscountCurve<double> usdCurve(tenors, usdRates);
+    DiscountCurve<double> eurCurve(tenors, eurRates);
 
     double spot = 1.10; // USDEUR spot
     FXDescriptor fxDesc("USD", "EUR", "2024-01-01");

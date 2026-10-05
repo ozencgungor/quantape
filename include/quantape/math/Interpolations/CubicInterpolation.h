@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "Interpolation.h"
@@ -424,8 +425,22 @@ private:
     }
 
     template <typename T>
-    static std::vector<T> computeAkimaDerivatives(size_t n, const std::vector<double>& /*dx*/,
+    static std::vector<T> computeAkimaDerivatives(size_t n, const std::vector<double>& dx,
                                                   const std::vector<T>& S, bool smooth) {
+        if (n == 2) {
+            // Two nodes: the Akima stencil does not exist, so the single
+            // slope is the linear derivative at both ends (same degeneracy
+            // rule the caller applies before dispatching here).
+            return {S[0], S[0]};
+        }
+        if (n == 3) {
+            // Three nodes: S has only two entries, so the full Akima end
+            // stencils (S[2], S[n-4]) would read out of bounds. Fall back to
+            // the parabolic central/one-sided rules, which are exact for
+            // quadratics and need only S[0..1].
+            return computeParabolicDerivatives(n, dx, S, smooth);
+        }
+
         std::vector<T> deriv(n);
 
         T w1 = weightAbs(S[1] - S[0], smooth);

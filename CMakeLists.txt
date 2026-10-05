@@ -21,7 +21,21 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
 endif()
-add_compile_options($<$<CONFIG:Release>:-march=native>)
+
+# Debug is the debugger-first configuration: full optimization off, DWARF with
+# macro information (-g3), frame pointers and sibling calls kept so backtraces
+# and single-stepping are reliable. NDEBUG stays undefined, so asserts fire.
+# Release keeps CMake's -O3 -DNDEBUG and adds -march=native. MSVC uses its own
+# default /Od /Zi and /O2 /DNDEBUG pairs.
+if(NOT MSVC)
+    add_compile_options(
+        $<$<CONFIG:Debug>:-O0>
+        $<$<CONFIG:Debug>:-g3>
+        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-fno-optimize-sibling-calls>
+        $<$<CONFIG:Release>:-march=native>
+    )
+endif()
 
 option(QUANTAPE_BUILD_EXAMPLES "Build example executables" ON)
 option(QUANTAPE_BUILD_TOOLS "Build command-line tools" ON)
@@ -35,7 +49,7 @@ if(NOT DEFINED QUANTAPE_BUILD_BENCHMARKS)
     endif()
 endif()
 option(QUANTAPE_TEST_OPTIMIZATION
-       "Build tests with -O2 in every configuration (numerical loops)" ON)
+       "Build tests with -O2 in optimized configurations (never in Debug)" ON)
 option(QUANTAPE_ENABLE_LOGGING "Build with quill-based logging (macros become no-ops when OFF)" ON)
 set(QUANTAPE_LOG_COMPILE_LEVEL "" CACHE STRING
     "Compile-time log level: TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL (default: TRACE in Debug, INFO otherwise)")
@@ -113,6 +127,7 @@ else()
 endif()
 
 target_link_libraries(quantape PUBLIC quantape_log quantape_format)
+target_link_libraries(quantape PRIVATE nlohmann_json::nlohmann_json)
 
 # ============================================================================
 # Generated assets
@@ -194,8 +209,9 @@ endif()
 #
 # Debug and Release are the supported configurations (defined at the top of
 # this file); a target's optimization follows its configuration. Tests are the
-# single documented exception: quantape_register_test adds a uniform -O2 in
-# every configuration because the numerical test loops are impractical at -O0.
+# single documented exception: quantape_register_test adds -O2 in optimized
+# configurations (never in Debug) because the numerical test loops are
+# impractical at -O0.
 # ============================================================================
 
 # ============================================================================

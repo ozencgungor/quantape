@@ -101,7 +101,7 @@ void testUnconstrainedLsq() {
                        1e-10);
     // Condition number should match lambda_max/lambda_min of A^T A
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(AtA);
-    checkClose("lsq cond", ift.condition_number,
+    checkClose("lsq cond", ift.conditionNumber,
                es.eigenvalues().maxCoeff() / es.eigenvalues().minCoeff(), 1e-9);
 
     // Bump-and-recalibrate central FD cross-check (grad_tol tight for clean FD)
@@ -127,7 +127,7 @@ void testUnconstrainedLsq() {
     }
     QTA_LOG_INFO("test",
                  "  [ok] unconstrained LSQ: IFT vs analytic 1e-10, vs FD 1e-6, cond={}",
-                 quantape::util::num(ift.condition_number, 3));
+                 quantape::util::num(ift.conditionNumber, 3));
 }
 
 // ============================================================================
@@ -213,7 +213,7 @@ void testActiveBound() {
     quantape::math::iftKkt(BoundQuadratic{}, NonNegative{}, quantape::math::NoConstraint{},
                            quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
                            ift);
-    CHECK(ift.active_ineq.size() == 1);
+    CHECK(ift.activeInequalities.size() == 1);
     checkClose("bound-active dp/dm", dp_dm[0], 0.0, 1e-12);
     checkClose("bound-active dlam/dm", dlam_dm[0], -1.0, 1e-12);
 
@@ -257,7 +257,7 @@ void testInactiveInequality() {
     quantape::math::iftKkt(BoundQuadratic{}, UpperTen{}, quantape::math::NoConstraint{},
                            quantape::math::Bounds{}, x_hat, m, {0.0}, {}, dp_dm, dlam_dm, dnu_dm,
                            ift);
-    CHECK(ift.active_ineq.empty());
+    CHECK(ift.activeInequalities.empty());
     checkClose("inactive-ineq dp/dm", dp_dm[0], 1.0, 1e-12);
     CHECK(dlam_dm.empty());
     QTA_LOG_INFO("test", "  [ok] inactive inequality: unconstrained fallback, dp/dm = 1");
@@ -366,7 +366,7 @@ void testCombinedActive() {
     std::vector<double> dp_dm, dlam_dm, dnu_dm;
     quantape::math::iftKkt(SepQuad{}, X0Cap{}, SumOne{}, quantape::math::Bounds{}, x_hat, m, lambda,
                            nu, dp_dm, dlam_dm, dnu_dm, ift);
-    CHECK(ift.active_ineq.size() == 1);
+    CHECK(ift.activeInequalities.size() == 1);
     for (std::size_t i = 0; i < 4; ++i)
         checkClose("combined dp/dm", dp_dm[i], 0.0, 1e-12);
     checkClose("combined dlam/dm0", dlam_dm[0], 1.0, 1e-12);
@@ -445,7 +445,7 @@ void testDegenerate() {
     quantape::math::iftKkt(BoundQuadratic{}, DoubleIneq{}, quantape::math::NoConstraint{},
                            quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
                            ift);
-    CHECK(ift.active_ineq.size() == 2);
+    CHECK(ift.activeInequalities.size() == 2);
     CHECK(ift.pseudo_inverse);
     CHECK(ift.rank < 3);
     checkClose("degenerate dp/dm", dp_dm[0], 0.0, 1e-8);
@@ -469,8 +469,8 @@ void testBoundsOnly() {
     quantape::math::iftKkt(TwoQuad{}, quantape::math::NoConstraint{},
                            quantape::math::NoConstraint{}, b, x_hat, m, {}, {}, dp_dm, dlam_dm,
                            dnu_dm, ift);
-    CHECK(ift.active_bounds.size() == 1);
-    CHECK(ift.active_bounds[0] == 0);
+    CHECK(ift.activeBounds.size() == 1);
+    CHECK(ift.activeBounds[0] == 0);
     checkClose("bounds dp0/dm0", dp_dm[0], 0.0, 1e-12);
     checkClose("bounds dp0/dm1", dp_dm[1], 0.0, 1e-12);
     checkClose("bounds dp1/dm0", dp_dm[2], 0.0, 1e-12);
@@ -497,11 +497,11 @@ void testConditionNumber() {
     quantape::math::IftResult ift;
     std::vector<double> dp_dm;
     quantape::math::iftUnconstrained(f2, x_hat, m, dp_dm, ift);
-    checkClose("cond number", ift.condition_number, 1.0 / eps, 1e-6);
+    checkClose("cond number", ift.conditionNumber, 1.0 / eps, 1e-6);
     CHECK(!ift.regularized);
     checkClose("ill-cond dp/dm diagonal", dp_dm[0], 1.0, 1e-12);
     QTA_LOG_INFO("test", "  [ok] condition number reporting: cond = {}",
-                 quantape::util::num(ift.condition_number, 2));
+                 quantape::util::num(ift.conditionNumber, 2));
 }
 
 // ============================================================================
@@ -607,7 +607,7 @@ void testNonlinearConstraint() {
     quantape::math::iftKkt(TwoQuad{}, UnitDisk{}, quantape::math::NoConstraint{},
                            quantape::math::Bounds{}, x_hat, m, lambda, {}, dp_dm, dlam_dm, dnu_dm,
                            ift);
-    CHECK(ift.active_ineq.size() == 1);
+    CHECK(ift.activeInequalities.size() == 1);
     checkClose("disk dp0/dm0", dp_dm[0], 0.0, 1e-12);
     checkClose("disk dp0/dm1", dp_dm[1], 0.0, 1e-12);
     checkClose("disk dp1/dm0", dp_dm[2], 0.0, 1e-12);
@@ -664,10 +664,10 @@ void testRidgeEscalation() {
     std::vector<double> dp_dm;
     quantape::math::iftUnconstrained(f2, {1.0}, {1.0}, dp_dm, ift);
     CHECK(ift.regularized);
-    CHECK(ift.ridge_used > 0.0);
+    CHECK(ift.ridgeUsed > 0.0);
     CHECK(std::isfinite(dp_dm[0]));
     QTA_LOG_INFO("test", "  [ok] ridge escalation: indefinite H regularized (ridge={})",
-                 quantape::util::num(ift.ridge_used, 2));
+                 quantape::util::num(ift.ridgeUsed, 2));
 
     // Near-flat but positive definite: no ridge needed, exact answer
     const auto flat = [](const auto& x, const auto& m) {
@@ -683,7 +683,7 @@ void testRidgeEscalation() {
     checkClose("flat-PD dp0/dm0", dp2[0], 1.0, 1e-12);
     checkClose("flat-PD dp1/dm1", dp2[3], 1.0, 1e-12);
     QTA_LOG_INFO("test", "  [ok] near-flat PD Hessian: no ridge, exact dp/dm (cond={})",
-                 quantape::util::num(ift2.condition_number, 1));
+                 quantape::util::num(ift2.conditionNumber, 1));
 }
 
 // ============================================================================
@@ -706,7 +706,7 @@ void testConstrainedVarComposition() {
     CHECK(r == quantape::math::OptimizeResult::Success);
     checkClose("constrained var p0", p_hat[0].val(), 0.8, 1e-7);
     checkClose("constrained var p1", p_hat[1].val(), 0.2, 1e-7);
-    CHECK(ift.active_ineq.size() == 1);
+    CHECK(ift.activeInequalities.size() == 1);
 
     var phi = p_hat[0] - p_hat[1];
     phi.grad();

@@ -2,11 +2,13 @@
 #define SURVIVALPROBABILITYCURVE_H
 
 #include "quantape/markets/Descriptors/CreditDescriptor.h"
+#include "quantape/math/Autodiff/PrimalExtraction.h"
 #include "quantape/math/Interpolations/CubicInterpolation.h"
 
 #include <cmath>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace quantape::markets {
@@ -81,6 +83,16 @@ public:
         }
         return *this;
     }
+
+    /**
+     * @brief Move constructor
+     */
+    SurvivalProbabilityCurve(SurvivalProbabilityCurve&&) noexcept = default;
+
+    /**
+     * @brief Move assignment
+     */
+    SurvivalProbabilityCurve& operator=(SurvivalProbabilityCurve&&) noexcept = default;
 
     /**
      * @brief Get survival probability at time t
@@ -181,15 +193,9 @@ private:
     }
 
     /**
-     * @brief Extract value for comparison (handles both double and AD types)
+     * @brief Extract the primal double for validation and comparisons
      */
-    static double value_impl(const DoubleT& x) {
-        if constexpr (std::is_same_v<DoubleT, double>) {
-            return x;
-        } else {
-            return x.val(); // For stan::math::var
-        }
-    }
+    static double value_impl(const DoubleT& x) { return quantape::math::detail::primalValue(x); }
 };
 
 } // namespace quantape::markets

@@ -43,7 +43,7 @@
  * std::vector<double> tenors = {0.5, 1.0, 2.0, 5.0, 10.0};
  * std::vector<double> rates = {0.01, 0.015, 0.02, 0.025, 0.03};
  * quantape::markets::IRCurveDescriptor ircDesc("USD", "OIS", "2024-01-01");
- * quantape::markets::IRCurve<double> oisCurve(tenors, rates, ircDesc);
+ * quantape::markets::DiscountCurve<double> oisCurve(tenors, rates);
  *
  * // Get discount factor and forward rate
  * double df = oisCurve.discountFactor(2.5);  // DF at 2.5 years
@@ -52,7 +52,8 @@
  * // Equity data with spot and curves
  * quantape::markets::EQDDescriptor eqdDesc("SPX", "INDEX", "USD");
  * double spot = 4500.0;
- * quantape::markets::YieldCurve<double> divCurve(tenors, divRates, yieldDesc);
+ * quantape::markets::DiscountCurve<double> divCurve(tenors, divRates,
+        quantape::markets::InterpolationSpace::Zero);
  * quantape::markets::EQDData<double> spxData(spot, divCurve, oisCurve, eqdDesc);
  *
  * // Calculate forward price
@@ -70,7 +71,7 @@
  * // With automatic differentiation (Stan Math)
  * using ADVariableT = stan::math::var;
  * std::vector<ADVariableT> ad_rates = {0.01, 0.015, 0.02, 0.025, 0.03};
- * quantape::markets::IRCurve<ADVariableT> ad_curve(tenors, ad_rates, ircDesc);
+ * quantape::markets::DiscountCurve<ADVariableT> ad_curve(tenors, ad_rates);
  * ADVariableT ad_df = ad_curve.discountFactor(ADVariableT(2.5));
  *
  * // Compute sensitivity: d(DF)/d(rates)
@@ -95,9 +96,8 @@
 #include "Descriptors/YieldCurveDescriptor.h"
 
 // Curves
-#include "Curves/IRCurve.h"
+#include "Curves/DiscountCurve.h"
 #include "Curves/SurvivalProbabilityCurve.h"
-#include "Curves/YieldCurve.h"
 
 // Volatility Surfaces
 #include "Volatility/EQDVolatility.h"

@@ -1,6 +1,7 @@
 #ifndef BILINEAR_INTERPOLATION_H
 #define BILINEAR_INTERPOLATION_H
 
+#include <stdexcept>
 #include <vector>
 
 #include "Interpolation2D.h"
@@ -30,6 +31,25 @@ public:
         m_x = this->toDoubleVector(x);
         m_y = this->toDoubleVector(y);
         m_z = this->toVector2D(z);
+
+        // locateX/locateY assume at least two strictly increasing grid
+        // points (size() - 2 must not underflow); mirror
+        // Interpolation::validate for the per-axis grids.
+        if (m_x.size() < 2 || m_y.size() < 2) {
+            throw std::invalid_argument("BilinearInterpolation: need at least 2 points per axis");
+        }
+        for (std::size_t i = 1; i < m_x.size(); ++i) {
+            if (m_x[i] <= m_x[i - 1]) {
+                throw std::invalid_argument(
+                    "BilinearInterpolation: x values must be strictly increasing");
+            }
+        }
+        for (std::size_t i = 1; i < m_y.size(); ++i) {
+            if (m_y[i] <= m_y[i - 1]) {
+                throw std::invalid_argument(
+                    "BilinearInterpolation: y values must be strictly increasing");
+            }
+        }
 
         if (m_z.size() != m_y.size()) {
             throw std::runtime_error("BilinearInterpolation: z rows must match y size");

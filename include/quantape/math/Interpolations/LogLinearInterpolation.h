@@ -43,10 +43,10 @@ public:
         DoubleT t = (x - DoubleT(x1)) / DoubleT(x2 - x1);
 
         // Node values are DoubleT — on tape
-        DoubleT log_y1 = log_impl(this->m_y[i]);
-        DoubleT log_y2 = log_impl(this->m_y[i + 1]);
+        DoubleT log_y1 = logImpl(this->m_y[i]);
+        DoubleT log_y2 = logImpl(this->m_y[i + 1]);
         DoubleT log_result = (DoubleT(1.0) - t) * log_y1 + t * log_y2;
-        return exp_impl(log_result);
+        return expImpl(log_result);
     }
 
     DoubleT derivativeImpl(DoubleT x) const {
@@ -58,8 +58,8 @@ public:
 
         // val carries x and y; dlog(y)/dx is the chord slope in log-space
         DoubleT val = valueImpl(x);
-        DoubleT log_y1 = log_impl(this->m_y[i]);
-        DoubleT log_y2 = log_impl(this->m_y[i + 1]);
+        DoubleT log_y1 = logImpl(this->m_y[i]);
+        DoubleT log_y2 = logImpl(this->m_y[i + 1]);
         return val * (log_y2 - log_y1) * inv_dx;
     }
 
@@ -69,7 +69,7 @@ public:
     DoubleT derivativeFixedImpl(DoubleT x) const { return derivativeImpl(x); }
 
 private:
-    static DoubleT log_impl(const DoubleT& x) {
+    static DoubleT logImpl(const DoubleT& x) {
         if constexpr (std::is_same_v<DoubleT, double>) {
             return std::log(x);
         } else {
@@ -78,7 +78,7 @@ private:
         }
     }
 
-    static DoubleT exp_impl(const DoubleT& x) {
+    static DoubleT expImpl(const DoubleT& x) {
         if constexpr (std::is_same_v<DoubleT, double>) {
             return std::exp(x);
         } else {

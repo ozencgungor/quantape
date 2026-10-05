@@ -2,6 +2,7 @@
 #define INTERPOLATION2D_H
 
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace quantape::math {

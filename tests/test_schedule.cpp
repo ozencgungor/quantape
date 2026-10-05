@@ -2,6 +2,7 @@
 #include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
 #include "quantape/datetime/Schedule.h"
+#include "quantape/datetime/Imm.h"
 #include "quantape/datetime/TimeConversion.h"
 
 #include <cmath>
@@ -75,6 +76,12 @@ int main() {
                         BusinessDayConvention::Following, DateGeneration::Zero, false);
     CHECK(zero.size() == 2);
 
+    // Zero rule ignores the tenor, so a zero tenor is accepted.
+    const Schedule zeroTenor(Date::parse("2026-01-15"), Date::parse("2027-01-15"),
+                             Period(0, TimeUnit::Months), target,
+                             BusinessDayConvention::Following, DateGeneration::Zero, false);
+    CHECK(zeroTenor.size() == 2);
+
     // Time conversion: first date maps to zero, monotone, grid steps match.
     const DayCounter act365(DayCount::Actual365Fixed);
     const std::vector<double> times = scheduleTimes(semi.dates(), semi.startDate(), act365);
@@ -124,6 +131,36 @@ int main() {
         CHECK(bus252.yearFractionUncached(Date(2020, 1, 6), Date(2020, 1, 6)) == 0.0);
     }
 
+    // IMM dates and IMM schedule grid.
+    CHECK(quantape::datetime::immDate(2027, 3) == quantape::datetime::Date::parse("2027-03-17"));
+    CHECK(quantape::datetime::immDate(2027, 6) == quantape::datetime::Date::parse("2027-06-16"));
+    CHECK(quantape::datetime::immDate(2027, 9) == quantape::datetime::Date::parse("2027-09-15"));
+    CHECK(quantape::datetime::immDate(2027, 12) == quantape::datetime::Date::parse("2027-12-15"));
+    CHECK(quantape::datetime::isIMMDate(quantape::datetime::Date::parse("2027-03-17")));
+    CHECK(!quantape::datetime::isIMMDate(quantape::datetime::Date::parse("2027-03-10")));
+    CHECK(quantape::datetime::nextIMMDate(quantape::datetime::Date::parse("2027-03-17")) ==
+          quantape::datetime::Date::parse("2027-06-16"));
+    CHECK(quantape::datetime::nextIMMDate(quantape::datetime::Date::parse("2027-12-16")) ==
+          quantape::datetime::Date::parse("2028-03-15"));
+    const std::vector<quantape::datetime::Date> immGrid = quantape::datetime::immSchedule(
+        quantape::datetime::Date::parse("2026-09-29"), quantape::datetime::Date::parse("2027-12-15"),
+        quantape::datetime::Calendar::noHolidays());
+    CHECK(immGrid.size() == 6);
+    CHECK(immGrid.front() == quantape::datetime::Date::parse("2026-09-29"));
+    CHECK(immGrid[1] == quantape::datetime::Date::parse("2026-12-16"));
+    CHECK(immGrid.back() == quantape::datetime::Date::parse("2027-12-15"));
+    // Separate effective/termination conventions.
+    const quantape::datetime::Schedule anchored(
+        quantape::datetime::Date::parse("2027-07-31"), quantape::datetime::Date::parse("2028-04-30"),
+        quantape::datetime::Period(3, quantape::datetime::TimeUnit::Months),
+        quantape::datetime::Calendar::weekendsOnly(),
+        quantape::datetime::BusinessDayConvention::ModifiedFollowing,
+        quantape::datetime::DateGeneration::Forward, false,
+        quantape::datetime::BusinessDayConvention::Unadjusted,
+        quantape::datetime::BusinessDayConvention::Following);
+    CHECK(anchored.startDate() == quantape::datetime::Date::parse("2027-07-31"));
+    CHECK(anchored.dates()[1] == quantape::datetime::Date::parse("2027-10-29"));
+    CHECK(anchored.endDate() == quantape::datetime::Date::parse("2028-05-01"));
     QTA_LOG_INFO("test", "test_schedule: ok");
     return 0;
 }

@@ -4,10 +4,10 @@
 //
 // ImplicitFunction.h -- first-order sensitivities of optima (Stan-dependent)
 //
-// The IFT layer (docs/ad_optimizers.md §6.1/§6.2): given a converged
-// optimizer solution, compute dp/dm -- the Jacobian of the optimal
-// parameters w.r.t. the market data -- by implicit differentiation of
-// either grad L = 0 (unconstrained) or the KKT system (constrained).
+// The IFT layer: given a converged optimizer solution, compute dp/dm -- the
+// Jacobian of the optimal parameters w.r.t. the market data -- by implicit
+// differentiation of either grad L = 0 (unconstrained) or the KKT system
+// (constrained).
 //
 // All derivatives are EXACT (dense Hessians from n HVPs, mixed Hessians
 // from forward-over-reverse seeds on m); finite differences appear only in
@@ -24,10 +24,10 @@
 // HVPs and the mixed Hessian), m only needs double for the solve and
 // `fvar<var>` for the mixed passes. g2/h2 must accept Sx == var.
 //
-// v1 scope (documented in §6.2): the constraints are assumed NOT to depend
-// on m directly (dg/dm = 0, dh/dm = 0) -- true for no-arbitrage/structural
-// constraints on the model surface, which are functions of the parameters
-// only. Bounds are folded in as exact linear rows (x_j = b_j => dp_j = 0).
+// Scope: the constraints are assumed NOT to depend on m directly (dg/dm = 0,
+// dh/dm = 0) -- true for no-arbitrage/structural constraints on the model
+// surface, which are functions of the parameters only. Bounds are folded in
+// as exact linear rows (x_j = b_j => dp_j = 0).
 //
 // Tape hygiene: every internal AD pass runs in its own
 // nested_rev_autodiff scope; minimizeDifferentialVar builds one small graph
@@ -56,28 +56,28 @@ namespace quantape::math {
 
 /// Tolerances for active-set detection and regularization
 struct IftOptions {
-    // Active-set detection: |g| <= feasibility_tol AND multiplier > lambda_tol.
+    // Active-set detection: |g| <= feasibilityTol AND multiplier > lambdaTol.
     // 1e-6 covers both solvers' feasibility exits on constraints of scale
     // O(1) (SLSQP returns ~5e-8, AUGLAG ~1e-9) while staying far below any
     // genuinely-inactive |g| ~ O(1). Keep it aligned with
     // CalibrationIftOptions::feasibilityTol when driving the assembled
     // (double/analytic) chain from the same optimum.
-    double feasibility_tol = 1e-6;
-    double lambda_tol = 1e-10; ///< multiplier > tol => strictly active
-    double bound_tol = 1e-8;   ///< |x - bound| <= tol*scale => active bound
-    double ridge = 0.0;        ///< explicit ridge for H (0 = automatic)
-    int max_ridge_tries = 30;  ///< ridge escalation attempts
+    double feasibilityTol = 1e-6;
+    double lambdaTol = 1e-10; ///< multiplier > tol => strictly active
+    double boundTol = 1e-8;   ///< |x - bound| <= tol*scale => active bound
+    double ridge = 0.0;       ///< explicit ridge for H (0 = automatic)
+    int maxRidgeTries = 30;   ///< ridge escalation attempts
 };
 
 /// Diagnostics of an IFT solve
 struct IftResult {
-    double condition_number = 0.0;          ///< lambda_max/lambda_min or 1/rcond(K)
-    double ridge_used = 0.0;                ///< regularization added to H (0 = none)
+    double conditionNumber = 0.0;          ///< lambda_max/lambda_min or 1/rcond(K)
+    double ridgeUsed = 0.0;                ///< regularization added to H (0 = none)
     bool regularized = false;               ///< H was not positive definite
     bool pseudo_inverse = false;            ///< KKT system used the pseudo-inverse path
     std::size_t rank = 0;                   ///< rank used by the pseudo-inverse solve
-    std::vector<std::size_t> active_ineq;   ///< indices of active inequality rows
-    std::vector<std::size_t> active_bounds; ///< parameters pinned by a bound
+    std::vector<std::size_t> activeInequalities;   ///< indices of active inequality rows
+    std::vector<std::size_t> activeBounds; ///< parameters pinned by a bound
 };
 
 namespace detail {
@@ -144,7 +144,7 @@ inline double solvePositiveDefinite(const Eigen::MatrixXd& H, const Eigen::Matri
 
     int tries = 0;
     Eigen::LLT<Eigen::MatrixXd> llt(Hr);
-    while (llt.info() != Eigen::Success && tries < options.max_ridge_tries) {
+    while (llt.info() != Eigen::Success && tries < options.maxRidgeTries) {
         ++tries;
         if (ridge <= 0.0) {
             // Minimal distortion: flip the most negative eigenvalue positive
@@ -173,9 +173,9 @@ inline double solvePositiveDefinite(const Eigen::MatrixXd& H, const Eigen::Matri
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hr);
     const double lmin = es.eigenvalues().minCoeff();
     const double lmax = es.eigenvalues().maxCoeff();
-    out.condition_number = lmax / std::max(lmin, 1e-300);
+    out.conditionNumber = lmax / std::max(lmin, 1e-300);
     out.regularized = ridge > 0.0;
-    out.ridge_used = ridge;
+    out.ridgeUsed = ridge;
     return ridge;
 }
 
@@ -229,9 +229,9 @@ void iftUnconstrained(const F2& f2, const std::vector<double>& x_hat, const std:
 }
 
 /**
- * @brief KKT first-order IFT (docs/ad_optimizers.md §6.2)
+ * @brief KKT first-order IFT
  *
- * Active inequalities: |g_i| <= feasibility_tol AND lambda_i > lambda_tol
+ * Active inequalities: |g_i| <= feasibilityTol AND lambda_i > lambdaTol
  * (strict complementarity; degenerate rows fall to the pseudo-inverse path).
  * Active bounds are folded in as exact linear rows. The square system
  *
@@ -296,23 +296,38 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
     const std::size_t mi_all = c.size();
     const std::size_t me = ch.size();
     for (std::size_t i = 0; i < mi_all; ++i) {
-        if (std::fabs(c[i]) <= options.feasibility_tol && ineq_lambda[i] > options.lambda_tol) {
-            out.active_ineq.push_back(i);
+        if (std::fabs(c[i]) <= options.feasibilityTol && ineq_lambda[i] > options.lambdaTol) {
+            out.activeInequalities.push_back(i);
         }
     }
     if (!bounds.empty()) {
         for (std::size_t j = 0; j < n; ++j) {
             const double scale = std::max(1.0, std::fabs(x_hat[j]));
-            if (bounds.hasLower(j) && x_hat[j] - bounds.lower[j] <= options.bound_tol * scale) {
-                out.active_bounds.push_back(j);
-            }
-            if (bounds.hasUpper(j) && bounds.upper[j] - x_hat[j] <= options.bound_tol * scale) {
-                out.active_bounds.push_back(j);
+            const bool atLower =
+                bounds.hasLower(j) && x_hat[j] - bounds.lower[j] <= options.boundTol * scale;
+            const bool atUpper =
+                bounds.hasUpper(j) && bounds.upper[j] - x_hat[j] <= options.boundTol * scale;
+            // One row per pinned parameter: when both bounds are within
+            // tolerance the variable is fixed and either row enforces
+            // dp_j = 0, so the index must not be added twice (duplicate
+            // rows make the KKT system rank deficient).
+            if (atLower || atUpper) {
+                out.activeBounds.push_back(j);
             }
         }
     }
-    const std::size_t mA = out.active_ineq.size();
-    const std::size_t mB = out.active_bounds.size();
+    const std::size_t mA = out.activeInequalities.size();
+    const std::size_t mB = out.activeBounds.size();
+
+    // Row sign for a pinned bound: -1 => x = lower (row lower - x), +1 =>
+    // x = upper (row x - upper). At a parameter pinned by both bounds the
+    // lower side is selected (both rows fix dp_j = 0 identically).
+    const auto boundSide = [&](std::size_t j) {
+        const double scale = std::max(1.0, std::fabs(x_hat[j]));
+        const bool atLower =
+            bounds.hasLower(j) && x_hat[j] - bounds.lower[j] <= options.boundTol * scale;
+        return atLower ? -1.0 : 1.0;
+    };
 
     if (mA == 0 && me == 0 && mB == 0) {
         // No binding constraints: degenerate to the unconstrained IFT
@@ -360,17 +375,14 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
         }
         for (std::size_t a = 0; a < mA; ++a) {
             K(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(n + a)) =
-                Jg[out.active_ineq[a] * n + i];
+                Jg[out.activeInequalities[a] * n + i];
         }
         for (std::size_t k = 0; k < me; ++k) {
             K(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(n + mA + k)) = Jh[k * n + i];
         }
         for (std::size_t b = 0; b < mB; ++b) {
-            const std::size_t j = out.active_bounds[b];
-            const double side =
-                x_hat[j] - bounds.lower[j] <= options.bound_tol * std::max(1.0, std::fabs(x_hat[j]))
-                    ? -1.0 // x = lower: row  -x_j + lower = 0
-                    : 1.0; // x = upper: row  x_j - upper = 0
+            const std::size_t j = out.activeBounds[b];
+            const double side = boundSide(j);
             // J_b^T(b, i) = side * delta(i, j): only row i == j is nonzero
             K(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(n + mA + me + b)) =
                 (i == j) ? side : 0.0;
@@ -381,7 +393,7 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
     }
     // Complementarity rows: diag(lA) J_A dp = 0
     for (std::size_t a = 0; a < mA; ++a) {
-        const std::size_t row = out.active_ineq[a];
+        const std::size_t row = out.activeInequalities[a];
         for (std::size_t i = 0; i < n; ++i) {
             K(static_cast<Eigen::Index>(n + a), static_cast<Eigen::Index>(i)) =
                 ineq_lambda[row] * Jg[row * n + i];
@@ -395,11 +407,8 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
     }
     // Bound rows: J_b dp = 0
     for (std::size_t b = 0; b < mB; ++b) {
-        const std::size_t j = out.active_bounds[b];
-        const double side =
-            x_hat[j] - bounds.lower[j] <= options.bound_tol * std::max(1.0, std::fabs(x_hat[j]))
-                ? -1.0
-                : 1.0;
+        const std::size_t j = out.activeBounds[b];
+        const double side = boundSide(j);
         K(static_cast<Eigen::Index>(n + mA + me + b), static_cast<Eigen::Index>(j)) = side;
     }
 
@@ -410,11 +419,11 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
     const bool invertible = lu.isInvertible();
     Eigen::MatrixXd Y = lu.solve(R);
     if (invertible) {
-        out.condition_number = 1.0 / lu.rcond();
+        out.conditionNumber = 1.0 / lu.rcond();
     } else {
         out.pseudo_inverse = true;
         out.rank = lu.rank();
-        out.condition_number = std::numeric_limits<double>::max();
+        out.conditionNumber = std::numeric_limits<double>::max();
     }
 
     // ── Split the solution
@@ -440,7 +449,7 @@ void iftKkt(const F2& f2, const G2& g2, const H2& h2, const Bounds& bounds,
 }
 
 /**
- * @brief Solve + IFT in one call (docs §4.11 interface sketch)
+ * @brief Solve + IFT in one call
  *
  * Runs LBFGS<var> (unconstrained) or SLSQP<var> (constrained), which
  * exports the final multipliers into `state`, then computes dp/dm (and
@@ -538,6 +547,10 @@ minimizeDifferential(const F2& f2, const G2& g2, const H2& h2, const Bounds& bou
  * exactly (d scalar / d p_hat) . (dp/dm). The internal solve and IFT runs
  * in nested scopes; only the callback graph stays on the caller's tape.
  *
+ * `IftResult::regularized`/`ridgeUsed`/`conditionNumber` are diagnostics
+ * only: a ridge-regularized `dp/dm` is a documented distortion. Pass
+ * `ift_out` to inspect them.
+ *
  * @param[in]  m_var data leaves (already on the caller's tape)
  * @param[in]  x0    starting point (double)
  * @param[out] p_hat callback vars for the optimum
@@ -570,17 +583,23 @@ minimizeDifferentialVar(const F2& f2, const G2& g2, const H2& h2, const Bounds& 
     }
 
     p_hat.resize(n);
+    // Arena-allocated captures: callback_vari destructors never run, so
+    // std::vector captures would leak their heap blocks.
+    stan::math::vari** marketVaris =
+        stan::math::ChainableStack::instance_->memalloc_.alloc_array<stan::math::vari*>(M);
+    for (std::size_t j = 0; j < M; ++j) {
+        marketVaris[j] = m_var[j].vi_;
+    }
     for (std::size_t k = 0; k < n; ++k) {
-        std::vector<double> row(M);
+        double* row = stan::math::ChainableStack::instance_->memalloc_.alloc_array<double>(M);
         for (std::size_t j = 0; j < M; ++j) {
             row[j] = dp_dm[k * M + j];
         }
-        std::vector<stan::math::var> m_cap = m_var; // copies share the varis
         p_hat[k] = stan::math::make_callback_var(
-            x[k], [m_cap = std::move(m_cap), row = std::move(row)](auto& vi) mutable {
+            x[k], [marketVaris, row, M](auto& vi) {
                 const double adj = vi.adj();
-                for (std::size_t j = 0; j < m_cap.size(); ++j) {
-                    m_cap[j].adj() += adj * row[j];
+                for (std::size_t j = 0; j < M; ++j) {
+                    marketVaris[j]->adj_ += adj * row[j];
                 }
             });
     }

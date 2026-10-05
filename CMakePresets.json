@@ -9,25 +9,29 @@
     {
       "name": "debug",
       "displayName": "Debug",
-      "description": "Unoptimized build with symbols (default); benchmarks off",
+      "description": "Debugger-first: -O0 -g3, frame pointers, asserts on, tests unoptimized; benchmarks off",
       "binaryDir": "${sourceDir}/build/debug",
       "environment": {
         "CMAKE_BUILD_PARALLEL_LEVEL": "2"
       },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "QUANTAPE_BUILD_BENCHMARKS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {
       "name": "release",
       "displayName": "Release",
-      "description": "Optimized build (-O3 -march=native -DNDEBUG); benchmarks on",
+      "description": "Optimized build (-O3 -march=native -DNDEBUG, tests at -O2); benchmarks on",
       "binaryDir": "${sourceDir}/build/release",
       "environment": {
         "CMAKE_BUILD_PARALLEL_LEVEL": "2"
       },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "QUANTAPE_BUILD_BENCHMARKS": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ],

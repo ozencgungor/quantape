@@ -111,7 +111,7 @@ struct StopCriteria {
 /// Running state of one minimize() call
 struct OptimizerState {
     std::vector<double> x;                         ///< current iterate (returned to the caller)
-    std::vector<double> grad;                      ///< current gradient (empty for double-only)
+    std::vector<double> grad;                      ///< Gradient vector (`J^T r`) for gradient-based solvers
     double f = std::numeric_limits<double>::max(); ///< current objective value
     std::size_t evals = 0;                         ///< objective evaluations
     std::size_t grad_evals = 0;                    ///< gradient evaluations

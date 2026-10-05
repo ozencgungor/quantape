@@ -49,13 +49,94 @@ foreach(_test test_date test_daycount test_calendar test_schedule)
     quantape_register_test(${_test})
 endforeach()
 
+# --- Curves ------------------------------------------------------------------
+add_executable(test_curve test_curve.cpp)
+target_link_libraries(test_curve PRIVATE quantape)
+quantape_set_warnings(test_curve)
+quantape_register_test(test_curve)
+
+add_executable(test_curve_config test_curve_config.cpp)
+target_link_libraries(test_curve_config PRIVATE quantape)
+target_compile_definitions(test_curve_config PRIVATE
+    CURVE_CONFIG_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/data/usd_ois_config.json")
+quantape_set_warnings(test_curve_config)
+quantape_register_test(test_curve_config)
+
+add_executable(test_curve_risk test_curve_risk.cpp)
+target_link_libraries(test_curve_risk PRIVATE quantape)
+quantape_set_warnings(test_curve_risk)
+quantape_register_test(test_curve_risk)
+
+add_executable(test_xccy test_xccy.cpp)
+target_link_libraries(test_xccy PRIVATE quantape)
+quantape_set_warnings(test_xccy)
+quantape_register_test(test_xccy)
+
+add_executable(test_instrument_options test_instrument_options.cpp)
+target_link_libraries(test_instrument_options PRIVATE quantape)
+quantape_set_warnings(test_instrument_options)
+quantape_register_test(test_instrument_options)
+
+add_executable(test_forecast_pillars test_forecast_pillars.cpp)
+target_link_libraries(test_forecast_pillars PRIVATE quantape)
+quantape_set_warnings(test_forecast_pillars)
+quantape_register_test(test_forecast_pillars)
+
+add_executable(test_synthetic_quotes test_synthetic_quotes.cpp)
+target_link_libraries(test_synthetic_quotes PRIVATE quantape)
+quantape_set_warnings(test_synthetic_quotes)
+quantape_register_test(test_synthetic_quotes)
+
+add_executable(test_futures test_futures.cpp)
+target_link_libraries(test_futures PRIVATE quantape)
+quantape_set_warnings(test_futures)
+quantape_register_test(test_futures)
+
+add_executable(test_bootstrap_validation test_bootstrap_validation.cpp)
+target_link_libraries(test_bootstrap_validation PRIVATE quantape)
+quantape_set_warnings(test_bootstrap_validation)
+quantape_register_test(test_bootstrap_validation)
+
+add_executable(test_curve_risk_report test_curve_risk_report.cpp)
+target_link_libraries(test_curve_risk_report PRIVATE quantape)
+quantape_set_warnings(test_curve_risk_report)
+quantape_register_test(test_curve_risk_report)
+
+add_executable(test_hull_white_convexity test_hull_white_convexity.cpp)
+target_link_libraries(test_hull_white_convexity PRIVATE quantape)
+quantape_enable_stan(test_hull_white_convexity)
+quantape_set_warnings(test_hull_white_convexity)
+quantape_register_test(test_hull_white_convexity)
+
+# Double-only curve replication: shares the data/builder/dump fixture header
+# with the AD test below and never instantiates Stan scalars.
+add_executable(test_paper_eur_curves test_paper_eur_curves.cpp)
+target_link_libraries(test_paper_eur_curves PRIVATE quantape)
+quantape_set_warnings(test_paper_eur_curves)
+quantape_register_test(test_paper_eur_curves)
+
+# Curve evaluation is AD-templated; this target instantiates Stan scalars and
+# gates solver-derived bootstrap sensitivities. It is the sole writer of the
+# portfolio risk table, so no test ordering or parallelism can race on it.
+add_executable(test_curve_ad test_curve_ad.cpp)
+target_link_libraries(test_curve_ad PRIVATE quantape)
+quantape_enable_stan(test_curve_ad)
+quantape_set_warnings(test_curve_ad)
+quantape_register_test(test_curve_ad)
+
 # --- Core library ------------------------------------------------------------
-foreach(_test test_math test_solvers test_interpolation test_markets)
+foreach(_test test_math test_solvers test_interpolation test_markets test_math_utils)
     add_executable(${_test} ${_test}.cpp)
     target_link_libraries(${_test} PRIVATE quantape)
     quantape_set_warnings(${_test})
     quantape_register_test(${_test})
 endforeach()
+
+# test_math_utils instantiates Stan scalars (var / `fvar<var>`) for the
+# interpolation and tridiagonal-solver paths; test_markets instantiates
+# `fvar<var>` for the survival-probability curve.
+quantape_enable_stan(test_math_utils)
+quantape_enable_stan(test_markets)
 
 # --- AD and Stan-backed ------------------------------------------------------
 add_executable(test_ad test_ad.cpp)
@@ -63,6 +144,12 @@ target_link_libraries(test_ad PRIVATE quantape)
 quantape_enable_stan(test_ad)
 quantape_set_warnings(test_ad)
 quantape_register_test(test_ad)
+
+add_executable(test_levenberg_marquardt_ad test_levenberg_marquardt_ad.cpp)
+target_link_libraries(test_levenberg_marquardt_ad PRIVATE quantape)
+quantape_enable_stan(test_levenberg_marquardt_ad)
+quantape_set_warnings(test_levenberg_marquardt_ad)
+quantape_register_test(test_levenberg_marquardt_ad)
 
 add_executable(test_black76 test_black76.cpp)
 target_link_libraries(test_black76 PRIVATE quantape)

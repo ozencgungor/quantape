@@ -1,8 +1,7 @@
 #ifndef EQDDATA_H
 #define EQDDATA_H
 
-#include "quantape/markets/Curves/IRCurve.h"
-#include "quantape/markets/Curves/YieldCurve.h"
+#include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Descriptors/EQDDescriptor.h"
 
 #include <memory>
@@ -28,12 +27,12 @@ public:
      * @param discountCurve Discount curve for present value calculations
      * @param descriptor Equity metadata
      */
-    EQDData(DoubleT spot, const YieldCurve<DoubleT>& dividendCurve,
-            const IRCurve<DoubleT>& discountCurve,
+    EQDData(DoubleT spot, const DiscountCurve<DoubleT>& dividendCurve,
+            const DiscountCurve<DoubleT>& discountCurve,
             const EQDDescriptor& descriptor = EQDDescriptor())
         : m_spot(spot), m_descriptor(descriptor),
-          m_dividendCurve(std::make_unique<YieldCurve<DoubleT>>(dividendCurve)),
-          m_discountCurve(std::make_unique<IRCurve<DoubleT>>(discountCurve)) {
+          m_dividendCurve(std::make_unique<DiscountCurve<DoubleT>>(dividendCurve)),
+          m_discountCurve(std::make_unique<DiscountCurve<DoubleT>>(discountCurve)) {
         // Validate spot is positive
         if (value_impl(spot) <= 0.0) {
             throw std::runtime_error("EQDData: spot price must be positive");
@@ -124,18 +123,18 @@ public:
     /**
      * @brief Get dividend curve
      */
-    const YieldCurve<DoubleT>& dividendCurve() const { return *m_dividendCurve; }
+    const DiscountCurve<DoubleT>& dividendCurve() const { return *m_dividendCurve; }
 
     /**
      * @brief Get discount curve
      */
-    const IRCurve<DoubleT>& discountCurve() const { return *m_discountCurve; }
+    const DiscountCurve<DoubleT>& discountCurve() const { return *m_discountCurve; }
 
 private:
     DoubleT m_spot;
     EQDDescriptor m_descriptor;
-    std::unique_ptr<YieldCurve<DoubleT>> m_dividendCurve;
-    std::unique_ptr<IRCurve<DoubleT>> m_discountCurve;
+    std::unique_ptr<DiscountCurve<DoubleT>> m_dividendCurve;
+    std::unique_ptr<DiscountCurve<DoubleT>> m_discountCurve;
 
     /**
      * @brief Extract value for validation (handles both double and AD types)
