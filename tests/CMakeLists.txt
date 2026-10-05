@@ -138,6 +138,12 @@ endforeach()
 quantape_enable_stan(test_math_utils)
 quantape_enable_stan(test_markets)
 
+# FX quote records and settlement helpers (double-based, no Stan scalars).
+add_executable(test_fx_quote test_fx_quote.cpp)
+target_link_libraries(test_fx_quote PRIVATE quantape)
+quantape_set_warnings(test_fx_quote)
+quantape_register_test(test_fx_quote)
+
 # --- AD and Stan-backed ------------------------------------------------------
 add_executable(test_ad test_ad.cpp)
 target_link_libraries(test_ad PRIVATE quantape)

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -21,12 +22,13 @@
 namespace quantape::markets {
 /**
  * @file XccyBasisBuilder.h
- * @brief Const-notional cross-currency basis bootstrap
+ * @brief Cross-currency basis bootstrap with constant or resetting notionals
  *
  * Bootstraps the *foreign discount curve collateralized in the domestic
- * currency* from const-notional cross-currency basis swap quotes, given the
- * domestic discount and both forecast curves. Both legs exchange notional at
- * start and maturity and the FX spot cancels, so the par condition is
+ * currency* from cross-currency basis swap quotes, given the domestic discount
+ * and both forecast curves. With constant notionals both legs exchange
+ * notional at start and maturity and the FX spot cancels, so the par condition
+ * is
  *
  *   `sum_f tau D_f (f_f + b) + (D_f(0) - D_f(T)) = sum_d tau D_d f_d + (D_d(0) - D_d(T))`
  *
@@ -34,6 +36,19 @@ namespace quantape::markets {
  * foreign zero node (foreign discounts at intermediate coupon dates are
  * interpolated, so arbitrary schedules are supported). Both legs support
  * stubs, payment lags and per-leg business-day conventions.
+ *
+ * In `XccyNotionalMode::MtM` the selected leg's notional resets at every
+ * accrual start to the other leg's forward-implied level. Netted against the
+ * periodic notional exchanges, its cashflows telescope to
+ *
+ *   `sum_k adjN_k (D_own(t_k) (1 + f_k tau_k) - D_own(t_{k-1}))`,
+ *   `adjN_k = D_other(t_{k-1}) / D_own(t_{k-1})`,
+ *
+ * where `D_own`/`D_other` are the resetting and opposite legs' discount
+ * curves, `f_k` the resetting leg's simple forward and `tau_k` its accrual.
+ * The reset and the telescoping discounts are read on accrual boundaries; the
+ * non-resetting leg keeps the constant-notional value above and the spread
+ * annuity keeps its `tau * D(pay)` definition on both legs.
  */
 
 /// Solved node times of a forecast provider: `DiscountCurve` exposes `times()`
@@ -55,11 +70,26 @@ concept XccyForecastCurve = requires(const T& curve, double t) {
     curve.zeroDayCounter();
 } && XccyNodeGrid<T>;
 
-/// Const-notional xccy basis pillar with both leg conventions.
+/// Notional convention of the cross-currency basis legs.
+enum class XccyNotionalMode : std::uint8_t {
+    Const, ///< Both legs keep their inception notional until maturity
+    MtM    ///< The selected leg's notional resets at every accrual start
+};
+
+/// Cross-currency basis pillar with both leg conventions and a constant or
+/// resetting notional.
 struct XccyPillar {
     datetime::Date maturity;
     double spread = 0.0;            ///< Basis spread (decimal)
     bool spreadOnForeignLeg = true; ///< Which leg carries the quoted basis
+    /// Notional convention. Analytic stack risk rows cover `Const` pillars
+    /// only; resetting pillars need reset-aware rows.
+    XccyNotionalMode notional = XccyNotionalMode::Const;
+    /// `MtM` only: which leg's notional resets (the domestic leg when false).
+    /// The reset notional at an accrual start is the opposite leg's
+    /// forward-implied level `D_other(tStart)/D_own(tStart)`. Ignored for
+    /// `XccyNotionalMode::Const`.
+    bool resetForeignLeg = true;
     datetime::Period foreignTenor{3, datetime::TimeUnit::Months};
     datetime::Calendar foreignCalendar{};
     datetime::DayCounter foreignDayCounter{datetime::DayCount::Actual360};
@@ -74,8 +104,9 @@ struct XccyPillar {
         datetime::BusinessDayConvention::ModifiedFollowing;
 };
 
-/// Model-implied const-notional basis spread (foreign leg spread) against a
-/// foreign discount curve, with both forecast curves given.
+/// Model-implied basis spread (foreign leg spread) against a foreign discount
+/// curve, with both forecast curves given. Handles constant and resetting
+/// notionals; the spread annuity is always `sum tau D(pay)` on the quoted leg.
 template <XccyForecastCurve ForeignForecastT, XccyForecastCurve DomesticForecastT>
 double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
                               const ForeignForecastT& foreignForecast,
@@ -92,13 +123,18 @@ double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
         pillar.domesticBusinessDayConvention, datetime::DateGeneration::Forward, false,
         datetime::BusinessDayConvention::Unadjusted);
 
+    const bool foreignResets = pillar.notional == XccyNotionalMode::MtM && pillar.resetForeignLeg;
+    const bool domesticResets = pillar.notional == XccyNotionalMode::MtM && !pillar.resetForeignLeg;
+
     const auto legValue = [&](const datetime::Schedule& schedule,
                               const datetime::DayCounter& accrualDayCounter,
                               const DiscountCurve<double>& discount, const auto& forecast,
+                              const DiscountCurve<double>& otherDiscount, bool resets,
                               int paymentLag, datetime::BusinessDayConvention businessDayConvention,
                               double& annuity) {
         const std::vector<datetime::Date>& dates = schedule.dates();
         double coupons = 0.0;
+        double resetValue = 0.0;
         annuity = 0.0;
         for (std::size_t k = 1; k < dates.size(); ++k) {
             const double tau = datetime::yearFraction(dates[k - 1], dates[k], accrualDayCounter);
@@ -117,6 +153,15 @@ double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
                 (forecast.discount(tPrevious) / forecast.discount(tAccrual) - 1.0) / tau;
             coupons += tau * df * forward;
             annuity += tau * df;
+            if (resets) {
+                const double ownStart = discount.discount(tPrevious);
+                const double adjustment = otherDiscount.discount(tPrevious) / ownStart;
+                resetValue +=
+                    adjustment * (discount.discount(tAccrual) * (1.0 + forward * tau) - ownStart);
+            }
+        }
+        if (resets) {
+            return resetValue;
         }
         const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
         const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
@@ -127,11 +172,13 @@ double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
     double foreignAnnuity = 0.0;
     const double foreignValue =
         legValue(foreignSchedule, pillar.foreignDayCounter, foreignDiscount, foreignForecast,
-                 pillar.foreignPaymentLag, pillar.foreignBusinessDayConvention, foreignAnnuity);
+                 domesticDiscount, foreignResets, pillar.foreignPaymentLag,
+                 pillar.foreignBusinessDayConvention, foreignAnnuity);
     double domesticAnnuity = 0.0;
     const double domesticValue =
         legValue(domesticSchedule, pillar.domesticDayCounter, domesticDiscount, domesticForecast,
-                 pillar.domesticPaymentLag, pillar.domesticBusinessDayConvention, domesticAnnuity);
+                 foreignDiscount, domesticResets, pillar.domesticPaymentLag,
+                 pillar.domesticBusinessDayConvention, domesticAnnuity);
     if (!(foreignAnnuity > 0.0) || !(domesticAnnuity > 0.0)) {
         throw std::invalid_argument("impliedXccyBasisSpread: non-positive annuity");
     }
@@ -142,8 +189,8 @@ double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
 }
 
 /// Sequential exact-fit bootstrap of the foreign discount curve (USD-collateral)
-/// from const-notional xccy basis pillars; domestic curves and the foreign
-/// forecast curve stay frozen.
+/// from constant- or resetting-notional xccy basis pillars; domestic curves
+/// and the foreign forecast curve stay frozen.
 template <XccyForecastCurve ForeignForecastT, XccyForecastCurve DomesticForecastT>
 DiscountCurve<double> bootstrapXccyDiscountCurve(
     const DiscountCurve<double>& domesticDiscount, const DomesticForecastT& domesticForecast,
@@ -270,7 +317,9 @@ struct XccyCoupledResult {
 /// curve discounting on the current discount curve, then the discount curve
 /// forecasting on the new spread curve; iterate until the max move of both
 /// curves (measured on discount factors at the pillar maturities) is below the
-/// tolerance.
+/// tolerance. Xccy pillars may carry either notional convention; the
+/// resetting-notional decomposition enters only through the discount-curve
+/// residual.
 template <XccyForecastCurve DomesticForecastT>
 XccyCoupledResult bootstrapXccyCoupled(const DiscountCurve<double>& domesticDiscount,
                                        const DomesticForecastT& domesticForecast,

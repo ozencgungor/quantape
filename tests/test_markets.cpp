@@ -188,12 +188,21 @@ void testFXRate() {
     DiscountCurve<double> usdCurve(tenors, usdRates);
     DiscountCurve<double> eurCurve(tenors, eurRates);
 
-    double spot = 1.10; // USDEUR spot
-    FXDescriptor fxDesc("USD", "EUR", "2024-01-01");
-    FXRate<double> fx(spot, usdCurve, eurCurve, fxDesc);
+    double spot = 1.10; // EURUSD spot: USD per 1 EUR
+    FXDescriptor fxDesc("EUR", "USD", "2024-01-01");
+    FXRate<double> fx(spot, eurCurve, usdCurve, fxDesc);
+
+    CHECK(fxDesc.pair() == "EURUSD");
+    CHECK(fxDesc.baseCcy == "EUR");
+    CHECK(fxDesc.quoteCcy == "USD");
+    CHECK(fxDesc.hasKnownCurrencies());
 
     QTA_LOG_INFO("test", "FX Pair: {}", fxDesc.pair());
     QTA_LOG_INFO("test", "Spot: {}", quantape::util::num(fx.spot()));
+
+    // CIP: F(1y) = S * DF_base / DF_quote = 1.10 * exp(-0.008 + 0.015).
+    quantape::util::checkClose("EURUSD 1y forward", fx.forward(1.0),
+                               spot * std::exp(-0.008 + 0.015), 1e-12);
 
     QTA_LOG_INFO("test", "Forward Rates (covered IRP):");
     for (double t : {0.5, 1.0, 2.0, 5.0}) {

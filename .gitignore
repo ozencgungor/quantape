@@ -66,7 +66,7 @@ joe-kuo-refined-*.txt
 joe-kuo-65536-*.txt
 
 # collected market data
-data/
+/data/
 
 # python venv
 .venv/

@@ -1,4 +1,5 @@
 #include "quantape/log/Log.h"
+#include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/StackRisk.h"
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
@@ -1155,6 +1156,236 @@ void testXccySharedForecastSplit() {
                  childAForward, childADomestic, childBForward, childBDomestic);
 }
 
+/// Three-coupon resetting-notional leg with distinct curves: with the
+/// resetting leg's forecast equal to its own discount curve the telescoped
+/// value `sum_k adjN_k (D(t_k)(1 + f_k tau_k) - D(t_{k-1}))` is zero, so the
+/// implied spread reduces to the opposite constant-notional leg value over the
+/// quoted leg's annuity. Golden values from an independent closed-form
+/// reference.
+void testXccyMtMTelescoping() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const std::vector<datetime::Date> dates{reference.plusMonths(3), reference.plusMonths(6),
+                                            reference.plusMonths(9)};
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<double> zeros;
+        for (const datetime::Date& date : dates) {
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.030, 0.0006);
+    const DiscountCurve<double> foreignForecast = buildCurve(0.025, 0.0008);
+
+    const auto makePillar = [&](bool resetForeign, bool spreadOnForeign) {
+        markets::XccyPillar pillar;
+        pillar.maturity = dates.back();
+        pillar.foreignCalendar = calendar;
+        pillar.domesticCalendar = calendar;
+        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.notional = markets::XccyNotionalMode::MtM;
+        pillar.resetForeignLeg = resetForeign;
+        pillar.spreadOnForeignLeg = spreadOnForeign;
+        return pillar;
+    };
+
+    // Foreign leg resets and forecasts on itself.
+    for (const bool spreadOnForeign : {true, false}) {
+        const double expected = spreadOnForeign ? 0.08254738125917123 : -0.08295639871603087;
+        util::checkClose("mtm telescoping foreign reset",
+                         markets::impliedXccyBasisSpread(
+                             foreignTarget, foreignTarget, domesticDiscount, domesticForecast,
+                             makePillar(true, spreadOnForeign), reference, zeroDc),
+                         expected, 1e-12);
+    }
+    // Domestic leg resets and forecasts on itself.
+    for (const bool spreadOnForeign : {true, false}) {
+        const double expected = spreadOnForeign ? -0.055470884346166476 : 0.055745739340945656;
+        util::checkClose("mtm telescoping domestic reset",
+                         markets::impliedXccyBasisSpread(
+                             foreignTarget, foreignForecast, domesticDiscount, domesticDiscount,
+                             makePillar(false, spreadOnForeign), reference, zeroDc),
+                         expected, 1e-12);
+    }
+}
+
+/// Golden spreads of a three-coupon resetting-notional pillar with distinct
+/// domestic/foreign curves, covering both reset-leg choices and both
+/// `spreadOnForeignLeg` values. Values are produced by an independent
+/// reference implementation of the telescoped reset and constant-notional
+/// formulas.
+void testXccyMtMGoldenSpreads() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const std::vector<datetime::Date> dates{reference.plusMonths(3), reference.plusMonths(6),
+                                            reference.plusMonths(9)};
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<double> zeros;
+        for (const datetime::Date& date : dates) {
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.030, 0.0006);
+    const DiscountCurve<double> foreignForecast = buildCurve(0.025, 0.0008);
+
+    struct GoldenCase {
+        bool resetForeign;
+        bool spreadOnForeign;
+        double spread;
+    };
+    const std::vector<GoldenCase> cases{
+        {true, true, 0.08735367316126888},
+        {true, false, -0.087786505514019036},
+        {false, true, -0.052562454453813891},
+        {false, false, 0.052822898348205888},
+    };
+    for (const GoldenCase& golden : cases) {
+        markets::XccyPillar pillar;
+        pillar.maturity = dates.back();
+        pillar.foreignCalendar = calendar;
+        pillar.domesticCalendar = calendar;
+        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.notional = markets::XccyNotionalMode::MtM;
+        pillar.resetForeignLeg = golden.resetForeign;
+        pillar.spreadOnForeignLeg = golden.spreadOnForeign;
+        const double spread =
+            markets::impliedXccyBasisSpread(foreignTarget, foreignForecast, domesticDiscount,
+                                            domesticForecast, pillar, reference, zeroDc);
+        util::checkClose("mtm golden spread", spread, golden.spread, 1e-12);
+    }
+}
+
+/// A bootstrap ladder mixing one resetting-notional and one
+/// constant-notional pillar recovers the synthetic foreign curve at both nodes
+/// and reprices both quotes.
+void testXccyMixedNotionalBootstrap() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope, int maxYears) {
+        std::vector<datetime::Date> pillarDates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= maxYears; ++years) {
+            pillarDates.push_back(reference.plusYears(years));
+            zeros.push_back(base +
+                            slope * datetime::yearFraction(reference, pillarDates.back(), zeroDc));
+        }
+        return DiscountCurve<double>(reference, pillarDates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005, 2);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004, 2);
+    const DiscountCurve<double> foreignForecast = buildCurve(0.025, 0.0008, 2);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0006, 2);
+
+    std::vector<markets::XccyPillar> pillars;
+    for (int years = 1; years <= 2; ++years) {
+        markets::XccyPillar pillar;
+        pillar.maturity = reference.plusYears(years);
+        pillar.foreignCalendar = calendar;
+        pillar.domesticCalendar = calendar;
+        pillar.foreignTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        pillar.domesticTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        pillar.notional =
+            years == 1 ? markets::XccyNotionalMode::MtM : markets::XccyNotionalMode::Const;
+        pillar.spread =
+            markets::impliedXccyBasisSpread(foreignTarget, foreignForecast, domesticDiscount,
+                                            domesticForecast, pillar, reference, zeroDc);
+        pillars.push_back(pillar);
+    }
+
+    const DiscountCurve<double> curve = markets::bootstrapXccyDiscountCurve(
+        domesticDiscount, domesticForecast, foreignForecast, reference, zeroDc,
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
+    for (std::size_t i = 0; i < pillars.size(); ++i) {
+        util::checkClose("mixed notionals recovered zero", curve.zeros()[i + 1],
+                         foreignTarget.zeros()[i + 1], 1e-10);
+        util::checkClose("mixed notionals reprice",
+                         markets::impliedXccyBasisSpread(curve, foreignForecast, domesticDiscount,
+                                                         domesticForecast, pillars[i], reference,
+                                                         zeroDc),
+                         pillars[i].spread, 1e-10);
+    }
+}
+
+/// Coupled bootstrap with resetting-notional xccy pillars: the reset enters
+/// only the discount-curve residual, so the fixed point must still recover the
+/// synthetic discount and spread curves.
+void testXccyCoupledMtM() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope, int maxYears) {
+        std::vector<datetime::Date> pillarDates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= maxYears; ++years) {
+            const datetime::Date date = reference.plusYears(years);
+            pillarDates.push_back(date);
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, pillarDates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005, 5);
+    const DiscountCurve<double> domesticForecast = domesticDiscount;
+    const DiscountCurve<double> xccyTarget = buildCurve(0.030, 0.0005, 3);
+    auto foreignBase = std::make_shared<DiscountCurve<double>>(buildCurve(0.025, 0.0005, 3));
+    const std::vector<double> spreadTimes{0.0, 1.0, 2.0, 3.0};
+    const std::vector<double> spreadNodes{0.0, 0.0010, 0.0013, 0.0016};
+    const markets::SpreadCurve<double> spreadTarget(foreignBase, spreadTimes, spreadNodes,
+                                                    InterpolationScheme::Linear);
+
+    std::vector<markets::XccyCoupledPillar> pillars;
+    for (int years = 1; years <= 3; ++years) {
+        const datetime::Date maturity = reference.plusYears(years);
+        markets::XccyCoupledPillar coupled;
+        coupled.xccy.maturity = maturity;
+        coupled.xccy.foreignCalendar = calendar;
+        coupled.xccy.domesticCalendar = calendar;
+        coupled.xccy.notional = markets::XccyNotionalMode::MtM;
+        coupled.xccy.spread =
+            markets::impliedXccyBasisSpread(xccyTarget, spreadTarget, domesticDiscount,
+                                            domesticForecast, coupled.xccy, reference, zeroDc);
+        coupled.basis.maturity = maturity;
+        coupled.basis.calendar = calendar;
+        coupled.basis.spread = markets::impliedBasisSpread(spreadTarget, coupled.basis, reference,
+                                                           zeroDc, &xccyTarget);
+        pillars.push_back(coupled);
+    }
+
+    const markets::XccyCoupledResult coupled = markets::bootstrapXccyCoupled(
+        domesticDiscount, domesticForecast, foreignBase, reference, zeroDc,
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
+    CHECK(coupled.converged);
+    CHECK(!coupled.usedJointFallback);
+    for (std::size_t i = 0; i < pillars.size(); ++i) {
+        util::checkClose("coupled mtm xccy node", coupled.foreignDiscount.zeros()[i + 1],
+                         xccyTarget.zeros()[i + 1], 1e-9);
+        util::checkClose("coupled mtm xccy reprice",
+                         markets::impliedXccyBasisSpread(
+                             coupled.foreignDiscount, coupled.foreignSpread, domesticDiscount,
+                             domesticForecast, pillars[i].xccy, reference, zeroDc),
+                         pillars[i].xccy.spread, 1e-9);
+        util::checkClose("coupled mtm basis reprice",
+                         markets::impliedBasisSpread(coupled.foreignSpread, pillars[i].basis,
+                                                     reference, zeroDc, &coupled.foreignDiscount),
+                         pillars[i].basis.spread, 1e-9);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1166,6 +1397,10 @@ int main() {
     testXccyAnalyticRowsAgainstFiniteDifference();
     testXccyGammaFiniteDifference();
     testXccySharedForecastSplit();
+    testXccyMtMTelescoping();
+    testXccyMtMGoldenSpreads();
+    testXccyMixedNotionalBootstrap();
+    testXccyCoupledMtM();
     QTA_LOG_INFO("test", "test_xccy: ok");
     return 0;
 }
