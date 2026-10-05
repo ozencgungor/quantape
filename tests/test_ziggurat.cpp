@@ -3,7 +3,9 @@
  * @brief Tests for the Ziggurat normal RNG: table verification, statistical tests, benchmarks
  */
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/ZigguratNormal.h"
+#include "quantape/util/Check.h"
 
 #include <algorithm>
 #include <chrono>
@@ -13,9 +15,6 @@
 #include <numeric>
 #include <random>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -42,16 +41,15 @@ double timeNs(F&& fn, int reps = 1'000'000) {
 
 void testTableGeneration() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " ZIGGURAT TABLE VERIFICATION\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " ZIGGURAT TABLE VERIFICATION\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     auto tab = quantape::math::mc::generateZigguratTables();
     auto v = quantape::math::mc::verifyZigguratTables(tab);
 
     QTA_LOG_INFO("test", "  r (tail cutoff)      = {}", quantape::util::num(tab.r));
     QTA_LOG_INFO("test", "  v (layer area)       = {}", quantape::util::num(tab.A));
-    QTA_LOG_INFO("test", "  base width v/y[0]    = {}",
-                 quantape::util::num(tab.A / tab.y[0]));
+    QTA_LOG_INFO("test", "  base width v/y[0]    = {}", quantape::util::num(tab.A / tab.y[0]));
     QTA_LOG_INFO("test", "  x[0] = r             = {}", quantape::util::num(tab.x[0]));
     QTA_LOG_INFO("test", "  x[1]                 = {}", quantape::util::num(tab.x[1]));
     QTA_LOG_INFO("test", "  x[N-2] = x[254]      = {}", quantape::util::num(tab.x[254]));
@@ -63,13 +61,11 @@ void testTableGeneration() {
                  quantape::util::num(tab.y[255]));
 
     QTA_LOG_INFO("test", "  Verification:");
-    QTA_LOG_INFO("test", "    max area rel error = {}",
-                 quantape::util::num(v.max_area_error));
+    QTA_LOG_INFO("test", "    max area rel error = {}", quantape::util::num(v.max_area_error));
     QTA_LOG_INFO("test", "    closure error      = {}  (|y[N] - 1|)",
                  quantape::util::num(v.closure_error));
     QTA_LOG_INFO("test", "    max f(x) error     = {}", quantape::util::num(v.max_f_error));
-    QTA_LOG_INFO("test", "    max f^{{-1}} error   = {}",
-                 quantape::util::num(v.max_finv_error));
+    QTA_LOG_INFO("test", "    max f^{{-1}} error   = {}", quantape::util::num(v.max_finv_error));
     QTA_LOG_INFO("test", "    monotone x?        = {}", (v.monotone_x ? "YES" : "NO"));
     QTA_LOG_INFO("test", "    monotone y?        = {}", (v.monotone_y ? "YES" : "NO"));
 
@@ -102,8 +98,8 @@ void testTableGeneration() {
 
 void testStatistics() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " STATISTICAL TESTS  (N = 10,000,000)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " STATISTICAL TESTS  (N = 10,000,000)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     constexpr int N = 10'000'000;
     quantape::math::mc::ZigguratNormal zig(12345);
@@ -174,8 +170,8 @@ void testStatistics() {
 
 void testTails() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " TAIL DISTRIBUTION TEST  (N = 50,000,000)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " TAIL DISTRIBUTION TEST  (N = 50,000,000)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     constexpr long N = 50'000'000;
     quantape::math::mc::ZigguratNormal zig(67890);
@@ -198,9 +194,9 @@ void testTails() {
         double expected_frac = std::erfc(thresholds[j] / std::sqrt(2.0));
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
-        QTA_LOG_INFO("test", "  {} sigma  {}   {}   {}",
-                     quantape::util::num(thresholds[j], 6), quantape::util::num(observed_frac, 6),
-                     quantape::util::num(expected_frac, 6), quantape::util::num(ratio, 6));
+        QTA_LOG_INFO("test", "  {} sigma  {}   {}   {}", quantape::util::num(thresholds[j], 6),
+                     quantape::util::num(observed_frac, 6), quantape::util::num(expected_frac, 6),
+                     quantape::util::num(ratio, 6));
     }
 }
 
@@ -210,8 +206,8 @@ void testTails() {
 
 void benchmark() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " BENCHMARK  (1,000,000 samples each)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " BENCHMARK  (1,000,000 samples each)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     quantape::math::mc::ZigguratNormal zig(42);
     std::mt19937_64 mt(42);
@@ -220,12 +216,10 @@ void benchmark() {
     double zig_ns = timeNs([&]() { return zig(); });
     double std_ns = timeNs([&]() { return std_normal(mt); });
 
-    QTA_LOG_INFO("test", "  Ziggurat              : {} ns/sample",
-                 quantape::util::num(zig_ns, 2));
+    QTA_LOG_INFO("test", "  Ziggurat              : {} ns/sample", quantape::util::num(zig_ns, 2));
     QTA_LOG_INFO("test", "  std::normal_distribution: {} ns/sample",
                  quantape::util::num(std_ns, 2));
-    QTA_LOG_INFO("test", "  Speedup               : {}x",
-                 quantape::util::num(std_ns / zig_ns, 2));
+    QTA_LOG_INFO("test", "  Speedup               : {}x", quantape::util::num(std_ns / zig_ns, 2));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

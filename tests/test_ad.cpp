@@ -8,10 +8,12 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
+#include "quantape/util/Check.h"
 
 #include <algorithm> // For std::copy
 #include <cmath>
@@ -19,9 +21,6 @@
 #include <iostream>
 #include <iterator> // For std::back_inserter
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using ADVariableT = stan::math::var;
 using namespace quantape::math;
@@ -39,8 +38,7 @@ void testLinearInterpolationAD() {
     ADVariableT x_eval = 1.5;
     ADVariableT y_interp = interp(x_eval);
 
-    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}",
-                 quantape::util::num(y_interp.val()));
+    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}", quantape::util::num(y_interp.val()));
     QTA_LOG_INFO("test", "Expected (linear): 2.5");
 
     // Test 2: Compute derivative with respect to x_eval
@@ -59,10 +57,8 @@ void testLinearInterpolationAD() {
     stan::math::grad(result.vi_);
 
     QTA_LOG_INFO("test", "Sensitivity to knot values:");
-    QTA_LOG_INFO("test", "  ∂result/∂y[1] = {} (expected: 0.5)",
-                 quantape::util::num(y2[1].adj()));
-    QTA_LOG_INFO("test", "  ∂result/∂y[2] = {} (expected: 0.5)",
-                 quantape::util::num(y2[2].adj()));
+    QTA_LOG_INFO("test", "  ∂result/∂y[1] = {} (expected: 0.5)", quantape::util::num(y2[1].adj()));
+    QTA_LOG_INFO("test", "  ∂result/∂y[2] = {} (expected: 0.5)", quantape::util::num(y2[2].adj()));
 }
 
 void testCubicSplineInterpolationAD() {
@@ -78,8 +74,7 @@ void testCubicSplineInterpolationAD() {
     ADVariableT x_eval = 1.5;
     ADVariableT y_interp = spline(x_eval);
 
-    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}",
-                 quantape::util::num(y_interp.val()));
+    QTA_LOG_INFO("test", "Interpolated value at x=1.5: {}", quantape::util::num(y_interp.val()));
     QTA_LOG_INFO("test", "Expected (x^2): 2.25");
     QTA_LOG_INFO("test", "Spline approximation error: {}",
                  quantape::util::num(std::abs(y_interp.val() - 2.25)));
@@ -87,11 +82,9 @@ void testCubicSplineInterpolationAD() {
     // Compute derivative
     stan::math::grad(y_interp.vi_);
     double dy_dx = x_eval.adj();
-    QTA_LOG_INFO("test", "Derivative d/dx at x=1.5 (via AD): {}",
-                 quantape::util::num(dy_dx));
+    QTA_LOG_INFO("test", "Derivative d/dx at x=1.5 (via AD): {}", quantape::util::num(dy_dx));
     QTA_LOG_INFO("test", "Expected (2*1.5): 3.0");
-    QTA_LOG_INFO("test", "Derivative error: {}",
-                 quantape::util::num(std::abs(dy_dx - 3.0)));
+    QTA_LOG_INFO("test", "Derivative error: {}", quantape::util::num(std::abs(dy_dx - 3.0)));
 
     stan::math::recover_memory();
 }
@@ -201,12 +194,12 @@ void testIntegrationAD() {
     double expected_integral = std::pow(2.0, 3) / 3.0;
     double expected_derivative = 2.0 * 2.0; // θ^2 at θ=2
 
-    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
-                 quantape::util::num(integral.val()), quantape::util::num(expected_integral));
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})", quantape::util::num(integral.val()),
+                 quantape::util::num(expected_integral));
 
     stan::math::grad(integral.vi_);
-    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})",
-                 quantape::util::num(theta.adj()), quantape::util::num(expected_derivative));
+    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})", quantape::util::num(theta.adj()),
+                 quantape::util::num(expected_derivative));
     QTA_LOG_INFO("test", "Error in derivative: {}",
                  quantape::util::num(std::abs(theta.adj() - expected_derivative)));
 
@@ -225,12 +218,12 @@ void testIntegrationAD() {
     double expected_integral2 = 3.0 / 3.0;
     double expected_deriv2 = 1.0 / 3.0;
 
-    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
-                 quantape::util::num(integral2.val()), quantape::util::num(expected_integral2));
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})", quantape::util::num(integral2.val()),
+                 quantape::util::num(expected_integral2));
 
     stan::math::grad(integral2.vi_);
-    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})",
-                 quantape::util::num(param.adj()), quantape::util::num(expected_deriv2));
+    QTA_LOG_INFO("test", "Derivative dI/dθ: {} (expected: {})", quantape::util::num(param.adj()),
+                 quantape::util::num(expected_deriv2));
     QTA_LOG_INFO("test", "Error in derivative: {}",
                  quantape::util::num(std::abs(param.adj() - expected_deriv2)));
     stan::math::recover_memory();
@@ -266,8 +259,8 @@ void testIntegrateInterpolatedFunctionAD() {
     double expected_deriv = std::exp(1.0); // d/db[exp(b)-1] = exp(b)
 
     QTA_LOG_INFO("test", "Integrating interpolated exp(x) from 0 to 1");
-    QTA_LOG_INFO("test", "Integral value: {} (expected: {})",
-                 quantape::util::num(integral.val()), quantape::util::num(expected_value));
+    QTA_LOG_INFO("test", "Integral value: {} (expected: {})", quantape::util::num(integral.val()),
+                 quantape::util::num(expected_value));
     QTA_LOG_INFO("test", "Error: {}",
                  quantape::util::num(std::abs(integral.val() - expected_value)));
 
@@ -281,15 +274,13 @@ void testIntegrateInterpolatedFunctionAD() {
     QTA_LOG_INFO("test", "Sensitivity to interpolation knot values:");
     QTA_LOG_INFO("test", "  ∂Integral/∂y_data[5] (at x=1.0): {}",
                  quantape::util::num(y_data[5].adj()));
-    QTA_LOG_INFO("test",
-                 "  (This shows how integral changes with knot value adjustments)");
+    QTA_LOG_INFO("test", "  (This shows how integral changes with knot value adjustments)");
     stan::math::recover_memory();
 }
 
 void testFinancialSensitivityExample() {
     QTA_LOG_INFO("test", "=== Financial Example: Price Sensitivity ===");
-    QTA_LOG_INFO("test",
-                 "Scenario: Discount curve interpolation and present value calculation");
+    QTA_LOG_INFO("test", "Scenario: Discount curve interpolation and present value calculation");
 
     // Discount factors at different maturities (time in years)
     std::vector<ADVariableT> maturities = {0.0, 0.5, 1.0, 2.0, 3.0, 5.0};
@@ -316,8 +307,7 @@ void testFinancialSensitivityExample() {
 
     QTA_LOG_INFO("test", "Price sensitivities to discount curve knots:");
     for (size_t i = 0; i < discount_factors.size(); ++i) {
-        QTA_LOG_INFO("test", "  ∂PV/∂DF[t={}] = {}",
-                     quantape::util::num(maturities[i].val()),
+        QTA_LOG_INFO("test", "  ∂PV/∂DF[t={}] = {}", quantape::util::num(maturities[i].val()),
                      quantape::util::num(discount_factors[i].adj()));
     }
     QTA_LOG_INFO("test",

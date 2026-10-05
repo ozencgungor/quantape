@@ -8,13 +8,12 @@
  * here uses real IMM dates and the Hull-White adjustment.
  */
 
+#include "quantape/datetime/Imm.h"
+#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/CurveConfig.h"
 #include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
-#include "quantape/datetime/Imm.h"
-
-#include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
 
 #include <cmath>
@@ -61,8 +60,8 @@ DiscountCurve<double> makeTarget(const std::vector<datetime::Date>& dates, doubl
         const double t = datetime::yearFraction(kReference, date, kZeroDc);
         zeros.push_back(base + slope * t);
     }
-    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros,
-                                 InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros, InterpolationSpace::LogDiscount,
+                                 InterpolationScheme::Linear);
 }
 
 std::vector<CurvePillar> futurePillars(const FutureStrip& strip, double convexity) {
@@ -88,13 +87,10 @@ void testHullWhiteAdjustment() {
     // Zero volatility and zero mean reversion handle their limits.
     util::checkClose("hw zero vol", markets::hullWhiteFuturesAdjustment(0.0, 0.05, 1.0, 0.25, 1.0),
                      0.0, 1e-18);
-    const double series =
-        markets::hullWhiteFuturesAdjustment(0.01, 0.0, 1.0, 0.25, 1.0);
-    const double nearlySeries =
-        markets::hullWhiteFuturesAdjustment(0.01, 1e-9, 1.0, 0.25, 1.0);
+    const double series = markets::hullWhiteFuturesAdjustment(0.01, 0.0, 1.0, 0.25, 1.0);
+    const double nearlySeries = markets::hullWhiteFuturesAdjustment(0.01, 1e-9, 1.0, 0.25, 1.0);
     util::checkClose("hw series continuity", nearlySeries, series, 1e-12);
-    const double seriesExponent =
-        0.01 * 0.01 * 0.25 * (0.5 * 1.0 * 1.0 + 1.0 * 0.25);
+    const double seriesExponent = 0.01 * 0.01 * 0.25 * (0.5 * 1.0 * 1.0 + 1.0 * 0.25);
     // (P1/P2) (exp(D) - 1) / accrual, evaluated with the same expm1 the helper uses
     const double expected = std::expm1(seriesExponent) / 0.25;
     util::checkClose("hw series value", series, expected, 1e-15);
@@ -130,9 +126,8 @@ void testImmFutureBootstrap() {
         pillar.calendar = datetime::Calendar::noHolidays();
         pillar.quote = markets::impliedQuote(pillar, kReference, target);
     }
-    const DiscountCurve<double> curve =
-        markets::bootstrapDiscountCurve(kReference, kZeroDc, InterpolationSpace::LogDiscount,
-                                        InterpolationScheme::Linear, pillars);
+    const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
         util::checkClose("future reprice", markets::impliedQuote(pillar, kReference, curve),
                          pillar.quote, 1e-9);
@@ -170,9 +165,9 @@ void testConvexityMovesForward() {
         pillar.calendar = datetime::Calendar::noHolidays();
         pillar.quote = markets::impliedQuote(pillar, kReference, target);
     }
-    const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        withConvexity);
+    const DiscountCurve<double> curve =
+        markets::bootstrapDiscountCurve(kReference, kZeroDc, InterpolationSpace::LogDiscount,
+                                        InterpolationScheme::Linear, withConvexity);
     for (std::size_t i = 0; i < strip.starts.size(); ++i) {
         const datetime::Date& start = strip.starts[i];
         const datetime::Date& end = strip.ends[i];
@@ -198,8 +193,7 @@ void testFutureRiskRowFiniteDifference() {
         pillar.quote = markets::impliedQuote(pillar, kReference, target);
     }
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     const CurvePillar& future = pillars[2];
     std::vector<double> row;
     CHECK(markets::pillarJacobianRow(future, kReference, curve, row));
@@ -278,15 +272,12 @@ void testCurveLevelConvexity() {
     const DiscountCurve<double> curve = markets::buildCurve(stack, spec);
 
     const markets::PillarSpec& futureSpec = spec.pillars.back();
-    const double t1 =
-        datetime::yearFraction(stack.asOf, futureSpec.start, spec.zeroDayCounter);
-    const double t2 =
-        datetime::yearFraction(stack.asOf, futureSpec.maturity, spec.zeroDayCounter);
-    const double accrual = datetime::yearFraction(futureSpec.start, futureSpec.maturity,
-                                                  futureSpec.quoteDayCounter);
+    const double t1 = datetime::yearFraction(stack.asOf, futureSpec.start, spec.zeroDayCounter);
+    const double t2 = datetime::yearFraction(stack.asOf, futureSpec.maturity, spec.zeroDayCounter);
+    const double accrual =
+        datetime::yearFraction(futureSpec.start, futureSpec.maturity, futureSpec.quoteDayCounter);
     const double ratio = curve.discount(t1) / curve.discount(t2);
-    const double adjustment =
-        markets::hullWhiteFuturesAdjustment(0.01, 0.05, t1, accrual, ratio);
+    const double adjustment = markets::hullWhiteFuturesAdjustment(0.01, 0.05, t1, accrual, ratio);
     const double forward = (ratio - 1.0) / accrual;
     util::checkClose("self-referential convexity", forward + adjustment, futureSpec.quote, 1e-9);
 
@@ -362,14 +353,12 @@ void testReferenceCurveConvexity() {
         datetime::yearFraction(stack.asOf, futureSpec.start, forecastSpec.zeroDayCounter);
     const double t2 =
         datetime::yearFraction(stack.asOf, futureSpec.maturity, forecastSpec.zeroDayCounter);
-    const double accrual = datetime::yearFraction(futureSpec.start, futureSpec.maturity,
-                                                  futureSpec.quoteDayCounter);
-    const double forward =
-        (forecast.discount(t1) / forecast.discount(t2) - 1.0) / accrual;
+    const double accrual =
+        datetime::yearFraction(futureSpec.start, futureSpec.maturity, futureSpec.quoteDayCounter);
+    const double forward = (forecast.discount(t1) / forecast.discount(t2) - 1.0) / accrual;
     const double referenceAdjustment = markets::hullWhiteFuturesAdjustment(
         0.01, 0.05, t1, accrual, discount.discount(t1) / discount.discount(t2));
-    util::checkClose("reference convexity", forward + referenceAdjustment, futureSpec.quote,
-                     1e-9);
+    util::checkClose("reference convexity", forward + referenceAdjustment, futureSpec.quote, 1e-9);
     // The EUR self-referential adjustment differs: the reference curve was used.
     const double selfAdjustment = markets::hullWhiteFuturesAdjustment(
         0.01, 0.05, t1, accrual, forecast.discount(t1) / forecast.discount(t2));
@@ -447,8 +436,7 @@ void testRfrFutureStyles() {
                      markets::impliedQuote(compounded, kReference, target),
                      markets::impliedQuote(simple, kReference, target), 1e-15);
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
         util::checkClose("rfr future reprice", markets::impliedQuote(pillar, kReference, curve),
                          pillar.quote, 1e-9);
@@ -486,8 +474,7 @@ void testAveragedRfrFuture() {
         pillar.quote = markets::impliedQuote(pillar, kReference, target);
     }
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
         util::checkClose("averaged future reprice",
                          markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
@@ -560,8 +547,7 @@ void testAveragedCompoundedFuture() {
         pillar.quote = markets::impliedQuote(pillar, kReference, target);
     }
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
         util::checkClose("compounded averaged reprice",
                          markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
@@ -577,9 +563,8 @@ void testAveragedCompoundedFuture() {
         minus[i] -= step;
         const DiscountCurve<double> bumpedPlus(curve.times(), plus, InterpolationSpace::LogDiscount,
                                                InterpolationScheme::Linear);
-        const DiscountCurve<double> bumpedMinus(curve.times(), minus,
-                                                InterpolationSpace::LogDiscount,
-                                                InterpolationScheme::Linear);
+        const DiscountCurve<double> bumpedMinus(
+            curve.times(), minus, InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
         const double fd = (markets::impliedQuote(averaged, kReference, bumpedPlus) -
                            markets::impliedQuote(averaged, kReference, bumpedMinus)) /
                           (2.0 * step);
@@ -655,10 +640,9 @@ void testAveragedWeekendFixings() {
     pillars.push_back(deposit);
     pillars.push_back(averaged);
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
-    util::checkClose("averaged weekend reprice",
-                     markets::impliedQuote(averaged, kReference, curve), averaged.quote, 1e-9);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
+    util::checkClose("averaged weekend reprice", markets::impliedQuote(averaged, kReference, curve),
+                     averaged.quote, 1e-9);
     const auto fixings = markets::businessDayFixings(weekends, start, maturity);
     CHECK(fixings.size() >= 20);
     CHECK(fixings.back() == maturity);
@@ -672,7 +656,7 @@ void testAveragedWeekendFixings() {
     }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     testHullWhiteAdjustment();

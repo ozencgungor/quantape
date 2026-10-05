@@ -1,5 +1,6 @@
 // test_logging.cpp — facade levels, file sink capture, runtime level changes
 #include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -7,9 +8,6 @@
 #include <fstream>
 #include <iterator>
 #include <string>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 int main() {
     namespace fs = std::filesystem;

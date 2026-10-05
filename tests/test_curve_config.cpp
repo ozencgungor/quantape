@@ -1,6 +1,5 @@
-#include "quantape/markets/Curves/CurveConfig.h"
-
 #include "quantape/log/Log.h"
+#include "quantape/markets/Curves/CurveConfig.h"
 #include "quantape/util/Check.h"
 
 #include <cmath>
@@ -83,10 +82,11 @@ void testValidation() {
     }
     CHECK(threw);
 
-    util::checkClose("day counter name", markets::dayCounterFromName("ACT/365F").yearFraction(
-                                             datetime::Date::parse("2026-01-01"),
-                                             datetime::Date::parse("2027-01-01")),
-                     1.0, 1e-12);
+    util::checkClose(
+        "day counter name",
+        markets::dayCounterFromName("ACT/365F")
+            .yearFraction(datetime::Date::parse("2026-01-01"), datetime::Date::parse("2027-01-01")),
+        1.0, 1e-12);
     CHECK(markets::curveRoleToName(markets::CurveRole::XccyBasis) == "XccyBasis");
 }
 
@@ -288,10 +288,8 @@ void testForecastCurveBootstrap() {
         markets::buildForecastCurve(stack, forecastSpec, parent, nullptr, {}, &filled);
     CHECK(forecast.parentPointer() == parent);
     CHECK(filled.size() == forecastSpec.forecastPillars.size());
-    CHECK(filled[2].irs.businessDayConvention ==
-          datetime::BusinessDayConvention::Following);
-    CHECK(filled[3].basis.businessDayConvention ==
-          datetime::BusinessDayConvention::Following);
+    CHECK(filled[2].irs.businessDayConvention == datetime::BusinessDayConvention::Following);
+    CHECK(filled[3].basis.businessDayConvention == datetime::BusinessDayConvention::Following);
     CHECK(filled[2].irs.floatTenor == datetime::Period(3, datetime::TimeUnit::Months));
     CHECK(filled[2].irs.fixedTenor == datetime::Period(1, datetime::TimeUnit::Years));
     CHECK(filled[2].irs.paymentLag == 2);
@@ -310,9 +308,8 @@ void testForecastCurveBootstrap() {
     };
     double worstResidual = 0.0;
     for (const markets::ForecastPillar& pillar : filled) {
-        const double implied =
-            markets::impliedForecastQuote(forecast, *parent, pillar, stack.asOf,
-                                          forecastSpec.zeroDayCounter);
+        const double implied = markets::impliedForecastQuote(forecast, *parent, pillar, stack.asOf,
+                                                             forecastSpec.zeroDayCounter);
         util::checkClose("forecast config reprice", implied, target(pillar), 1e-10);
         const double residual = std::abs(implied - target(pillar));
         if (residual > worstResidual) {
@@ -764,8 +761,7 @@ void testForecastFutureConfig() {
             }
         ]
     })";
-    const markets::CurveStackSpec missingStack =
-        markets::parseCurveStackSpec(missingAdjustment);
+    const markets::CurveStackSpec missingStack = markets::parseCurveStackSpec(missingAdjustment);
     const auto missingParent = std::make_shared<const markets::DiscountCurve<double>>(
         markets::buildCurve(missingStack, missingStack.curves[0]));
     bool threw = false;

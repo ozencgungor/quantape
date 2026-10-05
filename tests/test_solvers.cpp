@@ -1,12 +1,11 @@
+#include "quantape/log/Log.h"
 #include "quantape/math/NumericalMethods.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <stdexcept>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using namespace quantape::math;
 
@@ -106,15 +105,13 @@ void testBrentActuallyInterpolates() {
         solver.solve(counted, 1e-12, 0.5, 0.0, 1.0);
     }
 
-    QTA_LOG_INFO("test", "  cos(x)-x evaluation counts bisection={} brent={}",
-                 bisectionEvals, brentEvals);
+    QTA_LOG_INFO("test", "  cos(x)-x evaluation counts bisection={} brent={}", bisectionEvals,
+                 brentEvals);
     const bool ok = brentEvals * 2 <= bisectionEvals && brentEvals <= 20;
     if (ok) {
-        QTA_LOG_INFO("test",
-                     "  interpolation in use ok (brent must use < half the evals)");
+        QTA_LOG_INFO("test", "  interpolation in use ok (brent must use < half the evals)");
     } else {
-        QTA_LOG_ERROR("test",
-                      "  interpolation in use FAIL (brent must use < half the evals)");
+        QTA_LOG_ERROR("test", "  interpolation in use FAIL (brent must use < half the evals)");
         ++failures;
     }
 }

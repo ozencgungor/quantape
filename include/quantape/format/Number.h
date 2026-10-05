@@ -21,7 +21,9 @@ struct Num {
     int precision = -1;
 };
 
-inline Num num(double value, int precision = -1) { return Num{value, precision}; }
+inline Num num(double value, int precision = -1) {
+    return Num{value, precision};
+}
 
 /// Writes `value` into [out, out + size). Returns a pointer past the last
 /// character written; on buffer exhaustion returns `out` with `*out = '\0'`.

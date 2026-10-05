@@ -18,6 +18,7 @@
 // configured, skippable otherwise.
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/SobolGenerator.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/Gradients.h"
@@ -28,6 +29,7 @@
 #include "quantape/mc/SobolSource.h"
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -39,9 +41,6 @@
 #include <memory>
 #include <random>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -60,8 +59,6 @@ static_assert(quantape::mc::RandomSource<SobolSource>);
 static_assert(quantape::mc::UniformRandomSource<SobolSource>);
 
 namespace {
-
-
 
 // ── A valid (not quality-optimised) direction-number fixture ──
 
@@ -190,8 +187,7 @@ void testSourceContract() {
     Eigen::MatrixXd block2;
     shifted.fill(3, 5, 7, block2);
     CHECK(!(block.array() == block2.array()).all());
-    QTA_LOG_INFO("test",
-                 "  [ok] Sobol source contract (blocks, uniforms, replica shifts)");
+    QTA_LOG_INFO("test", "  [ok] Sobol source contract (blocks, uniforms, replica shifts)");
 }
 
 // ── Engine invariants with QMC ──

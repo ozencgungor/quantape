@@ -55,8 +55,7 @@ auto hullWhiteFuturesAdjustment(const SigmaT& sigma, const MeanReversionT& meanR
     DoubleT exponent;
     if (meanReversion < 1e-8) {
         // Limit of the exact branch as the mean reversion vanishes.
-        exponent = sigma * sigma * accrual *
-                   (0.5 * expiryTime * expiryTime + expiryTime * accrual);
+        exponent = sigma * sigma * accrual * (0.5 * expiryTime * expiryTime + expiryTime * accrual);
     } else {
         const auto a = meanReversion;
         const DoubleT b = -expm1(-a * accrual) / a;
@@ -96,15 +95,13 @@ struct HullWhiteFitResult {
 
 namespace detail {
 
-inline void hullWhiteResiduals(const std::vector<HullWhiteObservation>& observations,
-                               double sigma, double meanReversion,
-                               std::vector<double>& out) {
+inline void hullWhiteResiduals(const std::vector<HullWhiteObservation>& observations, double sigma,
+                               double meanReversion, std::vector<double>& out) {
     out.resize(observations.size());
     for (std::size_t i = 0; i < observations.size(); ++i) {
         const HullWhiteObservation& observation = observations[i];
         out[i] = hullWhiteFuturesAdjustment(sigma, meanReversion, observation.expiryTime,
-                                            observation.accrual,
-                                            observation.startOverEndDiscount) -
+                                            observation.accrual, observation.startOverEndDiscount) -
                  observation.impliedAdjustment;
     }
 }
@@ -128,14 +125,13 @@ inline HullWhiteFitResult summarize(const std::vector<HullWhiteObservation>& obs
     return result;
 }
 
-}  // namespace detail
+} // namespace detail
 
 /// Fit the short-rate volatility with the mean reversion pinned. A joint fit of
 /// both parameters is not identified from a futures strip alone (the two
 /// profiles are nearly collinear), so one parameter is always an input.
-inline HullWhiteFitResult fitHullWhiteSigma(
-    const std::vector<HullWhiteObservation>& observations,
-    const HullWhiteFitOptions& options = {}) {
+inline HullWhiteFitResult fitHullWhiteSigma(const std::vector<HullWhiteObservation>& observations,
+                                            const HullWhiteFitOptions& options = {}) {
     if (observations.empty()) {
         throw std::invalid_argument("fitHullWhiteSigma: no observations");
     }
@@ -154,8 +150,7 @@ inline HullWhiteFitResult fitHullWhiteSigma(
     lmOptions.ftol = 0.0;
     lmOptions.xtolAbs = options.tolerance;
     lmOptions.ftolAbs = options.tolerance;
-    std::vector<double> x{
-        std::log(options.initialValue > 0.0 ? options.initialValue : 0.01)};
+    std::vector<double> x{std::log(options.initialValue > 0.0 ? options.initialValue : 0.01)};
     const auto residuals = [&](const std::vector<double>& point, std::vector<double>& out) {
         detail::hullWhiteResiduals(observations, std::exp(point[0]), options.pinnedMeanReversion,
                                    out);
@@ -165,9 +160,9 @@ inline HullWhiteFitResult fitHullWhiteSigma(
 }
 
 /// Fit the mean reversion with the volatility pinned.
-inline HullWhiteFitResult fitHullWhiteMeanReversion(
-    const std::vector<HullWhiteObservation>& observations,
-    const HullWhiteFitOptions& options = {}) {
+inline HullWhiteFitResult
+fitHullWhiteMeanReversion(const std::vector<HullWhiteObservation>& observations,
+                          const HullWhiteFitOptions& options = {}) {
     if (observations.empty()) {
         throw std::invalid_argument("fitHullWhiteMeanReversion: no observations");
     }
@@ -186,8 +181,7 @@ inline HullWhiteFitResult fitHullWhiteMeanReversion(
     lmOptions.ftol = 0.0;
     lmOptions.xtolAbs = options.tolerance;
     lmOptions.ftolAbs = options.tolerance;
-    std::vector<double> x{
-        std::log(options.initialValue > 0.0 ? options.initialValue : 0.05)};
+    std::vector<double> x{std::log(options.initialValue > 0.0 ? options.initialValue : 0.05)};
     const auto residuals = [&](const std::vector<double>& point, std::vector<double>& out) {
         detail::hullWhiteResiduals(observations, options.pinnedSigma, std::exp(point[0]), out);
     };
@@ -195,4 +189,4 @@ inline HullWhiteFitResult fitHullWhiteMeanReversion(
     return detail::summarize(observations, options.pinnedSigma, std::exp(x[0]), lm);
 }
 
-}  // namespace quantape::markets
+} // namespace quantape::markets

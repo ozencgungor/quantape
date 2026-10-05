@@ -15,7 +15,15 @@
 
 namespace quantape::datetime {
 
-enum class Weekday : std::uint8_t { Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday };
+enum class Weekday : std::uint8_t {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday
+};
 
 inline constexpr const char* weekdayName(Weekday day) {
     constexpr const char* names[] = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
@@ -82,12 +90,11 @@ constexpr unsigned daysInMonthImpl(int year, unsigned month) {
 }
 
 constexpr unsigned dayOfYearImpl(int year, unsigned month, unsigned day) {
-    constexpr unsigned cumulative[] = {0,  31, 59,  90,  120, 151,
-                                       181, 212, 243, 273, 304, 334};
+    constexpr unsigned cumulative[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
     return cumulative[month - 1] + day + ((month > 2 && isLeapYearImpl(year)) ? 1u : 0u);
 }
 
-}  // namespace detail
+} // namespace detail
 
 class Date {
 public:
@@ -105,8 +112,7 @@ public:
 
     /// Validated construction; throws std::invalid_argument.
     static Date checked(int year, unsigned month, unsigned day) {
-        if (month < 1 || month > 12 || day < 1 ||
-            day > detail::daysInMonthImpl(year, month)) {
+        if (month < 1 || month > 12 || day < 1 || day > detail::daysInMonthImpl(year, month)) {
             throw std::invalid_argument("Date: invalid year/month/day");
         }
         return Date(year, month, day);
@@ -143,15 +149,13 @@ public:
         // Sunday = 0 on the epoch; 2^32 % 7 == 4 already biases negative days.
         const std::uint32_t u = static_cast<std::uint32_t>(serial_);
         const std::uint32_t sunday0 = (u + (serial_ >= 0 ? 4u : 0u)) % 7u;
-        return static_cast<Weekday>((sunday0 + 6u) % 7u);  // Monday = 0
+        return static_cast<Weekday>((sunday0 + 6u) % 7u); // Monday = 0
     }
     static constexpr bool isLeapYear(int year) { return detail::isLeapYearImpl(year); }
     static constexpr unsigned daysInMonth(int year, unsigned month) {
         return detail::daysInMonthImpl(year, month);
     }
-    constexpr bool isEndOfMonth() const {
-        return dayOfMonth() == daysInMonth(year(), month());
-    }
+    constexpr bool isEndOfMonth() const { return dayOfMonth() == daysInMonth(year(), month()); }
     constexpr Date endOfMonth() const {
         return Date(year(), month(), daysInMonth(year(), month()));
     }
@@ -163,12 +167,8 @@ public:
         return detail::dayOfYearImpl(y, m, d);
     }
 
-    constexpr Date plusDays(std::int32_t days) const {
-        return fromSerial(serial_ + days);
-    }
-    constexpr Date plusWeeks(std::int32_t weeks) const {
-        return plusDays(weeks * 7);
-    }
+    constexpr Date plusDays(std::int32_t days) const { return fromSerial(serial_ + days); }
+    constexpr Date plusWeeks(std::int32_t weeks) const { return plusDays(weeks * 7); }
     /// Month arithmetic with clipping; `preserveEndOfMonth` maps month-end to
     /// month-end (used by schedule generation).
     constexpr Date plusMonths(int months, bool preserveEndOfMonth = false) const {
@@ -189,9 +189,17 @@ public:
     constexpr Date operator+(std::int32_t days) const { return plusDays(days); }
     constexpr Date operator-(std::int32_t days) const { return plusDays(-days); }
     constexpr Date& operator++() { return *this = plusDays(1); }
-    constexpr Date operator++(int) { Date copy = *this; ++(*this); return copy; }
+    constexpr Date operator++(int) {
+        Date copy = *this;
+        ++(*this);
+        return copy;
+    }
     constexpr Date& operator--() { return *this = plusDays(-1); }
-    constexpr Date operator--(int) { Date copy = *this; --(*this); return copy; }
+    constexpr Date operator--(int) {
+        Date copy = *this;
+        --(*this);
+        return copy;
+    }
 
     std::string toIso() const;
 
@@ -239,7 +247,7 @@ inline Date Date::parse(std::string_view text) {
     return checked(year, month, day);
 }
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime
 
 namespace std {
 template <>
@@ -248,4 +256,4 @@ struct hash<quantape::datetime::Date> {
         return std::hash<std::int32_t>{}(date.serial());
     }
 };
-}  // namespace std
+} // namespace std

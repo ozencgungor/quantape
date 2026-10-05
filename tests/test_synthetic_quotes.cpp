@@ -9,10 +9,9 @@
  * the error paths.
  */
 
+#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/SyntheticQuotes.h"
-
-#include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
 
 #include <cmath>
@@ -42,11 +41,10 @@ DiscountCurve<double> makeShiftedCurve(int years, double shift) {
     for (int year = 1; year <= years; ++year) {
         const datetime::Date date = kReference.plusYears(year);
         dates.push_back(date);
-        zeros.push_back(0.03 + 0.0005 * datetime::yearFraction(kReference, date, kZeroDc) +
-                        shift);
+        zeros.push_back(0.03 + 0.0005 * datetime::yearFraction(kReference, date, kZeroDc) + shift);
     }
-    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros,
-                                 InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros, InterpolationSpace::LogDiscount,
+                                 InterpolationScheme::Linear);
 }
 
 DiscountCurve<double> makeOvernightCurve(int years) {
@@ -57,8 +55,8 @@ DiscountCurve<double> makeOvernightCurve(int years) {
         dates.push_back(date);
         zeros.push_back(0.03 + 0.0005 * datetime::yearFraction(kReference, date, kZeroDc));
     }
-    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros,
-                                 InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    return DiscountCurve<double>(kReference, dates, kZeroDc, zeros, InterpolationSpace::LogDiscount,
+                                 InterpolationScheme::Linear);
 }
 
 void testIntegratedBasisAndFra() {
@@ -74,8 +72,8 @@ void testIntegratedBasisAndFra() {
     const double t2 = datetime::yearFraction(kReference, maturity, kZeroDc);
     const double tau = datetime::yearFraction(start, maturity, kIndexDc);
 
-    const double synthetic = markets::syntheticFraQuote(
-        index, overnight, kReference, start, maturity, kOvernightDc, kIndexDc, kZeroDc);
+    const double synthetic = markets::syntheticFraQuote(index, overnight, kReference, start,
+                                                        maturity, kOvernightDc, kIndexDc, kZeroDc);
     const double exact = (index.discount(t1) / index.discount(t2) - 1.0) / tau;
     const double delta = markets::integratedBasis(index, overnight, t1, t2);
     CHECK(delta > 0.0);
@@ -88,8 +86,7 @@ void testIntegratedBasisAndFra() {
     const double syntheticDeposit = markets::syntheticDepositQuote(
         index, overnight, kReference, depositMaturity, kOvernightDc, kIndexDc, kZeroDc);
     const double tDeposit = datetime::yearFraction(kReference, depositMaturity, kZeroDc);
-    const double tauDeposit =
-        datetime::yearFraction(kReference, depositMaturity, kIndexDc);
+    const double tauDeposit = datetime::yearFraction(kReference, depositMaturity, kIndexDc);
     const double exactDeposit = (1.0 / index.discount(tDeposit) - 1.0) / tauDeposit;
     util::checkClose("synthetic deposit vs index rate", syntheticDeposit, exactDeposit, 1e-12);
 }
@@ -109,9 +106,8 @@ void testSyntheticDepositPinsShortEnd() {
     deposit.maturity = datetime::Period(3, datetime::TimeUnit::Months).advance(kReference);
     deposit.kind = PillarKind::Deposit;
     deposit.quoteDayCounter = kIndexDc;
-    deposit.quote = markets::syntheticDepositQuote(index, overnight, kReference,
-                                                   deposit.maturity, kOvernightDc, kIndexDc,
-                                                   kZeroDc);
+    deposit.quote = markets::syntheticDepositQuote(index, overnight, kReference, deposit.maturity,
+                                                   kOvernightDc, kIndexDc, kZeroDc);
     pillars.push_back(deposit);
     for (int year = 1; year <= 3; ++year) {
         CurvePillar swap;
@@ -122,34 +118,32 @@ void testSyntheticDepositPinsShortEnd() {
         pillars.push_back(swap);
     }
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
-        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
-        pillars);
+        kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
         util::checkClose("synthetic short-end reprice",
                          markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
     }
     const double tDeposit = datetime::yearFraction(kReference, deposit.maturity, kZeroDc);
-    const double tauDeposit =
-        datetime::yearFraction(kReference, deposit.maturity, kIndexDc);
+    const double tauDeposit = datetime::yearFraction(kReference, deposit.maturity, kIndexDc);
     // The deposit node solves its own synthetic quote exactly.
     util::checkClose("synthetic deposit node", curve.zero(tDeposit),
                      std::log(1.0 + deposit.quote * tauDeposit) / tDeposit, 1e-12);
     // The 1Y pillar is repriced from the index curve, so its node matches.
     const datetime::Date oneYear = kReference.plusYears(1);
     const double tOneYear = datetime::yearFraction(kReference, oneYear, kZeroDc);
-    util::checkClose("1y node vs index curve", curve.zero(tOneYear),
-                     indexTruth.zero(tOneYear), 1e-9);
+    util::checkClose("1y node vs index curve", curve.zero(tOneYear), indexTruth.zero(tOneYear),
+                     1e-9);
 }
 
 void testQuoteExtrapolation() {
     const std::vector<double> times{1.0, 2.0, 3.0};
     const std::vector<double> quotes{0.01, 0.02, 0.03};
-    util::checkClose("flat quote extrapolation",
-                     markets::extrapolatedQuote(times, quotes, 5.0), 0.03, 1e-15);
-    util::checkClose("linear quote extrapolation",
-                     markets::extrapolatedQuote(times, quotes, 5.0,
-                                                markets::QuoteExtrapolation::Linear),
-                     0.05, 1e-15);
+    util::checkClose("flat quote extrapolation", markets::extrapolatedQuote(times, quotes, 5.0),
+                     0.03, 1e-15);
+    util::checkClose(
+        "linear quote extrapolation",
+        markets::extrapolatedQuote(times, quotes, 5.0, markets::QuoteExtrapolation::Linear), 0.05,
+        1e-15);
     bool threw = false;
     try {
         (void)markets::extrapolatedQuote(times, quotes, 2.0);
@@ -177,15 +171,14 @@ void testSyntheticErrors() {
     threw = false;
     try {
         (void)markets::syntheticFraQuote(index, overnight, kReference, kReference.plusYears(1),
-                                         kReference.plusYears(1), kOvernightDc, kIndexDc,
-                                         kZeroDc);
+                                         kReference.plusYears(1), kOvernightDc, kIndexDc, kZeroDc);
     } catch (const std::invalid_argument&) {
         threw = true;
     }
     CHECK(threw);
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     testIntegratedBasisAndFra();

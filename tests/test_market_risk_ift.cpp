@@ -12,11 +12,13 @@
 #include "quantape/math/StanMath.h"
 
 #include "quantape/calibration/CalibrationChainKkt.h"
+#include "quantape/log/Log.h"
 #include "quantape/mc/Gradients.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SchemesStan.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -28,9 +30,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -41,8 +40,6 @@ using quantape::math::OptimizerState;
 using quantape::math::StopCriteria;
 
 namespace {
-
-
 
 // ── Scalar-generic undiscounted Black-Scholes call (drift mu as r) ──
 
@@ -216,8 +213,7 @@ void testSingleQuoteChain() {
     const double fd =
         (bsCallPrice(s0, k2, mu, bp[0], tMax) - bsCallPrice(s0, k2, mu, bm[0], tMax)) / (2.0 * h);
     checkClose("single-quote IFT vs bump-recalibrate", risk(0), fd, 1e-6);
-    QTA_LOG_INFO("test",
-                 "  [ok] single quote: KKT/inst agree, instrument exact, vs FD ({} vs {})",
+    QTA_LOG_INFO("test", "  [ok] single quote: KKT/inst agree, instrument exact, vs FD ({} vs {})",
                  quantape::util::num(risk(0), 9), quantape::util::num(fd, 9));
 }
 

@@ -38,8 +38,7 @@ namespace quantape::markets {
  * market-consistent synthetic deposits.
  */
 inline double integratedBasis(const SpreadCurve<double>& basisCurve,
-                              const DiscountCurve<double>& overnightCurve, double t1,
-                              double t2) {
+                              const DiscountCurve<double>& overnightCurve, double t1, double t2) {
     if (!(t2 > t1)) {
         throw std::invalid_argument("integratedBasis: t2 must be > t1");
     }
@@ -57,8 +56,8 @@ inline double integratedBasis(const SpreadCurve<double>& basisCurve,
 /// `1 + R_x tau_x = (1 + R_on tau_on) exp(Delta)`.
 inline double syntheticFraQuote(const SpreadCurve<double>& basisCurve,
                                 const DiscountCurve<double>& overnightCurve,
-                                const datetime::Date& referenceDate,
-                                const datetime::Date& start, const datetime::Date& maturity,
+                                const datetime::Date& referenceDate, const datetime::Date& start,
+                                const datetime::Date& maturity,
                                 const datetime::DayCounter& overnightDayCounter,
                                 const datetime::DayCounter& indexDayCounter,
                                 const datetime::DayCounter& zeroDayCounter) {
@@ -69,8 +68,7 @@ inline double syntheticFraQuote(const SpreadCurve<double>& basisCurve,
     if (!(tauOvernight > 0.0) || !(tauIndex > 0.0)) {
         throw std::invalid_argument("syntheticFraQuote: non-positive accrual");
     }
-    const double overnightGrowth =
-        overnightCurve.discount(t1) / overnightCurve.discount(t2);
+    const double overnightGrowth = overnightCurve.discount(t1) / overnightCurve.discount(t2);
     const double delta = integratedBasis(basisCurve, overnightCurve, t1, t2);
     return (overnightGrowth * std::exp(delta) - 1.0) / tauIndex;
 }
@@ -80,21 +78,19 @@ enum class QuoteExtrapolation : std::uint8_t { Flat, Linear };
 
 /// Extrapolated quote at a time beyond the last observation: `Flat` keeps the
 /// last quote, `Linear` extends the slope of the last segment.
-inline double extrapolatedQuote(const std::vector<double>& times,
-                                const std::vector<double>& quotes, double targetTime,
+inline double extrapolatedQuote(const std::vector<double>& times, const std::vector<double>& quotes,
+                                double targetTime,
                                 QuoteExtrapolation mode = QuoteExtrapolation::Flat) {
     if (times.size() != quotes.size() || times.empty()) {
         throw std::invalid_argument("extrapolatedQuote: malformed quote strip");
     }
     for (std::size_t i = 1; i < times.size(); ++i) {
         if (!(times[i] > times[i - 1])) {
-            throw std::invalid_argument(
-                "extrapolatedQuote: times must be strictly increasing");
+            throw std::invalid_argument("extrapolatedQuote: times must be strictly increasing");
         }
     }
     if (!(targetTime > times.back())) {
-        throw std::invalid_argument(
-            "extrapolatedQuote: target time is inside the quoted range");
+        throw std::invalid_argument("extrapolatedQuote: target time is inside the quoted range");
     }
     if (mode == QuoteExtrapolation::Flat || times.size() < 2) {
         return quotes.back();
@@ -116,4 +112,4 @@ inline double syntheticDepositQuote(const SpreadCurve<double>& basisCurve,
                              overnightDayCounter, indexDayCounter, zeroDayCounter);
 }
 
-}  // namespace quantape::markets
+} // namespace quantape::markets

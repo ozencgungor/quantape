@@ -1,7 +1,7 @@
 // test_daycount.cpp — convention values and the day-count cache contract
+#include "quantape/datetime/DayCounter.h"
 #include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
-#include "quantape/datetime/DayCounter.h"
 
 #include <cmath>
 #include <random>
@@ -16,10 +16,8 @@ bool close(double a, double b, double tol = 1e-14) {
     return std::abs(a - b) <= tol * (1.0 + std::abs(b));
 }
 
-double yf(DayCount convention, const char* from, const char* to,
-          DayCountContext context = {}) {
-    return DayCounter(convention, context).yearFractionUncached(Date::parse(from),
-                                                                Date::parse(to));
+double yf(DayCount convention, const char* from, const char* to, DayCountContext context = {}) {
+    return DayCounter(convention, context).yearFractionUncached(Date::parse(from), Date::parse(to));
 }
 
 /// Reference implementation of the AFB year walk (validates the fast path).
@@ -55,7 +53,7 @@ double slowAfb(Date d1, Date d2) {
     return sum + static_cast<double>(newD2 - d1) / den;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     enableDayCountCache(false);
@@ -78,19 +76,16 @@ int main() {
     CHECK(close(yf(DayCount::ActualActualAFB, "2020-01-01", "2020-07-01"), 182.0 / 366.0));
     CHECK(close(yf(DayCount::ActualActualAFB, "2021-01-01", "2021-07-01"), 181.0 / 365.0));
     CHECK(close(yf(DayCount::ActualActualYear, "2020-01-01", "2021-01-01"), 1.0));
-    CHECK(close(yf(DayCount::ActualActualYear, "2020-01-01", "2022-07-01"),
-                2.0 + 181.0 / 365.0));
+    CHECK(close(yf(DayCount::ActualActualYear, "2020-01-01", "2022-07-01"), 2.0 + 181.0 / 365.0));
 
     // ACT/365L needs the reference period end and frequency.
     {
         DayCountContext context;
         context.refEnd = Date::parse("2020-07-01");
         context.frequency = Frequency::Semiannual;
-        CHECK(close(yf(DayCount::Actual365L, "2020-01-01", "2020-07-01", context),
-                    182.0 / 366.0));
+        CHECK(close(yf(DayCount::Actual365L, "2020-01-01", "2020-07-01", context), 182.0 / 366.0));
         context.refEnd = Date::parse("2021-07-01");
-        CHECK(close(yf(DayCount::Actual365L, "2021-01-01", "2021-07-01", context),
-                    181.0 / 365.0));
+        CHECK(close(yf(DayCount::Actual365L, "2021-01-01", "2021-07-01", context), 181.0 / 365.0));
     }
 
     // 1/1 and Simple.
@@ -114,8 +109,8 @@ int main() {
     {
         DayCountContext context;
         context.termination = Date::parse("2020-02-29");
-        CHECK(close(yf(DayCount::ThirtyE360ISDA, "2020-01-31", "2020-02-29", context),
-                    29.0 / 360.0));
+        CHECK(
+            close(yf(DayCount::ThirtyE360ISDA, "2020-01-31", "2020-02-29", context), 29.0 / 360.0));
     }
 
     // Schedule/calendar-driven conventions with context.
@@ -164,8 +159,7 @@ int main() {
             if (a > b) {
                 std::swap(a, b);
             }
-            const double fast =
-                DayCounter(DayCount::ActualActualAFB).yearFractionUncached(a, b);
+            const double fast = DayCounter(DayCount::ActualActualAFB).yearFractionUncached(a, b);
             CHECK(close(fast, slowAfb(a, b), 1e-15));
         }
     }
@@ -189,11 +183,11 @@ int main() {
         DayCounter cheap(DayCount::Actual360);
         (void)cheap.yearFraction(a, b);
         stats = dayCountCacheStats();
-        CHECK(stats.hits == 2 && stats.misses == 1);  // bypassed, no stats change
+        CHECK(stats.hits == 2 && stats.misses == 1); // bypassed, no stats change
 
         (void)counter.yearFraction(a, b.plusDays(1));
         stats = dayCountCacheStats();
-        CHECK(stats.misses == 2);  // new key
+        CHECK(stats.misses == 2); // new key
     }
     {
         // Different threads have independent caches.

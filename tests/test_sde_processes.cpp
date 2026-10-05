@@ -10,6 +10,7 @@
 //     consistent with a fine-grid Euler reference
 //
 // Stan-free.
+#include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/MomentMatching.h"
 #include "quantape/mc/RandomSource.h"
@@ -19,6 +20,7 @@
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/processes/HestonQeProcess.h"
 #include "quantape/mc/processes/SdeProcesses.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -28,9 +30,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -49,8 +48,6 @@ using quantape::processes::HestonQeProcess;
 using quantape::processes::OuProcess;
 
 namespace {
-
-
 
 // ── GBM through the bundle: Euler mean/undiscounted call vs analytic ──
 
@@ -226,8 +223,8 @@ void testHestonQeProcess() {
                  quantape::util::num(qe.callPrice, 4), quantape::util::num(qe.callStdError, 4),
                  quantape::util::num(coarseEuler.callPrice, 4),
                  quantape::util::num(reference.callPrice, 4));
-    QTA_LOG_INFO("test", "               |err| QE={}  Euler64={}",
-                 quantape::util::num(qeErr, 5), quantape::util::num(eulerErr, 5));
+    QTA_LOG_INFO("test", "               |err| QE={}  Euler64={}", quantape::util::num(qeErr, 5),
+                 quantape::util::num(eulerErr, 5));
     CHECK(qeErr <= 4.0 * qe.callStdError + 4.0 * reference.callStdError + 0.01);
     CHECK(qeErr <= eulerErr + 4.0 * qe.callStdError);
 

@@ -246,3 +246,14 @@ if(Doxygen_FOUND)
         COMMENT "Generating API documentation (docs/html)"
         VERBATIM)
 endif()
+
+# Formatting automation (clang-format via format_code.sh).
+add_custom_target(format
+    COMMAND "${CMAKE_SOURCE_DIR}/format_code.sh"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Formatting C++ sources with clang-format")
+
+add_custom_target(format-check
+    COMMAND "${CMAKE_SOURCE_DIR}/format_code.sh" --check
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Checking C++ formatting with clang-format")

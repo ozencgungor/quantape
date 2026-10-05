@@ -4,10 +4,10 @@
 // doubles (non-differentiable); conversion happens once at schedule
 // construction.
 
-#include "quantape/mc/TimeGrid.h"
 #include "quantape/datetime/Calendar.h"
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/DayCounter.h"
+#include "quantape/mc/TimeGrid.h"
 
 #include <vector>
 
@@ -39,4 +39,4 @@ inline Date spotDate(const Date& trade, const Calendar& calendar, int lag,
     return calendar.advance(trade, lag, TimeUnit::Days, convention, false);
 }
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

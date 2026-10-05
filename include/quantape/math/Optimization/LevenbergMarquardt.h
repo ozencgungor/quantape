@@ -93,7 +93,8 @@ LevenbergMarquardtResult levenbergMarquardtCore(const Residual& residuals, const
         throw std::invalid_argument("levenbergMarquardt: empty parameter vector");
     }
     std::vector<double> residual;
-    const auto evaluate = [&](const std::vector<double>& point, std::vector<double>& out) -> double {
+    const auto evaluate = [&](const std::vector<double>& point,
+                              std::vector<double>& out) -> double {
         residuals(point, out);
         double cost = 0.0;
         for (const double value : out) {
@@ -222,8 +223,7 @@ LevenbergMarquardtResult levenbergMarquardtCore(const Residual& residuals, const
             }
         }
         try {
-            const std::vector<double> newtonStep =
-                solveDense(std::move(jtj), n, result.gradient);
+            const std::vector<double> newtonStep = solveDense(std::move(jtj), n, result.gradient);
             double stepNorm = 0.0;
             for (const double value : newtonStep) {
                 stepNorm += value * value;

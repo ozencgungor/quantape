@@ -21,10 +21,10 @@ namespace quantape::markets {
 
 template <typename DoubleT>
 struct CurveOnGrid {
-    std::vector<double> times;         ///< Grid times (years, increasing)
-    std::vector<DoubleT> discount;     ///< D(t_k)
-    std::vector<DoubleT> zero;         ///< Continuously compounded z(t_k)
-    std::vector<DoubleT> forward;      ///< Continuously compounded f_k on [t_k, t_{k+1})
+    std::vector<double> times;     ///< Grid times (years, increasing)
+    std::vector<DoubleT> discount; ///< D(t_k)
+    std::vector<DoubleT> zero;     ///< Continuously compounded z(t_k)
+    std::vector<DoubleT> forward;  ///< Continuously compounded f_k on [t_k, t_{k+1})
 
     std::size_t size() const { return times.size(); }
     std::size_t nSteps() const { return forward.size(); }

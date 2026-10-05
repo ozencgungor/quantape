@@ -45,8 +45,7 @@ std::vector<DoubleT> solveLowerTriangular(std::span<const double> l, std::size_t
 /// Solve `L^T x = b` for a row-major lower-triangular `n x n` matrix.
 template <typename DoubleT>
 std::vector<DoubleT> solveLowerTranspose(std::span<const double> l, std::size_t n,
-                                         const std::vector<DoubleT>& b,
-                                         bool unitDiagonal = false) {
+                                         const std::vector<DoubleT>& b, bool unitDiagonal = false) {
     if (l.size() != n * n || b.size() != n) {
         throw std::invalid_argument("solveLowerTranspose: size mismatch");
     }

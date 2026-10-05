@@ -8,7 +8,9 @@
 //     pick is at least as good as every candidate (small exhaustive check)
 //
 // Stan/Eigen-free: standard library + the Sobol headers only.
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/CBCSearch.h"
+#include "quantape/util/Check.h"
 
 #include <array>
 #include <cmath>
@@ -17,9 +19,6 @@
 #include <cstdlib>
 #include <random>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -161,8 +160,8 @@ int main() {
             CHECK(tValue2D(matrices[j - 1], matrices[d - 1], 12) == table21[d][j - 1]);
         }
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] tValue2D == brute force ({} checks), Table 2.1 values match", checked);
+    QTA_LOG_INFO("test", "  [ok] tValue2D == brute force ({} checks), Table 2.1 values match",
+                 checked);
 
     // Property A: incremental checker agrees with an independent determinant.
     PropertyAChecker checker(64);
@@ -219,8 +218,7 @@ int main() {
             CHECK(resA[0].score <= score);
         }
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] search: deterministic, finite score, optimal among candidates");
+    QTA_LOG_INFO("test", "  [ok] search: deterministic, finite score, optimal among candidates");
 
     // Fuzz: fast t-value == brute force and symmetric for random valid direction
     // sets (degrees 1..12) and the high-degree fixtures, all m = 1..31.
@@ -257,8 +255,8 @@ int main() {
                 ++checks;
             }
         }
-        QTA_LOG_INFO("test",
-                     "  [ok] fuzz: {} checks fast==brute and symmetric (degrees 1-18)", checks);
+        QTA_LOG_INFO("test", "  [ok] fuzz: {} checks fast==brute and symmetric (degrees 1-18)",
+                     checks);
     }
 
     QTA_LOG_INFO("test", "ALL SOBOL QUALITY TESTS PASSED");

@@ -315,8 +315,7 @@ void testHymanSplineMath() {
         const double low = std::min(humpY[i], humpY[i + 1]);
         const double high = std::max(humpY[i], humpY[i + 1]);
         for (int k = 0; k <= 40; ++k) {
-            const double t =
-                humpX[i] + (humpX[i + 1] - humpX[i]) * (static_cast<double>(k) / 40.0);
+            const double t = humpX[i] + (humpX[i + 1] - humpX[i]) * (static_cast<double>(k) / 40.0);
             CHECK(hump(t) >= low - 1e-12);
             CHECK(hump(t) <= high + 1e-12);
         }
@@ -371,7 +370,8 @@ void testHymanSplineAd() {
         }
         const math::HymanSplineInterpolation<FvarVar> interp(x, yAd);
         const FvarVar atPoint(1.5);
-        util::checkClose("hyman fvar<var> value", interp(atPoint).val_.val(), reference(1.5), 1e-13);
+        util::checkClose("hyman fvar<var> value", interp(atPoint).val_.val(), reference(1.5),
+                         1e-13);
         const double epsilon = 1e-6;
         for (std::size_t j = 0; j < y.size(); ++j) {
             std::vector<FvarVar> directional = yAd;

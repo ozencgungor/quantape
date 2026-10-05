@@ -10,12 +10,14 @@
 // Stan-dependent (Milstein uses forward-mode fvar); include StanMath.h first.
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/Schemes.h"
 #include "quantape/mc/SchemesStan.h"
 #include "quantape/mc/SdePrimitives.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -25,9 +27,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -47,7 +46,6 @@ namespace {
 // Bitwise finiteness guard: under -ffast-math the compiler folds
 // isnan/isfinite to constants, so NaN/Inf silently pass `<=` comparisons.
 // Inspecting the exponent bits cannot be optimized away.
-
 
 // ── Models ──
 
@@ -168,9 +166,10 @@ void testGbmStrongOrder() {
                  quantape::util::num(eulerErrors[2], 5), quantape::util::num(eulerErrors[3], 5),
                  quantape::util::num(eulerOrder, 3));
     QTA_LOG_INFO("test", "  Milstein errors: {} {} {} {}  (order {})",
-                 quantape::util::num(milsteinErrors[0], 5), quantape::util::num(milsteinErrors[1], 5),
-                 quantape::util::num(milsteinErrors[2], 5), quantape::util::num(milsteinErrors[3], 5),
-                 quantape::util::num(milsteinOrder, 3));
+                 quantape::util::num(milsteinErrors[0], 5),
+                 quantape::util::num(milsteinErrors[1], 5),
+                 quantape::util::num(milsteinErrors[2], 5),
+                 quantape::util::num(milsteinErrors[3], 5), quantape::util::num(milsteinOrder, 3));
     CHECK(eulerOrder > 0.35 && eulerOrder < 0.65);
     CHECK(milsteinOrder > 0.80 && milsteinOrder < 1.15);
 }

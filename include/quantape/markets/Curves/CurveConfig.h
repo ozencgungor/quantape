@@ -30,7 +30,7 @@ struct PillarSpec {
     datetime::Date start; ///< FRA start / future fixing
     PillarKind kind = PillarKind::Deposit;
     double quote = 0.0;
-    double convexityAdjustment = 0.0; ///< Futures: added to the fitted forward rate
+    double convexityAdjustment = 0.0;              ///< Futures: added to the fitted forward rate
     FutureStyle futureStyle = FutureStyle::Simple; ///< Futures: underlying style
     AveragingStyle averagingStyle = AveragingStyle::Arithmetic; ///< Averaged futures convention
     double fraConvexityExponent = 0.0; ///< FRA: explicit convexity exponent
@@ -57,8 +57,8 @@ struct ForecastPillarSpec {
     datetime::Date maturity;
     ForecastPillar::Kind kind = ForecastPillar::Kind::Deposit;
     double quote = 0.0; ///< Simple rate, par IRS rate, basis spread or futures rate (decimal)
-    double convexityAdjustment = 0.0; ///< Futures: added to the fitted forward rate
-    bool convexityAdjustmentSet = false; ///< Futures: explicit adjustment present
+    double convexityAdjustment = 0.0;              ///< Futures: added to the fitted forward rate
+    bool convexityAdjustmentSet = false;           ///< Futures: explicit adjustment present
     FutureStyle futureStyle = FutureStyle::Simple; ///< Futures: underlying style
     AveragingStyle averagingStyle = AveragingStyle::Arithmetic; ///< Averaged futures convention
     datetime::Period floatTenor{3, datetime::TimeUnit::Months};

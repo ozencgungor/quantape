@@ -1,8 +1,8 @@
 // test_date.cpp — Date conversions, arithmetic, parsing; naive reference sweep
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/Period.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 #include <cstdint>
 #include <random>
@@ -34,7 +34,7 @@ void refCivilFromDays(std::int64_t z, int& y, unsigned& m, unsigned& d) {
     y += (m <= 2);
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     // Known serials and weekdays.

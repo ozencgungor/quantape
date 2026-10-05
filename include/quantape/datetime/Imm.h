@@ -40,9 +40,9 @@ inline Date nextIMMDate(const Date& date) {
 
 /// Coupon dates anchored on the IMM grid between effective and termination;
 /// non-IMM effective/termination dates produce front/back stubs.
-inline std::vector<Date> immSchedule(
-    const Date& effective, const Date& termination, const Calendar& calendar,
-    BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing) {
+inline std::vector<Date>
+immSchedule(const Date& effective, const Date& termination, const Calendar& calendar,
+            BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing) {
     if (termination < effective) {
         throw std::invalid_argument("immSchedule: termination before effective");
     }
@@ -62,4 +62,4 @@ inline std::vector<Date> immSchedule(
     return dates;
 }
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

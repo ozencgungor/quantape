@@ -9,7 +9,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/models/HestonStanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -17,9 +19,6 @@
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 namespace {
 
@@ -108,8 +107,7 @@ void testStanGradientAndHessian() {
         }
     }
     check(hessErr < 1e-9, "stan fvar<var> Hessian == fullHessian", hessErr, 1e-9);
-    QTA_LOG_INFO("test",
-                 "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
+    QTA_LOG_INFO("test", "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
                  quantape::util::num(hessErr, 2));
 
     // Independent FD of the re-evaluated gradient for three representative entries

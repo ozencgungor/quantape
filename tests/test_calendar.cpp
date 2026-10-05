@@ -1,7 +1,7 @@
 // test_calendar.cpp — holiday rules, adjustments, advance, joint calendars
+#include "quantape/datetime/Calendar.h"
 #include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
-#include "quantape/datetime/Calendar.h"
 
 using namespace quantape::datetime;
 
@@ -14,9 +14,9 @@ int main() {
     const Calendar weekends = Calendar::weekendsOnly();
 
     // Weekend masking.
-    CHECK(!weekends.isBusinessDay(Date(2026, 9, 26)));  // Saturday
-    CHECK(!weekends.isBusinessDay(Date(2026, 9, 27)));  // Sunday
-    CHECK(weekends.isBusinessDay(Date(2026, 9, 28)));   // Monday
+    CHECK(!weekends.isBusinessDay(Date(2026, 9, 26))); // Saturday
+    CHECK(!weekends.isBusinessDay(Date(2026, 9, 27))); // Sunday
+    CHECK(weekends.isBusinessDay(Date(2026, 9, 28)));  // Monday
     CHECK(Calendar::noHolidays().isBusinessDay(Date(2026, 9, 26)));
 
     // US: Independence Day 2026 is a Saturday, observed Friday July 3.
@@ -37,32 +37,32 @@ int main() {
     CHECK(!sifma.isBusinessDay(Date(2018, 12, 5)));
 
     // TARGET: Easter holidays, May 1, Christmas/Boxing, no observed shifts.
-    CHECK(!target.isBusinessDay(Date(2026, 4, 3)));  // Good Friday
-    CHECK(!target.isBusinessDay(Date(2026, 4, 6)));  // Easter Monday
+    CHECK(!target.isBusinessDay(Date(2026, 4, 3))); // Good Friday
+    CHECK(!target.isBusinessDay(Date(2026, 4, 6))); // Easter Monday
     CHECK(!target.isBusinessDay(Date(2026, 5, 1)));
     CHECK(!target.isBusinessDay(Date(2026, 12, 25)));
     CHECK(!target.isBusinessDay(Date(2026, 12, 26)));
     CHECK(target.isBusinessDay(Date(2026, 12, 28)));
-    CHECK(target.isBusinessDay(Date::parse("2028-01-03")));  // Jan 1 2028 Saturday, no shift
+    CHECK(target.isBusinessDay(Date::parse("2028-01-03"))); // Jan 1 2028 Saturday, no shift
 
     // UK: bank holidays and one-offs.
-    CHECK(!uk.isBusinessDay(Date(2026, 5, 4)));    // Early May
-    CHECK(!uk.isBusinessDay(Date(2026, 5, 25)));   // Spring
-    CHECK(!uk.isBusinessDay(Date(2026, 8, 31)));   // Summer
+    CHECK(!uk.isBusinessDay(Date(2026, 5, 4)));  // Early May
+    CHECK(!uk.isBusinessDay(Date(2026, 5, 25))); // Spring
+    CHECK(!uk.isBusinessDay(Date(2026, 8, 31))); // Summer
     CHECK(!uk.isBusinessDay(Date(2026, 12, 25)));
-    CHECK(!uk.isBusinessDay(Date(2026, 12, 26)));  // Boxing (Saturday)
+    CHECK(!uk.isBusinessDay(Date(2026, 12, 26))); // Boxing (Saturday)
     CHECK(uk.isBusinessDay(Date(2026, 12, 29)));
-    CHECK(!uk.isBusinessDay(Date(2022, 9, 19)));   // State funeral
-    CHECK(!uk.isBusinessDay(Date(2023, 5, 8)));    // Coronation
+    CHECK(!uk.isBusinessDay(Date(2022, 9, 19))); // State funeral
+    CHECK(!uk.isBusinessDay(Date(2023, 5, 8)));  // Coronation
 
     // Japan: fixed, Happy Monday and equinox approximations.
     CHECK(!jp.isBusinessDay(Date(2026, 1, 1)));
-    CHECK(!jp.isBusinessDay(Date(2026, 1, 12)));  // Coming of Age, 2nd Monday
+    CHECK(!jp.isBusinessDay(Date(2026, 1, 12))); // Coming of Age, 2nd Monday
     CHECK(!jp.isBusinessDay(Date(2026, 2, 11)));
     CHECK(!jp.isBusinessDay(Date(2026, 2, 23)));
-    CHECK(!jp.isBusinessDay(Date(2026, 3, 20)));  // Vernal equinox
+    CHECK(!jp.isBusinessDay(Date(2026, 3, 20))); // Vernal equinox
     CHECK(!jp.isBusinessDay(Date(2026, 5, 4)));
-    CHECK(!jp.isBusinessDay(Date(2026, 7, 20)));  // Marine, 3rd Monday
+    CHECK(!jp.isBusinessDay(Date(2026, 7, 20))); // Marine, 3rd Monday
     CHECK(!jp.isBusinessDay(Date(2026, 8, 11)));
     CHECK(!jp.isBusinessDay(Date(2026, 9, 23)));  // Autumn equinox
     CHECK(!jp.isBusinessDay(Date(2026, 10, 12))); // Sports, 2nd Monday
@@ -84,7 +84,7 @@ int main() {
     CHECK(sifma.adjust(mid, BusinessDayConvention::HalfMonthModifiedFollowing) ==
           Date(2026, 8, 14));
     CHECK(sifma.adjust(Date(2026, 8, 8), BusinessDayConvention::HalfMonthModifiedFollowing) ==
-          Date(2026, 8, 10));  // stays in the first half
+          Date(2026, 8, 10)); // stays in the first half
 
     // Advance with end-of-month and adjustment.
     CHECK(sifma.advance(Date(2026, 1, 31), 1, TimeUnit::Months,
@@ -98,7 +98,7 @@ int main() {
     CHECK(weekends.businessDaysBetween(Date(2020, 1, 6), Date(2020, 1, 13)) == 5);
     CHECK(weekends.businessDaysBetween(Date(2020, 1, 13), Date(2020, 1, 6)) == -5);
     CHECK(weekends.businessDaysBetween(Date(2020, 1, 6), Date(2020, 1, 6)) == 0);
-    CHECK(sifma.businessDaysBetween(Date(2026, 7, 2), Date(2026, 7, 7)) == 2);  // Jul3 closed
+    CHECK(sifma.businessDaysBetween(Date(2026, 7, 2), Date(2026, 7, 7)) == 2); // Jul3 closed
 
     // Joint calendar: union of holidays, union of weekend masks.
     const Calendar joint = Calendar::joint(sifma, target);

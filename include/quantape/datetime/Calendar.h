@@ -28,10 +28,10 @@ namespace detail {
 
 struct CalendarRuleSet {
     std::string name;
-    std::uint8_t weekendMask = 0;  // bit i set => Weekday(i) is a weekend
-    std::vector<Date> closures;    // sorted ad-hoc closures
-    std::vector<std::shared_ptr<const CalendarRuleSet>> parents;  // joint calendars
-    std::function<std::vector<Date>(int)> rule;                   // named calendars
+    std::uint8_t weekendMask = 0; // bit i set => Weekday(i) is a weekend
+    std::vector<Date> closures;   // sorted ad-hoc closures
+    std::vector<std::shared_ptr<const CalendarRuleSet>> parents; // joint calendars
+    std::function<std::vector<Date>(int)> rule;                  // named calendars
 };
 
 inline Date nthWeekdayOfMonth(int year, unsigned month, Weekday weekday, int n) {
@@ -82,30 +82,30 @@ inline void addFixedObserved(std::vector<Date>& dates, int year, unsigned month,
 
 inline std::vector<Date> usCommonHolidays(int year, bool goodFriday) {
     std::vector<Date> dates;
-    addFixedObserved(dates, year, 1, 1);  // New Year
-    dates.push_back(nthWeekdayOfMonth(year, 1, Weekday::Monday, 3));   // MLK
-    dates.push_back(nthWeekdayOfMonth(year, 2, Weekday::Monday, 3));   // Presidents
+    addFixedObserved(dates, year, 1, 1);                             // New Year
+    dates.push_back(nthWeekdayOfMonth(year, 1, Weekday::Monday, 3)); // MLK
+    dates.push_back(nthWeekdayOfMonth(year, 2, Weekday::Monday, 3)); // Presidents
     if (goodFriday) {
         dates.push_back(easterSunday(year).plusDays(-2));
     }
-    dates.push_back(lastWeekdayOfMonth(year, 5, Weekday::Monday));     // Memorial
+    dates.push_back(lastWeekdayOfMonth(year, 5, Weekday::Monday)); // Memorial
     if (year >= 2022) {
-        addFixedObserved(dates, year, 6, 19);  // Juneteenth
+        addFixedObserved(dates, year, 6, 19); // Juneteenth
     }
-    addFixedObserved(dates, year, 7, 4);       // Independence
-    dates.push_back(nthWeekdayOfMonth(year, 9, Weekday::Monday, 1));   // Labor
-    dates.push_back(nthWeekdayOfMonth(year, 10, Weekday::Monday, 2));  // Columbus
-    addFixedObserved(dates, year, 11, 11);     // Veterans
-    dates.push_back(nthWeekdayOfMonth(year, 11, Weekday::Thursday, 4));  // Thanksgiving
-    addFixedObserved(dates, year, 12, 25);     // Christmas
+    addFixedObserved(dates, year, 7, 4);                                // Independence
+    dates.push_back(nthWeekdayOfMonth(year, 9, Weekday::Monday, 1));    // Labor
+    dates.push_back(nthWeekdayOfMonth(year, 10, Weekday::Monday, 2));   // Columbus
+    addFixedObserved(dates, year, 11, 11);                              // Veterans
+    dates.push_back(nthWeekdayOfMonth(year, 11, Weekday::Thursday, 4)); // Thanksgiving
+    addFixedObserved(dates, year, 12, 25);                              // Christmas
     return dates;
 }
 
 inline std::vector<Date> targetHolidays(int year) {
     // No weekend substitution: TARGET treats weekend days as non-business anyway.
     const Date easter = easterSunday(year);
-    return {Date(year, 1, 1), easter.plusDays(-2), easter.plusDays(1), Date(year, 5, 1),
-            Date(year, 12, 25), Date(year, 12, 26)};
+    return {Date(year, 1, 1), easter.plusDays(-2), easter.plusDays(1),
+            Date(year, 5, 1), Date(year, 12, 25),  Date(year, 12, 26)};
 }
 
 inline std::vector<Date> ukHolidays(int year) {
@@ -116,55 +116,55 @@ inline std::vector<Date> ukHolidays(int year) {
                         ? newYear.plusDays(2)
                         : (newYear.weekday() == Weekday::Sunday ? newYear.plusDays(1) : newYear));
     const Date easter = easterSunday(year);
-    dates.push_back(easter.plusDays(-2));  // Good Friday
-    dates.push_back(easter.plusDays(1));   // Easter Monday
-    dates.push_back(nthWeekdayOfMonth(year, 5, Weekday::Monday, 1));      // Early May
-    dates.push_back(lastWeekdayOfMonth(year, 5, Weekday::Monday));        // Spring
-    dates.push_back(lastWeekdayOfMonth(year, 8, Weekday::Monday));        // Summer
+    dates.push_back(easter.plusDays(-2));                            // Good Friday
+    dates.push_back(easter.plusDays(1));                             // Easter Monday
+    dates.push_back(nthWeekdayOfMonth(year, 5, Weekday::Monday, 1)); // Early May
+    dates.push_back(lastWeekdayOfMonth(year, 5, Weekday::Monday));   // Spring
+    dates.push_back(lastWeekdayOfMonth(year, 8, Weekday::Monday));   // Summer
     const Date christmas(year, 12, 25);
     const Date boxing(year, 12, 26);
     dates.push_back(christmas);
     dates.push_back(boxing);
     if (christmas.weekday() == Weekday::Saturday) {
-        dates.push_back(christmas.plusDays(2));  // Mon 27
+        dates.push_back(christmas.plusDays(2)); // Mon 27
     } else if (christmas.weekday() == Weekday::Sunday) {
-        dates.push_back(christmas.plusDays(2));  // Tue 27 (Boxing Mon 26 already added)
+        dates.push_back(christmas.plusDays(2)); // Tue 27 (Boxing Mon 26 already added)
     }
     if (boxing.weekday() == Weekday::Saturday) {
-        dates.push_back(boxing.plusDays(2));  // Mon 28
+        dates.push_back(boxing.plusDays(2)); // Mon 28
     } else if (boxing.weekday() == Weekday::Sunday) {
-        dates.push_back(boxing.plusDays(2));  // Tue 28
+        dates.push_back(boxing.plusDays(2)); // Tue 28
     }
     return dates;
 }
 
 inline Date equinox(int year, bool vernal) {
     const double base = vernal ? 20.8431 : 23.2488;
-    const int day = static_cast<int>(base + 0.242194 * (year - 1980) -
-                                     static_cast<int>((year - 1980) / 4));
+    const int day =
+        static_cast<int>(base + 0.242194 * (year - 1980) - static_cast<int>((year - 1980) / 4));
     return Date(year, vernal ? 3 : 9, static_cast<unsigned>(day));
 }
 
 inline std::vector<Date> japanHolidays(int year) {
     std::vector<Date> dates;
     dates.push_back(Date(year, 1, 1));
-    dates.push_back(nthWeekdayOfMonth(year, 1, Weekday::Monday, 2));   // Coming of Age
-    dates.push_back(Date(year, 2, 11));                                // Foundation
+    dates.push_back(nthWeekdayOfMonth(year, 1, Weekday::Monday, 2)); // Coming of Age
+    dates.push_back(Date(year, 2, 11));                              // Foundation
     if (year >= 2020) {
-        dates.push_back(Date(year, 2, 23));  // Emperor's Birthday
+        dates.push_back(Date(year, 2, 23)); // Emperor's Birthday
     }
-    dates.push_back(equinox(year, true));  // Vernal equinox
-    dates.push_back(Date(year, 4, 29));    // Showa
-    dates.push_back(Date(year, 5, 3));     // Constitution
-    dates.push_back(Date(year, 5, 4));     // Greenery
-    dates.push_back(Date(year, 5, 5));     // Children's Day
-    dates.push_back(nthWeekdayOfMonth(year, 7, Weekday::Monday, 3));   // Marine
-    dates.push_back(Date(year, 8, 11));                                // Mountain
-    dates.push_back(nthWeekdayOfMonth(year, 9, Weekday::Monday, 3));   // Respect for Aged
-    dates.push_back(equinox(year, false));  // Autumn equinox
-    dates.push_back(nthWeekdayOfMonth(year, 10, Weekday::Monday, 2));  // Sports
-    dates.push_back(Date(year, 11, 3));     // Culture
-    dates.push_back(Date(year, 11, 23));    // Labor Thanksgiving
+    dates.push_back(equinox(year, true));                             // Vernal equinox
+    dates.push_back(Date(year, 4, 29));                               // Showa
+    dates.push_back(Date(year, 5, 3));                                // Constitution
+    dates.push_back(Date(year, 5, 4));                                // Greenery
+    dates.push_back(Date(year, 5, 5));                                // Children's Day
+    dates.push_back(nthWeekdayOfMonth(year, 7, Weekday::Monday, 3));  // Marine
+    dates.push_back(Date(year, 8, 11));                               // Mountain
+    dates.push_back(nthWeekdayOfMonth(year, 9, Weekday::Monday, 3));  // Respect for Aged
+    dates.push_back(equinox(year, false));                            // Autumn equinox
+    dates.push_back(nthWeekdayOfMonth(year, 10, Weekday::Monday, 2)); // Sports
+    dates.push_back(Date(year, 11, 3));                               // Culture
+    dates.push_back(Date(year, 11, 23));                              // Labor Thanksgiving
 
     // Substitute holidays: a Sunday holiday moves to the next non-holiday day.
     for (std::size_t i = 0; i < dates.size(); ++i) {
@@ -179,20 +179,20 @@ inline std::vector<Date> japanHolidays(int year) {
     }
 
     if (year == 2019) {
-        dates.insert(dates.end(), {Date(2019, 4, 30), Date(2019, 5, 1), Date(2019, 5, 2),
-                                   Date(2019, 10, 22)});
+        dates.insert(dates.end(),
+                     {Date(2019, 4, 30), Date(2019, 5, 1), Date(2019, 5, 2), Date(2019, 10, 22)});
     } else if (year == 2020) {
         dates.insert(dates.end(), {Date(2020, 7, 23), Date(2020, 7, 24), Date(2020, 8, 10)});
     } else if (year == 2021) {
-        dates.insert(dates.end(), {Date(2021, 7, 22), Date(2021, 7, 23), Date(2021, 8, 8),
-                                   Date(2021, 8, 9)});
+        dates.insert(dates.end(),
+                     {Date(2021, 7, 22), Date(2021, 7, 23), Date(2021, 8, 8), Date(2021, 8, 9)});
     }
     return dates;
 }
 
-inline std::shared_ptr<const CalendarRuleSet> makeRuleSet(
-    std::string name, std::uint8_t weekendMask, std::function<std::vector<Date>(int)> rule,
-    std::vector<Date> closures = {}) {
+inline std::shared_ptr<const CalendarRuleSet>
+makeRuleSet(std::string name, std::uint8_t weekendMask, std::function<std::vector<Date>(int)> rule,
+            std::vector<Date> closures = {}) {
     auto set = std::make_shared<CalendarRuleSet>();
     set->name = std::move(name);
     set->weekendMask = weekendMask;
@@ -224,14 +224,13 @@ inline std::vector<Date> computeYearHolidays(const CalendarRuleSet& rules, int y
 }
 
 /// Process-wide lazy cache of one year's holidays per rule set.
-inline std::shared_ptr<const std::vector<Date>> yearHolidaysFor(
-    const std::shared_ptr<const CalendarRuleSet>& rules, int year) {
+inline std::shared_ptr<const std::vector<Date>>
+yearHolidaysFor(const std::shared_ptr<const CalendarRuleSet>& rules, int year) {
     static std::mutex mutex;
     static std::unordered_map<std::uint64_t, std::shared_ptr<const std::vector<Date>>> cache;
     const auto pointer = reinterpret_cast<std::uintptr_t>(rules.get()) >> 4;
-    const std::uint64_t key =
-        (static_cast<std::uint64_t>(pointer) * 0x9E3779B97F4A7C15ULL) ^
-        static_cast<std::uint64_t>(static_cast<std::uint32_t>(year));
+    const std::uint64_t key = (static_cast<std::uint64_t>(pointer) * 0x9E3779B97F4A7C15ULL) ^
+                              static_cast<std::uint64_t>(static_cast<std::uint32_t>(year));
     std::lock_guard lock(mutex);
     const auto it = cache.find(key);
     if (it != cache.end()) {
@@ -246,7 +245,7 @@ inline bool sortedContains(const std::vector<Date>& dates, const Date& date) {
     return std::binary_search(dates.begin(), dates.end(), date);
 }
 
-}  // namespace detail
+} // namespace detail
 
 class Calendar {
 public:
@@ -274,8 +273,7 @@ public:
         return Calendar(rules);
     }
     static Calendar target() {
-        static const auto rules =
-            detail::makeRuleSet("TARGET", kSatSun, detail::targetHolidays);
+        static const auto rules = detail::makeRuleSet("TARGET", kSatSun, detail::targetHolidays);
         return Calendar(rules);
     }
     static Calendar unitedKingdom() {
@@ -308,11 +306,10 @@ public:
         const auto holidays = detail::yearHolidaysFor(rules_, date.year());
         return detail::sortedContains(*holidays, date);
     }
-    bool isBusinessDay(const Date& date) const {
-        return !isWeekend(date) && !isHoliday(date);
-    }
+    bool isBusinessDay(const Date& date) const { return !isWeekend(date) && !isHoliday(date); }
 
-    Date adjust(const Date& date, BusinessDayConvention convention = BusinessDayConvention::Following) const {
+    Date adjust(const Date& date,
+                BusinessDayConvention convention = BusinessDayConvention::Following) const {
         switch (convention) {
             case BusinessDayConvention::Unadjusted:
                 return date;
@@ -351,10 +348,18 @@ public:
                  bool endOfMonth = false) const {
         Date unadjusted = date;
         switch (unit) {
-            case TimeUnit::Days: unadjusted = date.plusDays(n); break;
-            case TimeUnit::Weeks: unadjusted = date.plusWeeks(n); break;
-            case TimeUnit::Months: unadjusted = date.plusMonths(n, endOfMonth); break;
-            case TimeUnit::Years: unadjusted = date.plusYears(n, endOfMonth); break;
+            case TimeUnit::Days:
+                unadjusted = date.plusDays(n);
+                break;
+            case TimeUnit::Weeks:
+                unadjusted = date.plusWeeks(n);
+                break;
+            case TimeUnit::Months:
+                unadjusted = date.plusMonths(n, endOfMonth);
+                break;
+            case TimeUnit::Years:
+                unadjusted = date.plusYears(n, endOfMonth);
+                break;
         }
         return adjust(unadjusted, convention);
     }
@@ -395,26 +400,24 @@ public:
             out.extraHolidays_.end());
         if (detail::sortedContains(out.rules_->closures, date)) {
             auto rules = std::make_shared<detail::CalendarRuleSet>(*out.rules_);
-            rules->closures.erase(
-                std::remove(rules->closures.begin(), rules->closures.end(), date),
-                rules->closures.end());
+            rules->closures.erase(std::remove(rules->closures.begin(), rules->closures.end(), date),
+                                  rules->closures.end());
             out.rules_ = std::move(rules);
         }
         return out;
     }
 
 private:
-    static constexpr std::uint8_t kSatSun = 0x60;  // Saturday | Sunday bits
+    static constexpr std::uint8_t kSatSun = 0x60; // Saturday | Sunday bits
 
     static std::vector<Date> usClosures() {
-        return {Date(2001, 9, 11), Date(2001, 9, 12), Date(2001, 9, 13), Date(2001, 9, 14),
+        return {Date(2001, 9, 11), Date(2001, 9, 12), Date(2001, 9, 13),  Date(2001, 9, 14),
                 Date(2004, 6, 11), Date(2007, 1, 2),  Date(2012, 10, 29), Date(2012, 10, 30),
                 Date(2018, 12, 5), Date(2025, 1, 9)};
     }
     static std::vector<Date> ukClosures() {
-        return {Date(2011, 4, 29), Date(2012, 6, 4),  Date(2012, 6, 5),
-                Date(2020, 5, 8),  Date(2022, 6, 3),  Date(2022, 9, 19),
-                Date(2023, 5, 8)};
+        return {Date(2011, 4, 29), Date(2012, 6, 4),  Date(2012, 6, 5), Date(2020, 5, 8),
+                Date(2022, 6, 3),  Date(2022, 9, 19), Date(2023, 5, 8)};
     }
 
     static std::vector<Date> mergeHolidays(std::vector<Date> a, std::vector<Date> b) {
@@ -451,4 +454,4 @@ private:
     std::vector<Date> extraHolidays_;
 };
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

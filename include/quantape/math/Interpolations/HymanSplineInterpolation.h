@@ -35,8 +35,7 @@ namespace quantape::math {
  * @tparam DoubleT Numeric type (`double` or an AD scalar).
  */
 template <typename DoubleT>
-class HymanSplineInterpolation
-    : public Interpolation<DoubleT, HymanSplineInterpolation<DoubleT>> {
+class HymanSplineInterpolation : public Interpolation<DoubleT, HymanSplineInterpolation<DoubleT>> {
     using Base = Interpolation<DoubleT, HymanSplineInterpolation<DoubleT>>;
     friend Base;
 
@@ -108,17 +107,15 @@ private:
         }
         // Natural-spline node derivatives.
         std::vector<double> derivative(n, 0.0);
-        derivative[0] =
-            secant[0] - (this->m_x[1] - this->m_x[0]) * m_secondDerivatives[1] / 6.0;
+        derivative[0] = secant[0] - (this->m_x[1] - this->m_x[0]) * m_secondDerivatives[1] / 6.0;
         for (std::size_t i = 1; i + 1 < n; ++i) {
             const double hLeft = this->m_x[i] - this->m_x[i - 1];
             derivative[i] =
                 secant[i - 1] +
                 hLeft * (m_secondDerivatives[i - 1] + 2.0 * m_secondDerivatives[i]) / 6.0;
         }
-        derivative[n - 1] =
-            secant[n - 2] +
-            (this->m_x[n - 1] - this->m_x[n - 2]) * m_secondDerivatives[n - 2] / 6.0;
+        derivative[n - 1] = secant[n - 2] + (this->m_x[n - 1] - this->m_x[n - 2]) *
+                                                m_secondDerivatives[n - 2] / 6.0;
         // Hyman filter: zero at a sign change, otherwise cap at three times
         // each adjacent secant.
         for (std::size_t i = 0; i < n; ++i) {
@@ -127,9 +124,9 @@ private:
             if (before * after <= 0.0) {
                 m_slopes[i] = 0.0;
             } else {
-                const double magnitude = std::min(
-                    std::abs(derivative[i]),
-                    std::min(3.0 * std::abs(before), 3.0 * std::abs(after)));
+                const double magnitude =
+                    std::min(std::abs(derivative[i]),
+                             std::min(3.0 * std::abs(before), 3.0 * std::abs(after)));
                 m_slopes[i] = std::copysign(magnitude, after);
             }
         }
@@ -138,8 +135,7 @@ private:
     std::size_t segment(double x) const {
         const std::size_t n = this->m_x.size();
         if (!std::isfinite(x)) {
-            throw std::invalid_argument(
-                "HymanSplineInterpolation::segment: non-finite query time");
+            throw std::invalid_argument("HymanSplineInterpolation::segment: non-finite query time");
         }
         if (x <= this->m_x.front()) {
             return 0;

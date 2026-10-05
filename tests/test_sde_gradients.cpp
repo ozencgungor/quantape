@@ -12,6 +12,7 @@
 // Uses Stan rev-mode AD; parallel-safe under STAN_THREADS.
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/mc/ForwardStan.h"
 #include "quantape/mc/Gradients.h"
 #include "quantape/mc/MomentMatching.h"
@@ -24,6 +25,7 @@
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
 #include "quantape/mc/mcfwdrev/LeanGradients.h"
 #include "quantape/payoffs/Indicators.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -33,9 +35,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -57,7 +56,6 @@ namespace {
 
 // ── Small check helpers (bitwise finiteness under -ffast-math) ──
 
-
 bool bitwiseEqual(double a, double b) {
     std::uint64_t ba = 0;
     std::uint64_t bb = 0;
@@ -65,8 +63,6 @@ bool bitwiseEqual(double a, double b) {
     std::memcpy(&bb, &b, sizeof(double));
     return ba == bb;
 }
-
-
 
 double normalCdf(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);
@@ -242,8 +238,7 @@ void testSmoothIndicators() {
     const double x = 0.3 * eps;
     checkClose("indicator derivative inside", smoothIndicatorDerivative(x, eps), 1.0 / eps, 0.0);
     checkClose("indicator derivative outside", smoothIndicatorDerivative(0.8 * eps, eps), 0.0, 0.0);
-    QTA_LOG_INFO("test",
-                 "  [ok] smoothed indicator: ramp/clamp identities, branchless derivative");
+    QTA_LOG_INFO("test", "  [ok] smoothed indicator: ramp/clamp identities, branchless derivative");
 }
 
 // ── Gate 1: AD wiring vs CRN finite differences on the same discretization ──
@@ -292,8 +287,8 @@ void testFdConsistency() {
         const double ad = estimate.gradient(j);
         const double tol = 1e-6 * std::max(1.0, std::fabs(ad));
         checkClose("fd consistency", ad, fd, tol);
-        QTA_LOG_INFO("test", "  [ok] fd param {}: ad={} fd={}", j,
-                     quantape::util::num(ad, 12), quantape::util::num(fd, 12));
+        QTA_LOG_INFO("test", "  [ok] fd param {}: ad={} fd={}", j, quantape::util::num(ad, 12),
+                     quantape::util::num(fd, 12));
     }
 
     // Same gate for a smoothed digital (proves the indicator is
@@ -435,7 +430,8 @@ void testOuExactGradient() {
                  quantape::util::num(estimate.gradient(0), 12), quantape::util::num(exactX0, 12),
                  quantape::util::num(estimate.gradient(1), 6), quantape::util::num(exactKappa, 6),
                  quantape::util::num(estimate.stdErrors(1), 2),
-                 quantape::util::num(estimate.gradient(2), 12), quantape::util::num(exactLevel, 12));
+                 quantape::util::num(estimate.gradient(2), 12),
+                 quantape::util::num(exactLevel, 12));
     checkClose("ou dx0", estimate.gradient(0), exactX0, 1e-10);
     checkClose("ou dkappa", estimate.gradient(1), exactKappa,
                0.001 * std::fabs(exactKappa) + 5.0 * estimate.stdErrors(1));
@@ -562,7 +558,7 @@ void testCheckpointedGradient() {
             doubleValue(GbmModel{}, payoff, grid, thetaSteps, x0, theta, nPaths, 2468);
         CHECK(bitwiseEqual(checkpointed.value, reference));
         QTA_LOG_INFO("test", "  [ok] checkpointed: 1024-step parity bitwise, "
-                                      "full-vs-glued within 1e-8, schedules bitwise");
+                             "full-vs-glued within 1e-8, schedules bitwise");
     }
 }
 
@@ -662,7 +658,8 @@ void testForwardMode() {
         checkClose("fwd milstein rho", fwd.gradient(1), rho,
                    0.015 * std::fabs(rho) + 5.0 * fwd.stdErrors(1));
         QTA_LOG_INFO("test", "  [ok] forward: Milstein BS greeks (d={} v={} r={})",
-                     quantape::util::num(fwd.gradient(0), 4), quantape::util::num(fwd.gradient(2), 4),
+                     quantape::util::num(fwd.gradient(0), 4),
+                     quantape::util::num(fwd.gradient(2), 4),
                      quantape::util::num(fwd.gradient(1), 4));
     }
 
@@ -1229,8 +1226,7 @@ void testStateDerivatives() {
             checkClose("chain-rule handoff", lhs[j], gradient.gradient(j),
                        1e-8 * std::max(1.0, std::fabs(gradient.gradient(j))));
         }
-        QTA_LOG_INFO("test",
-                     "  [ok] state derivatives: chain-rule handoff == simulateGradient");
+        QTA_LOG_INFO("test", "  [ok] state derivatives: chain-rule handoff == simulateGradient");
     }
 }
 
@@ -1279,8 +1275,7 @@ void testSharding() {
     CHECK(bitwiseEqual(estMerged.valueStdError, estFull.valueStdError));
     CHECK((estMerged.gradient.array() == estFull.gradient.array()).all());
     CHECK((estMerged.stdErrors.array() == estFull.stdErrors.array()).all());
-    QTA_LOG_INFO("test",
-                 "  [ok] multiprocessing shards: merged reduction bitwise == single run");
+    QTA_LOG_INFO("test", "  [ok] multiprocessing shards: merged reduction bitwise == single run");
 }
 
 } // namespace

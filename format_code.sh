@@ -23,6 +23,20 @@ if ! command -v clang-format &> /dev/null; then
     exit 1
 fi
 
+if [[ "${1:-}" == "--check" ]]; then
+    echo -e "${GREEN}Checking C++ formatting...${NC}"
+    find . -type f \( -name "*.cpp" -o -name "*.h" \) \
+        ! -path "./cmake*/*" \
+        ! -path "./build*/*" \
+        ! -path "./third-party/*" \
+        -print0 | xargs -0 clang-format --dry-run --Werror || {
+        echo -e "${RED}Formatting check failed: run ./format_code.sh${NC}"
+        exit 1
+    }
+    echo -e "${GREEN}Formatting check passed.${NC}"
+    exit 0
+fi
+
 echo -e "${GREEN}Formatting C++ source files...${NC}"
 echo ""
 

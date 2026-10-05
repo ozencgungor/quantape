@@ -209,8 +209,8 @@ void testSubYearBucketSeparation() {
     // holiday (rolled to 03Mar26) and 2026-09-05 is a weekend (rolled to
     // 07Sep26).
     const datetime::Date reference(2026, 1, 1);
-    const datetime::Calendar calendar = datetime::Calendar::weekendsOnly().withExtraHolidays(
-        {datetime::Date(2026, 3, 2)});
+    const datetime::Calendar calendar =
+        datetime::Calendar::weekendsOnly().withExtraHolidays({datetime::Date(2026, 3, 2)});
     const auto makeDeposit = [&](const datetime::Date& maturity) {
         CurvePillar pillar;
         pillar.kind = PillarKind::Deposit;
@@ -257,11 +257,9 @@ void testGammaInputValidation() {
     sensitivity.back() = 1.0;
     const std::size_t n = curve.size();
     const std::vector<double> tooSmall(n * n - 1, 0.0);
-    checkInvalidArgument("HVdZeros size",
-                         [&] {
-                             (void)markets::curveRiskReport(curve, pillars, reference, sensitivity,
-                                                            {}, &tooSmall);
-                         });
+    checkInvalidArgument("HVdZeros size", [&] {
+        (void)markets::curveRiskReport(curve, pillars, reference, sensitivity, {}, &tooSmall);
+    });
     const std::vector<double> hessian(n * n, 0.0);
     const CurveRiskReport report =
         markets::curveRiskReport(curve, pillars, reference, sensitivity, {}, &hessian);

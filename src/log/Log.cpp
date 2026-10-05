@@ -29,8 +29,8 @@ std::mutex g_mutex;
 Config g_config{};
 bool g_initialized = false;
 std::atomic<Level> g_level{Level::Info};
-std::vector<std::shared_ptr<quill::Sink>> g_sinks_standard;  // info/debug + warn+
-std::vector<std::shared_ptr<quill::Sink>> g_sinks_test;      // terse test/bench pair
+std::vector<std::shared_ptr<quill::Sink>> g_sinks_standard; // info/debug + warn+
+std::vector<std::shared_ptr<quill::Sink>> g_sinks_test;     // terse test/bench pair
 std::unordered_map<std::string, quill::Logger*> g_loggers;
 
 /// Test/benchmark components (names starting with test/bench) use the terse
@@ -187,39 +187,38 @@ void initializeLocked(const Config& config) {
     std::string standard_info;
     std::string standard_diag;
     if (overridePatterns) {
-        standard_info = g_config.pattern.empty()
-                            ? buildPattern(false, showTimeInfo(g_config, false),
-                                           showComponent(g_config, false))
-                            : g_config.pattern;
-        standard_diag = g_config.diagnosticPattern.empty()
-                            ? buildPattern(true, showTimeDiagnostic(g_config),
-                                           showComponent(g_config, false))
-                            : g_config.diagnosticPattern;
+        standard_info =
+            g_config.pattern.empty()
+                ? buildPattern(false, showTimeInfo(g_config, false), showComponent(g_config, false))
+                : g_config.pattern;
+        standard_diag =
+            g_config.diagnosticPattern.empty()
+                ? buildPattern(true, showTimeDiagnostic(g_config), showComponent(g_config, false))
+                : g_config.diagnosticPattern;
     } else {
-        standard_info = buildPattern(false, showTimeInfo(g_config, false),
-                                     showComponent(g_config, false));
-        standard_diag = buildPattern(true, showTimeDiagnostic(g_config),
-                                     showComponent(g_config, false));
+        standard_info =
+            buildPattern(false, showTimeInfo(g_config, false), showComponent(g_config, false));
+        standard_diag =
+            buildPattern(true, showTimeDiagnostic(g_config), showComponent(g_config, false));
     }
-    const std::string test_info = g_config.pattern.empty()
-                                      ? buildPattern(false, showTimeInfo(g_config, true),
-                                                     showComponent(g_config, true))
-                                      : g_config.pattern;
-    const std::string test_diag = g_config.diagnosticPattern.empty()
-                                      ? buildPattern(true, showTimeDiagnostic(g_config),
-                                                     showComponent(g_config, true))
-                                      : g_config.diagnosticPattern;
+    const std::string test_info =
+        g_config.pattern.empty()
+            ? buildPattern(false, showTimeInfo(g_config, true), showComponent(g_config, true))
+            : g_config.pattern;
+    const std::string test_diag =
+        g_config.diagnosticPattern.empty()
+            ? buildPattern(true, showTimeDiagnostic(g_config), showComponent(g_config, true))
+            : g_config.diagnosticPattern;
 
     if (g_config.console) {
-        g_sinks_standard.push_back(makeConsoleSink("quantape_console_info", g_config,
-                                                   standard_info, quill::LogLevel::TraceL3,
+        g_sinks_standard.push_back(makeConsoleSink("quantape_console_info", g_config, standard_info,
+                                                   quill::LogLevel::TraceL3,
                                                    quill::LogLevel::Notice));
-        g_sinks_standard.push_back(makeConsoleSink("quantape_console_diag", g_config,
-                                                   standard_diag, quill::LogLevel::Warning,
+        g_sinks_standard.push_back(makeConsoleSink("quantape_console_diag", g_config, standard_diag,
+                                                   quill::LogLevel::Warning,
                                                    quill::LogLevel::Critical));
         g_sinks_test.push_back(makeConsoleSink("quantape_test_info", g_config, test_info,
-                                               quill::LogLevel::TraceL3,
-                                               quill::LogLevel::Notice));
+                                               quill::LogLevel::TraceL3, quill::LogLevel::Notice));
         g_sinks_test.push_back(makeConsoleSink("quantape_test_diag", g_config, test_diag,
                                                quill::LogLevel::Warning,
                                                quill::LogLevel::Critical));
@@ -230,8 +229,8 @@ void initializeLocked(const Config& config) {
         file_config.set_max_backup_files(g_config.maxFiles);
         // For file sinks the sink name doubles as the file path. The file keeps
         // everything with the full diagnostic header so warnings are traceable.
-        auto sink =
-            quill::Frontend::create_or_get_sink<quill::RotatingFileSink>(g_config.file, file_config);
+        auto sink = quill::Frontend::create_or_get_sink<quill::RotatingFileSink>(g_config.file,
+                                                                                 file_config);
         g_sinks_standard.push_back(sink);
         g_sinks_test.push_back(std::move(sink));
     }
@@ -245,7 +244,7 @@ void initializeLocked(const Config& config) {
     g_initialized = true;
 }
 
-}  // namespace
+} // namespace
 
 void initialize(const Config& config) {
     std::lock_guard lock(g_mutex);
@@ -294,8 +293,7 @@ bool active(Level level) {
     if (level == Level::Off) {
         return false;
     }
-    return static_cast<int>(level) >=
-           static_cast<int>(g_level.load(std::memory_order_relaxed));
+    return static_cast<int>(level) >= static_cast<int>(g_level.load(std::memory_order_relaxed));
 }
 
 Config config() {
@@ -320,8 +318,8 @@ quill::Logger* logger_for(std::string_view component) {
     return logger;
 }
 
-}  // namespace detail
+} // namespace detail
 
-}  // namespace quantape::log
+} // namespace quantape::log
 
-#endif  // QUANTAPE_DISABLE_LOGGING
+#endif // QUANTAPE_DISABLE_LOGGING

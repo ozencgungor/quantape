@@ -8,9 +8,9 @@
 // Reports ns/call per convention and cache size, plus cache bytes and process
 // peak RSS so the memory pressure is visible next to the timings.
 
+#include "quantape/datetime/DayCounter.h"
 #include "quantape/format/Number.h"
 #include "quantape/log/Log.h"
-#include "quantape/datetime/DayCounter.h"
 
 #include <chrono>
 #include <cstdint>
@@ -59,7 +59,7 @@ std::vector<Pair> randomPairs(std::size_t count) {
 
 double peakRssBytes() {
 #if defined(RUSAGE_SELF)
-    struct rusage usage {};
+    struct rusage usage{};
     getrusage(RUSAGE_SELF, &usage);
 #if defined(__APPLE__)
     return static_cast<double>(usage.ru_maxrss);
@@ -90,7 +90,7 @@ struct Workload {
     std::size_t iterations;
 };
 
-}  // namespace
+} // namespace
 
 int main() {
     const std::vector<Pair> schedule = schedulePairs();
@@ -114,7 +114,7 @@ int main() {
     };
 
     const DayCount conventions[] = {
-        DayCount::Actual365Fixed, DayCount::Actual360,  DayCount::ActualActualISDA,
+        DayCount::Actual365Fixed,  DayCount::Actual360,  DayCount::ActualActualISDA,
         DayCount::ActualActualAFB, DayCount::ThirtyE360, DayCount::Actual365Actual,
     };
     const std::size_t cacheSizes[] = {1'024, 65'536, 1'048'576};
@@ -151,8 +151,8 @@ int main() {
                 });
                 const DayCountCacheStats stats = dayCountCacheStats();
                 if (stats.hits + stats.misses == 0) {
-                    QTA_LOG_INFO("bench", "{} {:<9} cache bypassed (cheap convention)",
-                                 convName, workload.name);
+                    QTA_LOG_INFO("bench", "{} {:<9} cache bypassed (cheap convention)", convName,
+                                 workload.name);
                     continue;
                 }
                 const double hitRate = static_cast<double>(stats.hits) /

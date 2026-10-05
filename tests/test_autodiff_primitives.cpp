@@ -11,25 +11,23 @@
 // Run: ./test_autodiff_primitives
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Autodiff/Hvp.h"
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using stan::math::var;
 
 namespace {
-
 
 void testHvp() {
     QTA_LOG_INFO("test", "=== Hessian-vector product ===");

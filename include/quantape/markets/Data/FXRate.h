@@ -43,7 +43,8 @@ public:
      * @param descriptor FX metadata
      */
     FXRate(DoubleT spot, const DiscountCurve<DoubleT>& domesticCurve,
-           const DiscountCurve<DoubleT>& foreignCurve, const FXDescriptor& descriptor = FXDescriptor())
+           const DiscountCurve<DoubleT>& foreignCurve,
+           const FXDescriptor& descriptor = FXDescriptor())
         : m_spot(spot), m_descriptor(descriptor), m_hasCurves(true),
           m_domesticCurve(std::make_unique<DiscountCurve<DoubleT>>(domesticCurve)),
           m_foreignCurve(std::make_unique<DiscountCurve<DoubleT>>(foreignCurve)) {
@@ -156,7 +157,8 @@ public:
     /**
      * @brief Set interest rate curves
      */
-    void setCurves(const DiscountCurve<DoubleT>& domesticCurve, const DiscountCurve<DoubleT>& foreignCurve) {
+    void setCurves(const DiscountCurve<DoubleT>& domesticCurve,
+                   const DiscountCurve<DoubleT>& foreignCurve) {
         m_domesticCurve = std::make_unique<DiscountCurve<DoubleT>>(domesticCurve);
         m_foreignCurve = std::make_unique<DiscountCurve<DoubleT>>(foreignCurve);
         m_hasCurves = true;

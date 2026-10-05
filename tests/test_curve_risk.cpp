@@ -1656,8 +1656,8 @@ void testRebuiltViewIdentityCollision() {
     const markets::StackCurveView::Ptr upAgain = base->rebuildWithNode(1, 1e-3, nullptr);
     CHECK(up->identity() != upAgain->identity());
     CHECK(markets::sameCurveView(*up, *upAgain));
-    QTA_LOG_INFO("test", "rebuilt view identity: D(1.5) up={} down={}",
-                 up->discount(1.5), down->discount(1.5));
+    QTA_LOG_INFO("test", "rebuilt view identity: D(1.5) up={} down={}", up->discount(1.5),
+                 down->discount(1.5));
 }
 
 void testStackGammaValidation() {
@@ -1699,8 +1699,7 @@ void testRebuildWithNodeMetadata() {
                                             reference.plusYears(2)};
     const std::vector<double> pillars{0.03, 0.033, 0.036};
     const DiscountCurve<double> base(reference, dates, act360, pillars,
-                                     InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     const markets::StackCurveView::Ptr view = markets::StackCurveView::make(base);
     const markets::StackCurveView::Ptr bumped = view->rebuildWithNode(1, 0.002, nullptr);
     CHECK(bumped->zeroDayCounter().convention() == datetime::DayCount::Actual360);
@@ -1722,8 +1721,7 @@ void testRebuildWithNodeMetadata() {
     const markets::StackCurveView::Ptr childOver = childView->rebuildWithNode(0, 0.0, bumped);
     CHECK(childOver->zeroDayCounter().convention() == datetime::DayCount::Actual360);
     CHECK(childOver->parentView() != nullptr);
-    CHECK(childOver->parentView()->zeroDayCounter().convention() ==
-          datetime::DayCount::Actual360);
+    CHECK(childOver->parentView()->zeroDayCounter().convention() == datetime::DayCount::Actual360);
 }
 
 void testStackClockPreservedThroughBumps() {
@@ -1738,8 +1736,7 @@ void testStackClockPreservedThroughBumps() {
     const std::vector<datetime::Date> dates{reference.plusYears(1), reference.plusYears(2)};
     const std::vector<double> zeros{0.03, 0.035};
     const DiscountCurve<double> root(reference, dates, act360, zeros,
-                                     InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     std::vector<CurvePillar> rootPillars;
     for (std::size_t i = 0; i < dates.size(); ++i) {
         CurvePillar pillar;
@@ -1751,9 +1748,8 @@ void testStackClockPreservedThroughBumps() {
         rootPillars.push_back(pillar);
     }
     const auto parent = std::make_shared<DiscountCurve<double>>(root);
-    const markets::SpreadCurve<double> child(parent, root.times(),
-                                             std::vector<double>{0.0, 0.001, 0.0015},
-                                             InterpolationScheme::Linear);
+    const markets::SpreadCurve<double> child(
+        parent, root.times(), std::vector<double>{0.0, 0.001, 0.0015}, InterpolationScheme::Linear);
     std::vector<markets::ForecastPillar> childPillars;
     for (int year = 1; year <= 2; ++year) {
         markets::ForecastPillar instrument;

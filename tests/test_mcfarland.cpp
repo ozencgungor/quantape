@@ -3,18 +3,17 @@
  * @brief Tests for the McFarland modified ziggurat: statistical tests, benchmarks
  */
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/McFarlandNormal.h"
 #include "quantape/math/Random/PCGRandom.hpp"
 #include "quantape/math/Random/ZigguratNormal.h"
+#include "quantape/util/Check.h"
 
 #include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <random>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -40,8 +39,8 @@ double timeNs(F&& fn, int reps = 1'000'000) {
 
 void testStatistics() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " STATISTICAL TESTS  (N = 1,000,000,000)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " STATISTICAL TESTS  (N = 1,000,000,000)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     constexpr int N = 1'000'000'000;
     pcg64 rng(12345);
@@ -110,8 +109,8 @@ void testStatistics() {
 
 void testTails() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " TAIL DISTRIBUTION TEST  (N = 10,000,000,000)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " TAIL DISTRIBUTION TEST  (N = 10,000,000,000)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     constexpr long N = 10'000'000'000;
     pcg64 rng(67890);
@@ -134,9 +133,9 @@ void testTails() {
         double expected_frac = std::erfc(thresholds[j] / std::sqrt(2.0));
         double observed_frac = static_cast<double>(counts[j]) / N;
         double ratio = observed_frac / expected_frac;
-        QTA_LOG_INFO("test", "  {} sigma  {}   {}   {}",
-                     quantape::util::num(thresholds[j], 6), quantape::util::num(observed_frac, 6),
-                     quantape::util::num(expected_frac, 6), quantape::util::num(ratio, 6));
+        QTA_LOG_INFO("test", "  {} sigma  {}   {}   {}", quantape::util::num(thresholds[j], 6),
+                     quantape::util::num(observed_frac, 6), quantape::util::num(expected_frac, 6),
+                     quantape::util::num(ratio, 6));
     }
 }
 
@@ -146,8 +145,8 @@ void testTails() {
 
 void benchmark() {
     QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════\n"
-                                  " BENCHMARK  (1,000,000 samples each)\n"
-                                  "═══════════════════════════════════════════════════════════\n");
+                         " BENCHMARK  (1,000,000 samples each)\n"
+                         "═══════════════════════════════════════════════════════════\n");
 
     // McFarland + PCG64
     pcg64 rng_pcg(42);

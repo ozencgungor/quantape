@@ -1,11 +1,10 @@
+#include "quantape/log/Log.h"
 #include "quantape/math/NumericalMethods.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <iomanip>
 #include <iostream>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using namespace quantape::math;
 
@@ -23,8 +22,7 @@ void testIntegration() {
         QTA_LOG_INFO("test", "Trapezoid (Default Policy):");
         QTA_LOG_INFO("test", "  ∫₀¹ x² dx = {}", quantape::util::num(result));
         QTA_LOG_INFO("test", "  Exact     = {}", quantape::util::num(exact));
-        QTA_LOG_INFO("test", "  Error     = {}",
-                     quantape::util::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("test", "  Error     = {}", quantape::util::num(std::fabs(result - exact)));
         QTA_LOG_INFO("test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
@@ -36,8 +34,7 @@ void testIntegration() {
         QTA_LOG_INFO("test", "Trapezoid (MidPoint Policy):");
         QTA_LOG_INFO("test", "  ∫₀¹ x² dx = {}", quantape::util::num(result));
         QTA_LOG_INFO("test", "  Exact     = {}", quantape::util::num(exact));
-        QTA_LOG_INFO("test", "  Error     = {}",
-                     quantape::util::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("test", "  Error     = {}", quantape::util::num(std::fabs(result - exact)));
         QTA_LOG_INFO("test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
@@ -49,8 +46,7 @@ void testIntegration() {
         QTA_LOG_INFO("test", "Simpson's Rule:");
         QTA_LOG_INFO("test", "  ∫₀¹ x² dx = {}", quantape::util::num(result));
         QTA_LOG_INFO("test", "  Exact     = {}", quantape::util::num(exact));
-        QTA_LOG_INFO("test", "  Error     = {}",
-                     quantape::util::num(std::fabs(result - exact)));
+        QTA_LOG_INFO("test", "  Error     = {}", quantape::util::num(std::fabs(result - exact)));
         QTA_LOG_INFO("test", "  Evals     = {}", integrator.numberOfEvaluations());
     }
 
@@ -83,14 +79,11 @@ void testIntegration() {
         double result_gauss = gauss(f_sin, 0.0, M_PI);
 
         QTA_LOG_INFO("test", "Integral of sin(x) from 0 to π:");
-        QTA_LOG_INFO("test", "  Trapezoid  = {} (error: {})",
-                     quantape::util::num(result_trap),
+        QTA_LOG_INFO("test", "  Trapezoid  = {} (error: {})", quantape::util::num(result_trap),
                      quantape::util::num(std::fabs(result_trap - exact)));
-        QTA_LOG_INFO("test", "  Simpson    = {} (error: {})",
-                     quantape::util::num(result_simpson),
+        QTA_LOG_INFO("test", "  Simpson    = {} (error: {})", quantape::util::num(result_simpson),
                      quantape::util::num(std::fabs(result_simpson - exact)));
-        QTA_LOG_INFO("test", "  Gauss-20   = {} (error: {})",
-                     quantape::util::num(result_gauss),
+        QTA_LOG_INFO("test", "  Gauss-20   = {} (error: {})", quantape::util::num(result_gauss),
                      quantape::util::num(std::fabs(result_gauss - exact)));
         QTA_LOG_INFO("test", "  Exact      = {}", quantape::util::num(exact));
     }
@@ -112,8 +105,8 @@ void testSolvers() {
             BisectionSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  Bisection:  root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  Bisection:  root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
 
         // Secant
@@ -121,8 +114,8 @@ void testSolvers() {
             SecantSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  Secant:     root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  Secant:     root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
 
         // Newton (with finite differences)
@@ -130,8 +123,8 @@ void testSolvers() {
             NewtonSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  Newton:     root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  Newton:     root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
 
         // Brent
@@ -139,8 +132,8 @@ void testSolvers() {
             BrentSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  Brent:      root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  Brent:      root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
 
         // Ridder
@@ -148,8 +141,8 @@ void testSolvers() {
             RidderSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  Ridder:     root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  Ridder:     root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
 
         // False Position
@@ -157,8 +150,8 @@ void testSolvers() {
             FalsePositionSolver<double> solver;
             solver.setMaxEvaluations(100);
             double root = solver.solve(f, 1e-10, 1.5, 0.0, 3.0);
-            QTA_LOG_INFO("test", "  FalsePos:   root = {} (error: {})",
-                         quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+            QTA_LOG_INFO("test", "  FalsePos:   root = {} (error: {})", quantape::util::num(root),
+                         quantape::util::num(std::fabs(root - exact)));
         }
     }
 
@@ -173,8 +166,8 @@ void testSolvers() {
         BrentSolver<double> solver;
         double root = solver.solve(f, 1e-10, 1.0, 0.0, 2.0);
 
-        QTA_LOG_INFO("test", "  Brent:      root = {} (error: {})",
-                     quantape::util::num(root), quantape::util::num(std::fabs(root - exact)));
+        QTA_LOG_INFO("test", "  Brent:      root = {} (error: {})", quantape::util::num(root),
+                     quantape::util::num(std::fabs(root - exact)));
         QTA_LOG_INFO("test", "  f(root)     = {}", quantape::util::num(f(root)));
     }
 
@@ -228,8 +221,7 @@ void testQuadratureOnStandardDomain() {
     for (size_t order : {2, 3, 5}) {
         GaussLegendreQuadrature<double> quad(order);
         double result = quad.integrate(poly2, -1.0, 1.0);
-        QTA_LOG_INFO("test", "  Order {}: {} (error: {})", order,
-                     quantape::util::num(result),
+        QTA_LOG_INFO("test", "  Order {}: {} (error: {})", order, quantape::util::num(result),
                      quantape::util::num(std::fabs(result - exact_poly2)));
     }
 
@@ -239,8 +231,7 @@ void testQuadratureOnStandardDomain() {
     for (size_t order : {2, 3, 5}) {
         GaussLegendreQuadrature<double> quad(order);
         double result = quad.integrate(poly4, -1.0, 1.0);
-        QTA_LOG_INFO("test", "  Order {}: {} (error: {})", order,
-                     quantape::util::num(result),
+        QTA_LOG_INFO("test", "  Order {}: {} (error: {})", order, quantape::util::num(result),
                      quantape::util::num(std::fabs(result - exact_poly4)));
     }
 }

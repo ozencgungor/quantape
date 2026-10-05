@@ -730,8 +730,8 @@ void testForecastDepositVarQuote() {
                      primal(baseParent, baseSpreads), 1e-12);
 }
 
-void testForecastFutureVarQuoteCase(markets::FutureStyle style,
-                                    markets::AveragingStyle averaging, const char* tag) {
+void testForecastFutureVarQuoteCase(markets::FutureStyle style, markets::AveragingStyle averaging,
+                                    const char* tag) {
     stan::math::recover_memory();
     const std::vector<double> times{0.0, 1.0, 2.0};
     const std::vector<double> baseParent{0.0, 0.03, 0.035};
@@ -1255,8 +1255,7 @@ int main() {
     testForecastFutureVarQuoteCase(markets::FutureStyle::Simple,
                                    markets::AveragingStyle::Arithmetic, "future simple var");
     testForecastFutureVarQuoteCase(markets::FutureStyle::Averaged,
-                                   markets::AveragingStyle::Arithmetic,
-                                   "future averaged var");
+                                   markets::AveragingStyle::Arithmetic, "future averaged var");
     testForecastFutureVarQuoteCase(markets::FutureStyle::Averaged,
                                    markets::AveragingStyle::Compounded,
                                    "future compounded-average var");

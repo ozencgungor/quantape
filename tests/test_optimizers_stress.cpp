@@ -5,19 +5,18 @@
 // Run: ./build/test_optimizers_stress
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
+#include "quantape/util/Check.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using stan::math::var;
 
@@ -37,8 +36,8 @@ void check(const char* label, bool ok) {
 void checkClose(const char* label, double got, double expected, double tol) {
     const bool ok = std::fabs(got - expected) <= tol;
     if (!ok) {
-        QTA_LOG_ERROR("test", "  {} FAIL got={} expected={}", label,
-                      quantape::util::num(got, 10), quantape::util::num(expected, 10));
+        QTA_LOG_ERROR("test", "  {} FAIL got={} expected={}", label, quantape::util::num(got, 10),
+                      quantape::util::num(expected, 10));
         ++failures;
     } else {
         QTA_LOG_INFO("test", "  {} ok  got={} err={}", label, quantape::util::num(got, 10),
@@ -250,9 +249,9 @@ void stressLbfgs() {
             solver.minimize(q, x, state);
             return static_cast<double>(state.evals);
         });
-        QTA_LOG_INFO("test", "  illcond1e16: evals={} iters={} x0={} x4={} ({} us)",
-                     state.evals, state.iterations, quantape::util::num(x[0], 6),
-                     quantape::util::num(x[4], 6), quantape::util::num(us));
+        QTA_LOG_INFO("test", "  illcond1e16: evals={} iters={} x0={} x4={} ({} us)", state.evals,
+                     state.iterations, quantape::util::num(x[0], 6), quantape::util::num(x[4], 6),
+                     quantape::util::num(us));
         checkClose("illcond1e16 x4", x[4], 1.0, 1e-6);
         // x0 stays near its start on this 1e16 multi-scale problem (global
         // gamma limitation, same as NLopt which fails outright) -- informational.
@@ -423,8 +422,8 @@ void stressConstrained() {
             feasible = feasible && (p[i] - 2.0 * p[i + 1] + p[i + 2] >= -1e-5);
         }
         check("auglag curve arbitrage feasible", feasible);
-        QTA_LOG_INFO("test", "  auglag curve-arb n=20: evals={} iters={} ({} us)",
-                     state.evals, state.iterations, quantape::util::num(us));
+        QTA_LOG_INFO("test", "  auglag curve-arb n=20: evals={} iters={} ({} us)", state.evals,
+                     state.iterations, quantape::util::num(us));
     }
 }
 

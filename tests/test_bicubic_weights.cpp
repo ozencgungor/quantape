@@ -12,16 +12,15 @@
 // Run: ./test_bicubic_weights
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::math::BicubicInterpolation;
 using quantape::math::CubicDerivativeApprox;
@@ -200,8 +199,7 @@ int main() {
                 const double diff = std::abs(v.val() - ref);
                 if (diff > 1e-12 * (1.0 + std::abs(ref))) {
                     QTA_LOG_ERROR(
-                        "test",
-                        "value mismatch: {} smooth={} (x,y)=({},{}) ref={} var={} diff={}",
+                        "test", "value mismatch: {} smooth={} (x,y)=({},{}) ref={} var={} diff={}",
                         methodName(method), smooth, quantape::util::num(x), quantape::util::num(y),
                         quantape::util::num(ref), quantape::util::num(v.val()),
                         quantape::util::num(diff));
@@ -238,8 +236,7 @@ int main() {
                     if (linearInZ) {
                         const double h = maxHessian(x, y, method, smooth);
                         if (h > 1e-7) {
-                            QTA_LOG_ERROR("test",
-                                          "hessian not zero: {} (x,y)=({},{}) max|H|={}",
+                            QTA_LOG_ERROR("test", "hessian not zero: {} (x,y)=({},{}) max|H|={}",
                                           methodName(method), quantape::util::num(x),
                                           quantape::util::num(y), quantape::util::num(h));
                             CHECK(false);
@@ -255,11 +252,10 @@ int main() {
                             }
                         }
                         if (maxdiff > 5e-3 * (1.0 + maxref)) {
-                            QTA_LOG_ERROR("test",
-                                          "hessian mismatch: {} (x,y)=({},{}) maxdiff={} maxref={}",
-                                          methodName(method), quantape::util::num(x),
-                                          quantape::util::num(y), quantape::util::num(maxdiff),
-                                          quantape::util::num(maxref));
+                            QTA_LOG_ERROR(
+                                "test", "hessian mismatch: {} (x,y)=({},{}) maxdiff={} maxref={}",
+                                methodName(method), quantape::util::num(x), quantape::util::num(y),
+                                quantape::util::num(maxdiff), quantape::util::num(maxref));
                             CHECK(false);
                         }
                     }

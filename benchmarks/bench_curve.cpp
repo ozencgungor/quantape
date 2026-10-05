@@ -1,9 +1,8 @@
-#include "quantape/markets/Curves/CurveBuilder.h"
-#include "quantape/markets/Curves/CurveRisk.h"
-#include "quantape/markets/Curves/CurveOnGrid.h"
-#include "quantape/markets/Curves/DiscountCurve.h"
-
 #include "quantape/log/Log.h"
+#include "quantape/markets/Curves/CurveBuilder.h"
+#include "quantape/markets/Curves/CurveOnGrid.h"
+#include "quantape/markets/Curves/CurveRisk.h"
+#include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/util/Check.h"
 
 #include <chrono>
@@ -59,7 +58,8 @@ void benchDiscount() {
         {markets::InterpolationSpace::LogDiscount, markets::InterpolationScheme::Linear, 0.0},
         {markets::InterpolationSpace::Zero, markets::InterpolationScheme::Linear, 0.0},
         {markets::InterpolationSpace::Zero, markets::InterpolationScheme::Akima, 0.0},
-        {markets::InterpolationSpace::LogDiscount, markets::InterpolationScheme::TensionSpline, 8.0},
+        {markets::InterpolationSpace::LogDiscount, markets::InterpolationScheme::TensionSpline,
+         8.0},
         {markets::InterpolationSpace::Zero, markets::InterpolationScheme::MonotoneCubic, 0.0},
         {markets::InterpolationSpace::Zero, markets::InterpolationScheme::MixedLinearCubic, 0.0},
     };
@@ -96,8 +96,8 @@ void benchBootstrap() {
         targetZeros.push_back(0.04 - 0.002 * std::exp(-0.5 * t));
     }
     const markets::DiscountCurve<double> target(reference, pillarDates, zeroDayCounter, targetZeros,
-                                       markets::InterpolationSpace::LogDiscount,
-                                       markets::InterpolationScheme::Linear);
+                                                markets::InterpolationSpace::LogDiscount,
+                                                markets::InterpolationScheme::Linear);
     std::vector<markets::CurvePillar> pillars;
     markets::CurvePillar deposit;
     deposit.maturity = pillarDates.front();
@@ -123,9 +123,9 @@ void benchBootstrap() {
         reference, zeroDayCounter, markets::InterpolationSpace::LogDiscount,
         markets::InterpolationScheme::Linear, pillars);
     for (int i = 0; i < kRepetitions; ++i) {
-        curve = markets::bootstrapDiscountCurve(
-            reference, zeroDayCounter, markets::InterpolationSpace::LogDiscount,
-            markets::InterpolationScheme::Linear, pillars);
+        curve = markets::bootstrapDiscountCurve(reference, zeroDayCounter,
+                                                markets::InterpolationSpace::LogDiscount,
+                                                markets::InterpolationScheme::Linear, pillars);
         sink += curve.zeros().back();
     }
     const auto stop = std::chrono::steady_clock::now();
@@ -153,15 +153,14 @@ void benchBootstrap() {
     }
     const auto riskStop = std::chrono::steady_clock::now();
     g_sink = riskSink;
-    const double riskMicros = std::chrono::duration<double, std::micro>(riskStop - riskStart)
-                                  .count() /
-                              kRiskRepetitions;
+    const double riskMicros =
+        std::chrono::duration<double, std::micro>(riskStop - riskStart).count() / kRiskRepetitions;
     QTA_LOG_INFO("bench", "quote risk 21 pillars  {} us/transform", util::num(riskMicros, 3));
 }
 
 void benchMaterialize() {
-    const DiscountCurve<double> curve = makeCurve(markets::InterpolationSpace::LogDiscount,
-                                                  markets::InterpolationScheme::Linear);
+    const DiscountCurve<double> curve =
+        makeCurve(markets::InterpolationSpace::LogDiscount, markets::InterpolationScheme::Linear);
     constexpr std::size_t kPoints = 1 << 20;
     std::vector<double> times(kPoints);
     for (std::size_t k = 0; k < kPoints; ++k) {
@@ -172,8 +171,8 @@ void benchMaterialize() {
     const auto stop = std::chrono::steady_clock::now();
     g_sink = static_cast<double>(grid.discount.back());
     const double seconds = std::chrono::duration<double>(stop - start).count();
-    QTA_LOG_INFO("bench", "materialize {} points  {} M points/s  ({} ns/point)",
-                 kPoints, util::num(static_cast<double>(kPoints) / seconds / 1e6, 2),
+    QTA_LOG_INFO("bench", "materialize {} points  {} M points/s  ({} ns/point)", kPoints,
+                 util::num(static_cast<double>(kPoints) / seconds / 1e6, 2),
                  util::num(seconds * 1e9 / static_cast<double>(kPoints), 2));
 }
 

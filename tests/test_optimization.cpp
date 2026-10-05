@@ -14,6 +14,7 @@
 // Run: ./test_optimization
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/Constraint.h"
 #include "quantape/math/Optimization/LBFGS.h"
@@ -21,6 +22,7 @@
 #include "quantape/math/Optimization/QpSolver.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdio>
@@ -28,16 +30,12 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using stan::math::fvar;
 using stan::math::var;
 
 namespace {
-
 
 /// f(x) = sum_i w_i (x_i - c_i)^2, grad_i = 2 w_i (x_i - c_i), H = diag(2 w_i)
 struct Quadratic {

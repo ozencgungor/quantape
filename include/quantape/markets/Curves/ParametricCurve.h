@@ -28,8 +28,10 @@ enum class ParametricForm { NelsonSiegel, Svensson };
 
 constexpr std::string_view parametricFormName(ParametricForm form) noexcept {
     switch (form) {
-        case ParametricForm::NelsonSiegel: return "NelsonSiegel";
-        case ParametricForm::Svensson: return "Svensson";
+        case ParametricForm::NelsonSiegel:
+            return "NelsonSiegel";
+        case ParametricForm::Svensson:
+            return "Svensson";
     }
     return "Unknown";
 }
@@ -111,13 +113,12 @@ struct ParametricCurve {
                 b2Init = (zeros[mid] - b0Init - b1Init * decay) / denominator;
             }
         }
-        std::vector<double> x{b0Init, b1Init, b2Init, std::log(tauInit), 0.0,
-                              std::log(5.0)};
+        std::vector<double> x{b0Init, b1Init, b2Init, std::log(tauInit), 0.0, std::log(5.0)};
         const auto residual = [&](const std::vector<double>& point, std::vector<double>& out) {
             ParametricCurve trial;
             trial.form = form;
-            trial.parameters = {point[0], point[1], point[2], std::exp(point[3]), point[4],
-                                std::exp(point[5])};
+            trial.parameters = {point[0],           point[1], point[2],
+                                std::exp(point[3]), point[4], std::exp(point[5])};
             out.clear();
             out.reserve(n);
             for (std::size_t i = 0; i < n; ++i) {
@@ -126,7 +127,8 @@ struct ParametricCurve {
         };
         math::LevenbergMarquardtOptions options;
         options.maxIterations = 500;
-        const math::LevenbergMarquardtResult result = math::levenbergMarquardt(residual, x, options);
+        const math::LevenbergMarquardtResult result =
+            math::levenbergMarquardt(residual, x, options);
         if (result.status == math::OptimizeResult::Failure) {
             throw std::runtime_error("ParametricCurve::fit: LM failed");
         }

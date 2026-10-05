@@ -9,8 +9,10 @@
 //     dimension gap, changed prefix) and random valid tables pass
 //
 // Tool paths are injected by CMake (EXTEND_BIN / REFINE_BIN / VERIFY_BIN).
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdint>
@@ -22,8 +24,6 @@
 #include <string>
 #include <vector>
 
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 #include <unistd.h>
 
 #ifndef EXTEND_BIN
@@ -163,8 +163,7 @@ int main() {
         CHECK(resumed.size() == 43 && resumed.back().dim == 44);
         CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + resumedPath.string() + "\" --base=\"" +
                   basePath.string() + "\" --sample=4 --m=12 2>/dev/null") == 0);
-        QTA_LOG_INFO("test",
-                     "  [ok] extend: structure, net exactness, determinism, resume");
+        QTA_LOG_INFO("test", "  [ok] extend: structure, net exactness, determinism, resume");
     }
 
     // ── refine: objective non-increasing, valid, deterministic, dry-run ──
@@ -277,8 +276,7 @@ int main() {
             CHECK(run(std::string(VERIFY_BIN) + " --input=\"" + path.string() +
                       "\" --sample=3 --m=10 2>/dev/null") == 0);
         }
-        QTA_LOG_INFO("test",
-                     "  [ok] verify: 5 negative cases fail, 10 random valid tables pass");
+        QTA_LOG_INFO("test", "  [ok] verify: 5 negative cases fail, 10 random valid tables pass");
     }
 
     std::filesystem::remove_all(tmp);

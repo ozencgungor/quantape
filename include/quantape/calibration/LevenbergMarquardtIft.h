@@ -60,13 +60,10 @@ auto leastSquaresCost(const Residual& residual, const auto& x, const auto& m) {
 }
 
 template <typename Residual>
-LevenbergMarquardtResult solveLeastSquares(const Residual& residual,
-                                           const std::vector<double>& market,
-                                           std::vector<double>& x,
-                                           const LevenbergMarquardtOptions& options) {
-    const auto wrapped = [&](const auto& point, auto& out) {
-        residual(point, market, out);
-    };
+LevenbergMarquardtResult
+solveLeastSquares(const Residual& residual, const std::vector<double>& market,
+                  std::vector<double>& x, const LevenbergMarquardtOptions& options) {
+    const auto wrapped = [&](const auto& point, auto& out) { residual(point, market, out); };
     return levenbergMarquardtAd(wrapped, x, options);
 }
 
@@ -149,10 +146,9 @@ OptimizeResult levenbergMarquardtDifferential(
 template <typename Residual>
 OptimizeResult levenbergMarquardtDifferentialVar(
     const Residual& residual, const std::vector<stan::math::var>& mVar,
-    const std::vector<double>& x0, std::vector<stan::math::var>& pHat,
-    IftResult* iftOut = nullptr, OptimizerState* stateOut = nullptr,
-    const LevenbergMarquardtOptions& lmOptions = {}, const IftOptions& iftOptions = {},
-    bool allowRidge = false) {
+    const std::vector<double>& x0, std::vector<stan::math::var>& pHat, IftResult* iftOut = nullptr,
+    OptimizerState* stateOut = nullptr, const LevenbergMarquardtOptions& lmOptions = {},
+    const IftOptions& iftOptions = {}, bool allowRidge = false) {
     const std::size_t marketSize = mVar.size();
     std::vector<double> market(marketSize);
     for (std::size_t j = 0; j < marketSize; ++j) {
@@ -162,8 +158,8 @@ OptimizeResult levenbergMarquardtDifferentialVar(
     IftResult ift;
     std::vector<double> dpDm;
     LevenbergMarquardtResult lm;
-    const OptimizeResult result = levenbergMarquardtDifferential(
-        residual, x0, market, x, ift, &dpDm, lmOptions, iftOptions, &lm);
+    const OptimizeResult result = levenbergMarquardtDifferential(residual, x0, market, x, ift,
+                                                                 &dpDm, lmOptions, iftOptions, &lm);
     if (!detail::iftAcceptableStatus(result)) {
         return result;
     }
@@ -188,13 +184,12 @@ OptimizeResult levenbergMarquardtDifferentialVar(
         for (std::size_t j = 0; j < marketSize; ++j) {
             row[j] = dpDm[k * marketSize + j];
         }
-        pHat[k] = stan::math::make_callback_var(
-            x[k], [marketVaris, row, marketSize](auto& vi) {
-                const double adjoint = vi.adj();
-                for (std::size_t j = 0; j < marketSize; ++j) {
-                    marketVaris[j]->adj_ += adjoint * row[j];
-                }
-            });
+        pHat[k] = stan::math::make_callback_var(x[k], [marketVaris, row, marketSize](auto& vi) {
+            const double adjoint = vi.adj();
+            for (std::size_t j = 0; j < marketSize; ++j) {
+                marketVaris[j]->adj_ += adjoint * row[j];
+            }
+        });
     }
     if (iftOut) {
         *iftOut = ift;

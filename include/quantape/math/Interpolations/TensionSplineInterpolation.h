@@ -139,8 +139,7 @@ private:
         for (std::size_t i = 0; i < interior; ++i) {
             m_m[i + 1] = solution[i];
         }
-        m_firstSlope =
-            (this->m_y[1] - this->m_y[0]) / m_h[0] + (m_a[0] / m_h[0]) * m_m[1];
+        m_firstSlope = (this->m_y[1] - this->m_y[0]) / m_h[0] + (m_a[0] / m_h[0]) * m_m[1];
         const std::size_t last = n - 2;
         m_lastSlope = (this->m_y[last + 1] - this->m_y[last]) / m_h[last] +
                       (m_a[last] / m_h[last]) * m_m[last];
@@ -189,8 +188,8 @@ private:
         const double right = xRight - x;
         const double left = x - xLeft;
         return m_m[j] * (-invLambda * m_sigma * std::cosh(m_sigma * right)) +
-               m_m[j + 1] * (invLambda * m_sigma * std::cosh(m_sigma * left)) -
-               this->m_y[j] / h + m_m[j] / (m_sigma * m_sigma * h) + this->m_y[j + 1] / h -
+               m_m[j + 1] * (invLambda * m_sigma * std::cosh(m_sigma * left)) - this->m_y[j] / h +
+               m_m[j] / (m_sigma * m_sigma * h) + this->m_y[j + 1] / h -
                m_m[j + 1] / (m_sigma * m_sigma * h);
     }
 

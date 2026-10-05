@@ -110,8 +110,8 @@ inline int numberOfLeapDays(const Date& d1, const Date& d2) {
 }
 
 inline double thirty360Days(const Ymd& a, int day1, const Ymd& b, int day2) {
-    return static_cast<double>(360 * (b.year - a.year) + 30 * (static_cast<int>(b.month) -
-                                                               static_cast<int>(a.month)) +
+    return static_cast<double>(360 * (b.year - a.year) +
+                               30 * (static_cast<int>(b.month) - static_cast<int>(a.month)) +
                                (day2 - day1));
 }
 
@@ -194,22 +194,21 @@ inline std::vector<Date> quasiCouponDates(const Schedule& schedule) {
     }
     if (!schedule.isRegular(0)) {
         const Date issue = dates[0];
-        const Date notionalFirst = calendar.advance(original[1], -tenor.length(), tenor.unit(),
-                                                    convention, endOfMonth);
+        const Date notionalFirst =
+            calendar.advance(original[1], -tenor.length(), tenor.unit(), convention, endOfMonth);
         dates[0] = notionalFirst;
         if (notionalFirst > issue) {
-            dates.insert(dates.begin(),
-                         calendar.advance(notionalFirst, -tenor.length(), tenor.unit(),
-                                          convention, endOfMonth));
+            dates.insert(dates.begin(), calendar.advance(notionalFirst, -tenor.length(),
+                                                         tenor.unit(), convention, endOfMonth));
         }
     }
     if (!schedule.isRegular(n - 2)) {
-        const Date notionalLast = calendar.advance(original[n - 2], tenor.length(), tenor.unit(),
-                                                   convention, endOfMonth);
+        const Date notionalLast =
+            calendar.advance(original[n - 2], tenor.length(), tenor.unit(), convention, endOfMonth);
         dates[n - 1] = notionalLast;
         if (notionalLast < schedule.endDate()) {
-            dates.push_back(calendar.advance(notionalLast, tenor.length(), tenor.unit(),
-                                             convention, endOfMonth));
+            dates.push_back(calendar.advance(notionalLast, tenor.length(), tenor.unit(), convention,
+                                             endOfMonth));
         }
     }
     return dates;
@@ -440,11 +439,10 @@ inline double yearFractionFor(DayCount convention, const Date& d1, const Date& d
             }
             if (day2 == 31) {
                 day2 = 1;
-                month2 += 1;  // no need to carry December into January (Strata)
+                month2 += 1; // no need to carry December into January (Strata)
             }
             return static_cast<double>(360 * (b.year - a.year) +
-                                       30 * (month2 - static_cast<int>(a.month)) +
-                                       (day2 - day1)) /
+                                       30 * (month2 - static_cast<int>(a.month)) + (day2 - day1)) /
                    360.0;
         }
         case DayCount::Thirty360Italian: {
@@ -517,6 +515,6 @@ inline double yearFractionFor(DayCount convention, const Date& d1, const Date& d
     return days / 365.0;
 }
 
-}  // namespace detail
+} // namespace detail
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

@@ -651,8 +651,8 @@ inline void forecastSimpleJacobianRows(const SpreadCurve<double>& child,
 template <typename ChildT, typename ParentT>
 inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
                                    const ForecastPillar& pillar,
-                                   const datetime::Date& referenceDate,
-                                   std::vector<double>& ownRow, std::vector<double>& parentRow) {
+                                   const datetime::Date& referenceDate, std::vector<double>& ownRow,
+                                   std::vector<double>& parentRow) {
     const datetime::DayCounter& zeroDayCounter = child.zeroDayCounter();
     ownRow.assign(child.size() - 1, 0.0);
     parentRow.assign(parent.size() - 1, 0.0);
@@ -664,8 +664,7 @@ inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
         }
         curve.zeroNodeWeights(time, out);
     };
-    const double startTime =
-        datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
+    const double startTime = datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
     if (!(startTime >= 0.0)) {
         throw std::invalid_argument(
             "forecastFutureRowsCore: futures fixing before the reference date");
@@ -682,15 +681,14 @@ inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
         std::vector<double> weightsStart;
         std::vector<double> weightsEnd;
         for (std::size_t k = 0; k < periods; ++k) {
-            const double tau = datetime::yearFraction(fixings[k], fixings[k + 1],
-                                                      pillar.quoteDayCounter);
+            const double tau =
+                datetime::yearFraction(fixings[k], fixings[k + 1], pillar.quoteDayCounter);
             if (!(tau > 0.0)) {
                 throw std::invalid_argument(
                     "forecastFutureRowsCore: non-positive averaged futures accrual");
             }
             const double t1 = datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter);
-            const double t2 =
-                datetime::yearFraction(referenceDate, fixings[k + 1], zeroDayCounter);
+            const double t2 = datetime::yearFraction(referenceDate, fixings[k + 1], zeroDayCounter);
             const double d1 = child.discount(t1);
             const double d2 = child.discount(t2);
             const double ratio = d1 / d2;
@@ -699,8 +697,8 @@ inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
                 weightsAt(weightsCurve, t1, weightsStart);
                 weightsAt(weightsCurve, t2, weightsEnd);
                 for (std::size_t j = 1; j < row.size() + 1; ++j) {
-                    row[j - 1] += scale * (-t1 * d1 * weightsStart[j] +
-                                           ratio * t2 * d2 * weightsEnd[j]);
+                    row[j - 1] +=
+                        scale * (-t1 * d1 * weightsStart[j] + ratio * t2 * d2 * weightsEnd[j]);
                 }
             };
             accumulate(child, ownRow);
@@ -722,8 +720,7 @@ inline void forecastFutureRowsCore(const ChildT& child, const ParentT& parent,
     if (!(tau > 0.0)) {
         throw std::invalid_argument("forecastFutureRowsCore: non-positive futures accrual");
     }
-    const double endTime =
-        datetime::yearFraction(referenceDate, pillar.maturity, zeroDayCounter);
+    const double endTime = datetime::yearFraction(referenceDate, pillar.maturity, zeroDayCounter);
     const double d1 = child.discount(startTime);
     const double d2 = child.discount(endTime);
     std::vector<double> weightsStart;
@@ -1129,12 +1126,13 @@ forecastSimpleJacobianRowsView(const StackCurveView& child, const StackCurveView
 /// curve shifts the child forwards one-for-one with its parent) and a zero
 /// discount row. The optional weight sources express the parent partial on an
 /// ancestor curve's node grid for depth-2 chains.
-inline void forecastFutureJacobianRowsView(
-    const StackCurveView& child, const StackCurveView& parent, const StackCurveView& discount,
-    const ForecastPillar& pillar, const datetime::Date& referenceDate,
-    std::vector<double>& ownRow, std::vector<double>& parentRow, std::vector<double>& discountRow,
-    const StackCurveView* parentWeights = nullptr,
-    const StackCurveView* discountWeights = nullptr) {
+inline void
+forecastFutureJacobianRowsView(const StackCurveView& child, const StackCurveView& parent,
+                               const StackCurveView& discount, const ForecastPillar& pillar,
+                               const datetime::Date& referenceDate, std::vector<double>& ownRow,
+                               std::vector<double>& parentRow, std::vector<double>& discountRow,
+                               const StackCurveView* parentWeights = nullptr,
+                               const StackCurveView* discountWeights = nullptr) {
     const StackCurveView& parentWeightCurve = parentWeights != nullptr ? *parentWeights : parent;
     const StackCurveView& discountWeightCurve =
         discountWeights != nullptr ? *discountWeights : discount;
@@ -1192,8 +1190,7 @@ inline void appendStackQuoteMetadata(const StackCurveInput& input,
         years.push_back(static_cast<int>(std::lround(t)));
         roles.push_back(pillar.turnPillar ? CurveRole::TurnOverlay : input.role);
         if (pillar.turnPillar) {
-            const datetime::Date start =
-                pillar.start.serial() != 0 ? pillar.start : referenceDate;
+            const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
             const std::string label = "Turn " + start.toIso();
             buckets.push_back(label);
             labels.push_back(label);
@@ -1276,38 +1273,36 @@ inline StackQuoteSystem assembleStackQuoteSystem(const std::vector<StackCurveInp
         }
         const StackCurveView& parent = *input.curve->parentView();
         const StackCurveView& discount = input.discount ? *input.discount : parent;
-        const auto assembleRows =
-            [&](const ForecastPillar& pillar, const StackCurveView* parentWeights,
-                const StackCurveView* discountWeights, std::vector<double>& ownRow,
-                std::vector<double>& parentRow, std::vector<double>& discountRow) {
-                switch (pillar.kind) {
-                    case ForecastPillar::Kind::Irs:
-                        irsSwapJacobianRowsView(*input.curve, parent, discount, pillar.irs,
-                                                referenceDate, ownRow, parentRow, discountRow,
-                                                parentWeights, discountWeights);
-                        return;
-                    case ForecastPillar::Kind::Deposit:
-                    case ForecastPillar::Kind::Fra:
-                        forecastSimpleJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                       referenceDate, ownRow, parentRow,
-                                                       discountRow, parentWeights,
-                                                       discountWeights);
-                        return;
-                    case ForecastPillar::Kind::Future:
-                        forecastFutureJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                       referenceDate, ownRow, parentRow,
-                                                       discountRow, parentWeights,
-                                                       discountWeights);
-                        return;
-                    case ForecastPillar::Kind::BasisSwap:
-                        basisSwapJacobianRowsView(*input.curve, parent, discount, pillar.basis,
-                                                  referenceDate, ownRow, parentRow, discountRow,
-                                                  parentWeights, discountWeights);
-                        return;
-                }
-                throw std::invalid_argument(
-                    "assembleStackQuoteSystem: unknown forecast pillar kind");
-            };
+        const auto assembleRows = [&](const ForecastPillar& pillar,
+                                      const StackCurveView* parentWeights,
+                                      const StackCurveView* discountWeights,
+                                      std::vector<double>& ownRow, std::vector<double>& parentRow,
+                                      std::vector<double>& discountRow) {
+            switch (pillar.kind) {
+                case ForecastPillar::Kind::Irs:
+                    irsSwapJacobianRowsView(*input.curve, parent, discount, pillar.irs,
+                                            referenceDate, ownRow, parentRow, discountRow,
+                                            parentWeights, discountWeights);
+                    return;
+                case ForecastPillar::Kind::Deposit:
+                case ForecastPillar::Kind::Fra:
+                    forecastSimpleJacobianRowsView(*input.curve, parent, discount, pillar,
+                                                   referenceDate, ownRow, parentRow, discountRow,
+                                                   parentWeights, discountWeights);
+                    return;
+                case ForecastPillar::Kind::Future:
+                    forecastFutureJacobianRowsView(*input.curve, parent, discount, pillar,
+                                                   referenceDate, ownRow, parentRow, discountRow,
+                                                   parentWeights, discountWeights);
+                    return;
+                case ForecastPillar::Kind::BasisSwap:
+                    basisSwapJacobianRowsView(*input.curve, parent, discount, pillar.basis,
+                                              referenceDate, ownRow, parentRow, discountRow,
+                                              parentWeights, discountWeights);
+                    return;
+            }
+            throw std::invalid_argument("assembleStackQuoteSystem: unknown forecast pillar kind");
+        };
         for (const ForecastPillar& pillar : input.forecastPillars) {
             std::vector<double> ownRow;
             std::vector<double> parentRow;
@@ -2005,10 +2000,9 @@ stackQuoteRiskXccy(const DiscountCurve<double>& root, const std::vector<CurvePil
         childEntry.role = child.role;
         childEntry.quoteDeltas = xChild;
         for (const XccyPillar& pillar : child.pillars) {
-            const datetime::Date maturity = pillar.foreignCalendar.adjust(
-                pillar.maturity, pillar.foreignBusinessDayConvention);
-            const double t = datetime::yearFraction(referenceDate, maturity,
-                                                    root.zeroDayCounter());
+            const datetime::Date maturity =
+                pillar.foreignCalendar.adjust(pillar.maturity, pillar.foreignBusinessDayConvention);
+            const double t = datetime::yearFraction(referenceDate, maturity, root.zeroDayCounter());
             const std::string tag = riskMaturityTag(maturity, t);
             childEntry.quoteYears.push_back(static_cast<int>(std::lround(t)));
             childEntry.quoteRoles.push_back(child.role);

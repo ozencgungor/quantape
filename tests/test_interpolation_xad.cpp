@@ -12,15 +12,14 @@
 // Run: ./test_interpolation_xad
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using quantape::math::BilinearInterpolation;
@@ -89,7 +88,6 @@ Eigen::Matrix<double, -1, -1> hessian2D(double x, double y,
         flat, fx, grad, H);
     return H;
 }
-
 
 void testLinear() {
     QTA_LOG_INFO("test", "=== linear evaluation-point AD ===");

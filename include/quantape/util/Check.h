@@ -120,10 +120,10 @@ concept ValAdjScalar = requires(const T& x) {
 }
 
 /// AD-scalar mismatch reporter (value vs adjoint).
-[[noreturn]] inline void failAdPart(const char* label, const char* part, double got, double expected,
-                                    double tol) {
-    std::fprintf(stderr, "FAIL: %s %s got=%s expected=%s tol=%s\n", label, part, num(got, 12).c_str(),
-                 num(expected, 12).c_str(), num(tol, 3).c_str());
+[[noreturn]] inline void failAdPart(const char* label, const char* part, double got,
+                                    double expected, double tol) {
+    std::fprintf(stderr, "FAIL: %s %s got=%s expected=%s tol=%s\n", label, part,
+                 num(got, 12).c_str(), num(expected, 12).c_str(), num(tol, 3).c_str());
     std::fflush(nullptr);
     std::_Exit(1);
 }

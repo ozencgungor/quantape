@@ -28,6 +28,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+
 #include <Eigen/Dense>
 
 #include <chrono>
@@ -36,9 +39,6 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using stan::math::fvar;
 using stan::math::var;
@@ -416,10 +416,9 @@ double bench_us(F&& fn, int N) {
 }
 
 int main() {
-    QTA_LOG_INFO("test",
-                 "╔═══════════════════════════════════════════════════════════════╗\n"
-                 "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain       ║\n"
-                 "╚═══════════════════════════════════════════════════════════════╝\n");
+    QTA_LOG_INFO("test", "╔═══════════════════════════════════════════════════════════════╗\n"
+                         "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain       ║\n"
+                         "╚═══════════════════════════════════════════════════════════════╝\n");
 
     // Setup: 6-pillar yield curve
     constexpr int N_PILLARS = 6;
@@ -608,8 +607,7 @@ int main() {
 
     // ── 4. Architecture summary ──
     QTA_LOG_INFO("test", "\n── Architecture ──\n");
-    QTA_LOG_INFO("test",
-                 "  Each function provides overloads for {{double, var, fvar<var>}}.");
+    QTA_LOG_INFO("test", "  Each function provides overloads for {{double, var, fvar<var>}}.");
     QTA_LOG_INFO("test", "  Composition via fvar<var> chains automatically.\n");
     QTA_LOG_INFO("test", "  Level 0 (black box):   fvar<var> tapes everything");
     QTA_LOG_INFO("test", "  Level 1 (grad as var): make_callback_var for 1st order,");
@@ -623,7 +621,6 @@ int main() {
     QTA_LOG_INFO("test", "  H_total = J_g^T · H_f · J_g  +  Σ_a (∂f/∂g_a) · H_g_a");
     QTA_LOG_INFO("test", "  (AD computes this automatically via fvar<var> composition)");
 
-    QTA_LOG_INFO("test",
-                 "\n═══════════════════════════════════════════════════════════════");
+    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════════");
     return 0;
 }

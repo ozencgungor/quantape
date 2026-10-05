@@ -23,6 +23,7 @@
 
 #include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/calibration/HestonCalibration.h"
+#include "quantape/log/Log.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
@@ -30,6 +31,7 @@
 #include "quantape/models/HestonModel.h"
 #include "quantape/models/HestonStanPrimitives.h"
 #include "quantape/pricing/BlackScholes.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -43,9 +45,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using quantape::models::HestonFullPoint;
@@ -56,7 +55,6 @@ using quantape::models::HestonParams;
 namespace {
 
 constexpr int kNumParams = quantape::models::HESTON_PARAM_COUNT;
-
 
 struct Quote {
     double strike = 1.0;
@@ -515,8 +513,7 @@ struct NoiseStats {
 };
 
 void runNoiseStudy() {
-    QTA_LOG_INFO("test",
-                 "NOISE MONTE CARLO (LM Gauss-Newton, vega weights, 40 seeds per level)");
+    QTA_LOG_INFO("test", "NOISE MONTE CARLO (LM Gauss-Newton, vega weights, 40 seeds per level)");
     const double levels[3] = {0.001, 0.002, 0.005};
     const std::vector<double> start{0.05, 1.5, 0.05, 0.5, -0.3};
     for (double noise : levels) {
@@ -634,8 +631,7 @@ void testFixedMarketAdapter() {
     }
     fullUs /= 10.0;
     fixedUs /= 10.0;
-    QTA_LOG_INFO("test",
-                 "  assemble per quote-set: full 9-param {} us, fixed 5-param {} us ({}x)",
+    QTA_LOG_INFO("test", "  assemble per quote-set: full 9-param {} us, fixed 5-param {} us ({}x)",
                  quantape::util::num(fullUs, 1), quantape::util::num(fixedUs, 1),
                  quantape::util::num(fullUs / fixedUs, 2));
 
@@ -662,8 +658,8 @@ void testFixedMarketAdapter() {
 // ── Reporting ──
 
 void printRun(const Run& run) {
-    QTA_LOG_INFO("test", "  {} f={} iters={} evals={} {} ms converged={} maxdparam={}",
-                 run.name, quantape::util::num(run.f, 3), run.iterations, run.evals,
+    QTA_LOG_INFO("test", "  {} f={} iters={} evals={} {} ms converged={} maxdparam={}", run.name,
+                 quantape::util::num(run.f, 3), run.iterations, run.evals,
                  quantape::util::num(run.ms, 1), run.converged ? "yes" : "no",
                  quantape::util::num(run.maxParamErr, 2));
     std::string xLine = "      x = [";
@@ -675,10 +671,9 @@ void printRun(const Run& run) {
 }
 
 void printTruth(const Fixture& fx) {
-    QTA_LOG_INFO("test", "  truth = [{}, {}, {}, {}, {}]",
-                 quantape::util::num(fx.truth.v0, 6), quantape::util::num(fx.truth.kappa, 6),
-                 quantape::util::num(fx.truth.theta, 6), quantape::util::num(fx.truth.sigma, 6),
-                 quantape::util::num(fx.truth.rho, 6));
+    QTA_LOG_INFO("test", "  truth = [{}, {}, {}, {}, {}]", quantape::util::num(fx.truth.v0, 6),
+                 quantape::util::num(fx.truth.kappa, 6), quantape::util::num(fx.truth.theta, 6),
+                 quantape::util::num(fx.truth.sigma, 6), quantape::util::num(fx.truth.rho, 6));
 }
 
 double noiseFloor(const FitProblem& prob) {
@@ -699,9 +694,8 @@ int main() {
 
     for (int noisy = 0; noisy < 2; ++noisy) {
         Fixture fx = makeFixture(noisy ? 0.002 : 0.0, 42u + static_cast<unsigned>(noisy));
-        QTA_LOG_INFO("test", "{} data ({} quotes, noise {}%)",
-                     noisy ? "NOISY" : "NOISELESS", fx.quotes.size(),
-                     quantape::util::num(noisy ? 0.2 : 0.0, 2));
+        QTA_LOG_INFO("test", "{} data ({} quotes, noise {}%)", noisy ? "NOISY" : "NOISELESS",
+                     fx.quotes.size(), quantape::util::num(noisy ? 0.2 : 0.0, 2));
         printTruth(fx);
         {
             FitProblem pt;
@@ -712,7 +706,8 @@ int main() {
             const double uniformF = pt.value(truth5);
             pt.weights = WeightMode::Vega;
             QTA_LOG_INFO("test", "  [check] f(truth) uniform={}  vega={}",
-                         quantape::util::num(uniformF, 6), quantape::util::num(pt.value(truth5), 6));
+                         quantape::util::num(uniformF, 6),
+                         quantape::util::num(pt.value(truth5), 6));
         }
 
         {
@@ -913,9 +908,9 @@ int main() {
             const double gUnconstrained = unconstrained.x[3] * unconstrained.x[3] -
                                           2.0 * unconstrained.x[1] * unconstrained.x[2];
             const bool binding = gUnconstrained > 0.01;
-            QTA_LOG_INFO(
-                "test", "  {}: Feller 2*kappa*theta - sigma^2 at unconstrained = {} ({})",
-                label, quantape::util::num(-gUnconstrained, 6), binding ? "VIOLATED" : "satisfied");
+            QTA_LOG_INFO("test", "  {}: Feller 2*kappa*theta - sigma^2 at unconstrained = {} ({})",
+                         label, quantape::util::num(-gUnconstrained, 6),
+                         binding ? "VIOLATED" : "satisfied");
 
             // Reference: the boundary optimum by construction
             // (sigma = sqrt(2 kappa theta), 4 free parameters).
@@ -974,17 +969,16 @@ int main() {
                     kkt = std::max(kkt,
                                    std::fabs(grad[static_cast<std::size_t>(k)] + lambda * dg[k]));
                 }
-                QTA_LOG_INFO("test",
-                             "  AUGLAG Feller ({})  f={}  g={}  lambda={}  KKT={}  evals={} {} ms",
-                             quantape::math::to_string(result),
-                             quantape::util::num(prob.value(x), 6), quantape::util::num(g, 2),
-                             quantape::util::num(lambda, 6), quantape::util::num(kkt, 2), state.evals,
-                             quantape::util::num(
-                                 std::chrono::duration<double, std::milli>(t1 - t0).count(), 1));
-                QTA_LOG_INFO("test", "      x = [{}, {}, {}, {}, {}]",
-                             quantape::util::num(x[0], 6), quantape::util::num(x[1], 6),
-                             quantape::util::num(x[2], 6), quantape::util::num(x[3], 6),
-                             quantape::util::num(x[4], 6));
+                QTA_LOG_INFO(
+                    "test", "  AUGLAG Feller ({})  f={}  g={}  lambda={}  KKT={}  evals={} {} ms",
+                    quantape::math::to_string(result), quantape::util::num(prob.value(x), 6),
+                    quantape::util::num(g, 2), quantape::util::num(lambda, 6),
+                    quantape::util::num(kkt, 2), state.evals,
+                    quantape::util::num(std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                                        1));
+                QTA_LOG_INFO("test", "      x = [{}, {}, {}, {}, {}]", quantape::util::num(x[0], 6),
+                             quantape::util::num(x[1], 6), quantape::util::num(x[2], 6),
+                             quantape::util::num(x[3], 6), quantape::util::num(x[4], 6));
                 CHECK(result != quantape::math::OptimizeResult::Failure);
                 CHECK(g <= 1e-7);
                 CHECK(kkt < 1e-5);
@@ -1003,16 +997,15 @@ int main() {
                     solver.minimize(PriceValueGrad{&prob}, FellerConstraint{}, bounds, x, state);
                 const auto t1 = std::chrono::steady_clock::now();
                 const double g = x[3] * x[3] - 2.0 * x[1] * x[2];
-                QTA_LOG_INFO(
-                    "test", "  SLSQP  Feller ({})  f={}  g={}  iters={} evals={} {} ms",
-                    quantape::math::to_string(result), quantape::util::num(prob.value(x), 6),
-                    quantape::util::num(g, 2), static_cast<int>(state.iterations), state.evals,
-                    quantape::util::num(std::chrono::duration<double, std::milli>(t1 - t0).count(),
-                                       1));
-                QTA_LOG_INFO("test", "      x = [{}, {}, {}, {}, {}]",
-                             quantape::util::num(x[0], 6), quantape::util::num(x[1], 6),
-                             quantape::util::num(x[2], 6), quantape::util::num(x[3], 6),
-                             quantape::util::num(x[4], 6));
+                QTA_LOG_INFO("test", "  SLSQP  Feller ({})  f={}  g={}  iters={} evals={} {} ms",
+                             quantape::math::to_string(result),
+                             quantape::util::num(prob.value(x), 6), quantape::util::num(g, 2),
+                             static_cast<int>(state.iterations), state.evals,
+                             quantape::util::num(
+                                 std::chrono::duration<double, std::milli>(t1 - t0).count(), 1));
+                QTA_LOG_INFO("test", "      x = [{}, {}, {}, {}, {}]", quantape::util::num(x[0], 6),
+                             quantape::util::num(x[1], 6), quantape::util::num(x[2], 6),
+                             quantape::util::num(x[3], 6), quantape::util::num(x[4], 6));
                 CHECK(result != quantape::math::OptimizeResult::Failure);
                 CHECK(g <= 1e-6);
                 CHECK(prob.value(x) <= boundaryRun.f + 1e-6);
@@ -1034,9 +1027,8 @@ int main() {
                 }
                 return worst;
             };
-            QTA_LOG_INFO("test",
-                         "  {}: max |IV shift| unconstrained={}  boundary={}  AUGLAG={}", label,
-                         quantape::util::num(worstIvShift(unconstrained.x), 2),
+            QTA_LOG_INFO("test", "  {}: max |IV shift| unconstrained={}  boundary={}  AUGLAG={}",
+                         label, quantape::util::num(worstIvShift(unconstrained.x), 2),
                          quantape::util::num(worstIvShift(xBoundary5), 2),
                          quantape::util::num(worstIvShift(xAug), 2));
             if (binding) {
@@ -1162,8 +1154,7 @@ int main() {
                 "LM 8-param (S,r,q + model)", prob9,
                 std::vector<double>{0.05, 1.5, 0.05, 0.5, -0.3, 0.99, 0.01, -0.01}, true);
             printRun(run);
-            QTA_LOG_INFO("test",
-                         "  (9-parameter joint fits are near-singular; see report)");
+            QTA_LOG_INFO("test", "  (9-parameter joint fits are near-singular; see report)");
         }
     }
 

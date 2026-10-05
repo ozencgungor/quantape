@@ -1,5 +1,7 @@
 // test_number_format.cpp — zmij wrapper: round trip, printf compatibility, hex
 #include "quantape/format/Number.h"
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 
 #include <charconv>
 #include <cmath>
@@ -9,9 +11,6 @@
 #include <cstring>
 #include <random>
 #include <string>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::format::FloatFormat;
 

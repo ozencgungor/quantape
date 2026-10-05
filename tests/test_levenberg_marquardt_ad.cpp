@@ -1,5 +1,4 @@
 #include "quantape/calibration/LevenbergMarquardtIft.h"
-
 #include "quantape/log/Log.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
@@ -131,14 +130,14 @@ void testDifferentialAndTape() {
     stan::math::set_zero_all_adjoints();
     stan::math::grad(pHatVar[0].vi_);
     for (std::size_t j = 0; j < quotes.size(); ++j) {
-        util::checkClose("LM var adjoint row 0", market[j].adj(),
-                         dpDm[0 * quotes.size() + j], 1e-12);
+        util::checkClose("LM var adjoint row 0", market[j].adj(), dpDm[0 * quotes.size() + j],
+                         1e-12);
     }
     stan::math::set_zero_all_adjoints();
     stan::math::grad(pHatVar[1].vi_);
     for (std::size_t j = 0; j < quotes.size(); ++j) {
-        util::checkClose("LM var adjoint row 1", market[j].adj(),
-                         dpDm[1 * quotes.size() + j], 1e-12);
+        util::checkClose("LM var adjoint row 1", market[j].adj(), dpDm[1 * quotes.size() + j],
+                         1e-12);
     }
 }
 
@@ -167,9 +166,8 @@ void testBrentImplicitRootVectorQuotes() {
 
     math::BrentSolver<stan::math::var> solver;
     solver.setMaxEvaluations(300);
-    stan::math::var xHat =
-        solver.solve(residual, 1e-12, stan::math::var(0.8), stan::math::var(0.5),
-                     stan::math::var(1.0));
+    stan::math::var xHat = solver.solve(residual, 1e-12, stan::math::var(0.8), stan::math::var(0.5),
+                                        stan::math::var(1.0));
     xHat.grad();
 
     util::checkClose("brent-quote root", xHat.val(), root, 1e-9);
@@ -180,10 +178,10 @@ void testBrentImplicitRootVectorQuotes() {
                      -(m[2].val() * std::pow(root, t0) + m[3].val() * std::pow(root, t1)) / rx,
                      1e-9);
     util::checkClose("brent-quote d x/d price", m[1].adj(), 1.0 / rx, 1e-9);
-    util::checkClose("brent-quote d x/d c0", m[2].adj(),
-                     -m[0].val() * std::pow(root, t0) / rx, 1e-9);
-    util::checkClose("brent-quote d x/d c1", m[3].adj(),
-                     -m[0].val() * std::pow(root, t1) / rx, 1e-9);
+    util::checkClose("brent-quote d x/d c0", m[2].adj(), -m[0].val() * std::pow(root, t0) / rx,
+                     1e-9);
+    util::checkClose("brent-quote d x/d c1", m[3].adj(), -m[0].val() * std::pow(root, t1) / rx,
+                     1e-9);
 
     // Direct implicitRoot idiom gate at the analytic root.
     stan::math::set_zero_all_adjoints();
@@ -314,8 +312,8 @@ void testPinnedBoundDedup() {
     std::vector<double> dpDm;
     std::vector<double> dlambdaDm;
     std::vector<double> dnuDm;
-    math::iftKkt(f2, math::NoConstraint{}, math::NoConstraint{}, bounds, {1.0}, {2.0}, {}, {},
-                 dpDm, dlambdaDm, dnuDm, ift);
+    math::iftKkt(f2, math::NoConstraint{}, math::NoConstraint{}, bounds, {1.0}, {2.0}, {}, {}, dpDm,
+                 dlambdaDm, dnuDm, ift);
     CHECK(ift.activeBounds.size() == 1);
     CHECK(ift.activeBounds[0] == 0);
     CHECK(!ift.pseudo_inverse);

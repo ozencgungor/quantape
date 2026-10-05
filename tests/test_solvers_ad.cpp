@@ -17,17 +17,16 @@
 // Run: ./test_solvers_ad
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/math/Solvers/SolverStanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using stan::math::var;
 

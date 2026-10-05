@@ -26,6 +26,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
+
 #include <Eigen/Dense>
 
 #include <chrono>
@@ -37,9 +40,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using stan::math::fvar;
 using stan::math::var;
@@ -527,10 +527,9 @@ double bench_us(F&& fn, int N) {
 }
 
 int main() {
-    QTA_LOG_INFO("test",
-                 "╔═══════════════════════════════════════════════════════════════╗\n"
-                 "║  Pricer Hierarchy: Mixed 1st/2nd Order AD                    ║\n"
-                 "╚═══════════════════════════════════════════════════════════════╝\n");
+    QTA_LOG_INFO("test", "╔═══════════════════════════════════════════════════════════════╗\n"
+                         "║  Pricer Hierarchy: Mixed 1st/2nd Order AD                    ║\n"
+                         "╚═══════════════════════════════════════════════════════════════╝\n");
 
     // Market data: 2 rates + 1 vol = 3 parameters
     std::vector<double> market_data = {1.05, 0.05, 0.20}; // S_proxy, r, vol
@@ -582,16 +581,14 @@ int main() {
 
         // Verify Hessian symmetry
         double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
-        QTA_LOG_INFO("test", "  Hessian symmetry check: {}\n",
-                     quantape::util::num(max_sym, 2));
+        QTA_LOG_INFO("test", "  Hessian symmetry check: {}\n", quantape::util::num(max_sym, 2));
     }
 
     // ── Timing comparison ──
     QTA_LOG_INFO("test", "── Performance ──\n");
     constexpr int N = 50'000;
 
-    QTA_LOG_INFO("test", "  {:<35}{:>12}{:>12}{:>10}", "Pricer", "1st order", "2nd order",
-                 "ratio");
+    QTA_LOG_INFO("test", "  {:<35}{:>12}{:>12}{:>10}", "Pricer", "1st order", "2nd order", "ratio");
     QTA_LOG_INFO("test", "  {}", std::string(69, '-'));
 
     for (auto* pricer : pricers) {
@@ -626,22 +623,15 @@ int main() {
     QTA_LOG_INFO("test",
                  "    for j = 0..n-1:                      ← one column per market data point");
     QTA_LOG_INFO("test", "      nested_rev_autodiff scope");
-    QTA_LOG_INFO("test",
-                 "      md[i] = fvar<var>(var(θ_i), i==j)  ← tangent direction e_j");
-    QTA_LOG_INFO("test",
-                 "      fvar<var> pv = pricer.price(md)     ← pricer uses best overload");
+    QTA_LOG_INFO("test", "      md[i] = fvar<var>(var(θ_i), i==j)  ← tangent direction e_j");
+    QTA_LOG_INFO("test", "      fvar<var> pv = pricer.price(md)     ← pricer uses best overload");
     QTA_LOG_INFO("test", "      grad(pv.d_)                         ← reverse on tangent");
-    QTA_LOG_INFO("test",
-                 "      H[:,j] = md[i].val_.adj()           ← read Hessian column\n");
+    QTA_LOG_INFO("test", "      H[:,j] = md[i].val_.adj()           ← read Hessian column\n");
     QTA_LOG_INFO("test", "  Pricer overloads (each independent, composable):");
-    QTA_LOG_INFO("test",
-                 "    Level 0: template just works with fvar<var>     (no code change)");
-    QTA_LOG_INFO("test",
-                 "    Level 1: gradient as var → AD handles Hessian   (moderate speed)");
-    QTA_LOG_INFO("test",
-                 "    Level 2: nested make_callback_var               (maximum speed)");
+    QTA_LOG_INFO("test", "    Level 0: template just works with fvar<var>     (no code change)");
+    QTA_LOG_INFO("test", "    Level 1: gradient as var → AD handles Hessian   (moderate speed)");
+    QTA_LOG_INFO("test", "    Level 2: nested make_callback_var               (maximum speed)");
 
-    QTA_LOG_INFO("test",
-                 "\n═══════════════════════════════════════════════════════════════");
+    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════════");
     return 0;
 }

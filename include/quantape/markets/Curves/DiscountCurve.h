@@ -1,10 +1,10 @@
 #pragma once
 
-#include "quantape/math/Autodiff/PrimalExtraction.h"
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/DayCounter.h"
 #include "quantape/datetime/TimeConversion.h"
 #include "quantape/markets/Curves/Curve.h"
+#include "quantape/math/Autodiff/PrimalExtraction.h"
 #include "quantape/math/Interpolations/CubicInterpolation.h"
 #include "quantape/math/Interpolations/HymanSplineInterpolation.h"
 #include "quantape/math/Interpolations/MonotoneCubicInterpolation.h"
@@ -51,33 +51,41 @@ enum class InterpolationSpace : std::uint8_t {
 };
 
 enum class InterpolationScheme : std::uint8_t {
-    Linear,        ///< Linear in the chosen space
-    Akima,         ///< Akima cubic (local C1)
-    TensionSpline, ///< Exponential tension spline (C2, sigma-controlled locality)
-    HymanSpline,   ///< Natural cubic spline with Hyman's monotone node-slope
-                   ///< filter (C1, monotone; in-range risk weights are
-                   ///< unavailable for this scheme)
-    MonotoneCubic, ///< Steffen shape-preserving cubic (C1, monotone; in-range
-                   ///< risk weights are unavailable for this scheme)
+    Linear,           ///< Linear in the chosen space
+    Akima,            ///< Akima cubic (local C1)
+    TensionSpline,    ///< Exponential tension spline (C2, sigma-controlled locality)
+    HymanSpline,      ///< Natural cubic spline with Hyman's monotone node-slope
+                      ///< filter (C1, monotone; in-range risk weights are
+                      ///< unavailable for this scheme)
+    MonotoneCubic,    ///< Steffen shape-preserving cubic (C1, monotone; in-range
+                      ///< risk weights are unavailable for this scheme)
     MixedLinearCubic, ///< Linear up to `switchIndex` segments, Akima beyond
 };
 
 constexpr std::string_view interpolationSpaceName(InterpolationSpace space) noexcept {
     switch (space) {
-        case InterpolationSpace::Zero: return "Zero";
-        case InterpolationSpace::LogDiscount: return "LogDiscount";
+        case InterpolationSpace::Zero:
+            return "Zero";
+        case InterpolationSpace::LogDiscount:
+            return "LogDiscount";
     }
     return "Unknown";
 }
 
 constexpr std::string_view interpolationSchemeName(InterpolationScheme scheme) noexcept {
     switch (scheme) {
-        case InterpolationScheme::Linear: return "Linear";
-        case InterpolationScheme::Akima: return "Akima";
-        case InterpolationScheme::TensionSpline: return "TensionSpline";
-        case InterpolationScheme::HymanSpline: return "HymanSpline";
-        case InterpolationScheme::MonotoneCubic: return "MonotoneCubic";
-        case InterpolationScheme::MixedLinearCubic: return "MixedLinearCubic";
+        case InterpolationScheme::Linear:
+            return "Linear";
+        case InterpolationScheme::Akima:
+            return "Akima";
+        case InterpolationScheme::TensionSpline:
+            return "TensionSpline";
+        case InterpolationScheme::HymanSpline:
+            return "HymanSpline";
+        case InterpolationScheme::MonotoneCubic:
+            return "MonotoneCubic";
+        case InterpolationScheme::MixedLinearCubic:
+            return "MixedLinearCubic";
     }
     return "Unknown";
 }
@@ -88,8 +96,8 @@ public:
     /// Times constructor (analysis / benchmarks; no calendar dates involved).
     DiscountCurve(std::vector<double> times, std::vector<DoubleT> zeros,
                   InterpolationSpace space = InterpolationSpace::LogDiscount,
-                  InterpolationScheme scheme = InterpolationScheme::Linear,
-                  double tension = 0.0, int switchIndex = 1)
+                  InterpolationScheme scheme = InterpolationScheme::Linear, double tension = 0.0,
+                  int switchIndex = 1)
         : m_tension(tension), m_switchIndex(switchIndex), m_space(space), m_scheme(scheme) {
         m_times = std::move(times);
         m_zeros = std::move(zeros);
@@ -101,8 +109,8 @@ public:
                   const std::vector<datetime::Date>& pillarDates,
                   const datetime::DayCounter& zeroDayCounter, std::vector<DoubleT> zeros,
                   InterpolationSpace space = InterpolationSpace::LogDiscount,
-                  InterpolationScheme scheme = InterpolationScheme::Linear,
-                  double tension = 0.0, int switchIndex = 1)
+                  InterpolationScheme scheme = InterpolationScheme::Linear, double tension = 0.0,
+                  int switchIndex = 1)
         : m_referenceDate(referenceDate), m_zeroDayCounter(zeroDayCounter), m_tension(tension),
           m_switchIndex(switchIndex), m_space(space), m_scheme(scheme) {
         if (pillarDates.size() != zeros.size()) {
@@ -162,7 +170,8 @@ public:
     /// instrument satisfies the index's telescoping condition.
     DoubleT compoundedRate(double t1, double t2, double yearFraction) const {
         if (!(yearFraction > 0.0)) {
-            throw std::invalid_argument("DiscountCurve::compoundedRate: non-positive year fraction");
+            throw std::invalid_argument(
+                "DiscountCurve::compoundedRate: non-positive year fraction");
         }
         return (compoundingFactor(t1, t2) - 1.0) / yearFraction;
     }
@@ -181,8 +190,8 @@ public:
                 throw std::invalid_argument(
                     "DiscountCurve::averagedRate: times must be strictly increasing");
             }
-            const DoubleT simple = (discount(fixingTimes[k - 1]) / discount(fixingTimes[k]) - 1.0) /
-                                   tau;
+            const DoubleT simple =
+                (discount(fixingTimes[k - 1]) / discount(fixingTimes[k]) - 1.0) / tau;
             sum += simple;
             ++count;
         }
@@ -194,10 +203,8 @@ public:
         if (!(t2 > t1)) {
             throw std::invalid_argument("DiscountCurve::forward: t2 must be > t1");
         }
-        const DoubleT x1 =
-            m_space == InterpolationSpace::Zero ? valueAt(t1) * t1 : spaceValue(t1);
-        const DoubleT x2 =
-            m_space == InterpolationSpace::Zero ? valueAt(t2) * t2 : spaceValue(t2);
+        const DoubleT x1 = m_space == InterpolationSpace::Zero ? valueAt(t1) * t1 : spaceValue(t1);
+        const DoubleT x2 = m_space == InterpolationSpace::Zero ? valueAt(t2) * t2 : spaceValue(t2);
         return (x2 - x1) / (t2 - t1);
     }
 
@@ -225,8 +232,7 @@ public:
                 "DiscountCurve: MonotoneCubic risk weights are unavailable");
         }
         if (m_scheme == InterpolationScheme::HymanSpline) {
-            throw std::invalid_argument(
-                "DiscountCurve: HymanSpline risk weights are unavailable");
+            throw std::invalid_argument("DiscountCurve: HymanSpline risk weights are unavailable");
         }
         if (m_scheme == InterpolationScheme::Akima ||
             (m_scheme == InterpolationScheme::MixedLinearCubic &&
@@ -283,8 +289,7 @@ public:
     /// weight is left at zero.
     void zeroNodeWeights(double t, std::vector<double>& weights) const {
         if (!(t >= 0.0)) {
-            throw std::invalid_argument(
-                "DiscountCurve::zeroNodeWeights: t must be non-negative");
+            throw std::invalid_argument("DiscountCurve::zeroNodeWeights: t must be non-negative");
         }
         if (t == 0.0) {
             // D(0) = 1 and the t = 0 node is fixed: no node carries risk.
@@ -399,11 +404,13 @@ private:
             m_zeros.front() = DoubleT(0);
         }
         if (m_times.size() < 2) {
-            throw std::invalid_argument("DiscountCurve: need at least two nodes (t=0 and a pillar)");
+            throw std::invalid_argument(
+                "DiscountCurve: need at least two nodes (t=0 and a pillar)");
         }
         for (std::size_t i = 1; i < m_times.size(); ++i) {
             if (!(m_times[i] > m_times[i - 1])) {
-                throw std::invalid_argument("DiscountCurve: node times must be strictly increasing");
+                throw std::invalid_argument(
+                    "DiscountCurve: node times must be strictly increasing");
             }
         }
         // Akima and the other local cubics act on the chosen space values, so
@@ -415,8 +422,8 @@ private:
         }
         m_values.resize(m_zeros.size());
         for (std::size_t i = 0; i < m_zeros.size(); ++i) {
-            m_values[i] = m_space == InterpolationSpace::Zero ? m_zeros[i]
-                                                              : m_zeros[i] * m_times[i];
+            m_values[i] =
+                m_space == InterpolationSpace::Zero ? m_zeros[i] : m_zeros[i] * m_times[i];
         }
         if (m_scheme == InterpolationScheme::MixedLinearCubic) {
             // Short trial curves used inside bootstrap may not have enough
@@ -440,14 +447,12 @@ private:
             const std::size_t last = m_times.size() - 2;
             const double h = m_times[last + 1] - m_times[last];
             const bool mixed = m_scheme == InterpolationScheme::MixedLinearCubic;
-            m_firstSlope =
-                mixed && 0 < m_switchIndex
-                    ? (m_values[1] - m_values[0]) / (m_times[1] - m_times[0])
-                    : m_a.front();
-            m_lastSlope =
-                mixed && last < static_cast<std::size_t>(m_switchIndex)
-                    ? (m_values[last + 1] - m_values[last]) / h
-                    : m_a[last] + h * (2.0 * m_b[last] + h * 3.0 * m_c[last]);
+            m_firstSlope = mixed && 0 < m_switchIndex
+                               ? (m_values[1] - m_values[0]) / (m_times[1] - m_times[0])
+                               : m_a.front();
+            m_lastSlope = mixed && last < static_cast<std::size_t>(m_switchIndex)
+                              ? (m_values[last + 1] - m_values[last]) / h
+                              : m_a[last] + h * (2.0 * m_b[last] + h * 3.0 * m_c[last]);
         }
         if (m_scheme == InterpolationScheme::MonotoneCubic) {
             const quantape::math::MonotoneCubicInterpolation<DoubleT> interp(m_times, m_values);
@@ -463,7 +468,7 @@ private:
         }
         if (m_scheme == InterpolationScheme::TensionSpline) {
             const quantape::math::TensionSplineInterpolation<DoubleT> interp(m_times, m_values,
-                                                                            m_tension);
+                                                                             m_tension);
             m_tensionM = interp.secondDerivatives();
             const std::size_t segments = m_times.size() - 1;
             m_tensionInvLambda.resize(segments);
@@ -491,8 +496,7 @@ private:
             m_firstSlope =
                 -m_tensionM[0] * invFirst * sigma * std::cosh(sigma * hFirst) +
                 m_tensionM[1] * invFirst * sigma +
-                (m_values[1] - m_values[0] +
-                 (m_tensionM[0] - m_tensionM[1]) / sigmaSquared) /
+                (m_values[1] - m_values[0] + (m_tensionM[0] - m_tensionM[1]) / sigmaSquared) /
                     hFirst;
         }
     }
@@ -517,7 +521,8 @@ private:
         const double dx = t - m_times[i];
         if (m_scheme == InterpolationScheme::MixedLinearCubic &&
             i < static_cast<std::size_t>(m_switchIndex)) {
-            return m_values[i] + dx * (m_values[i + 1] - m_values[i]) / (m_times[i + 1] - m_times[i]);
+            return m_values[i] +
+                   dx * (m_values[i + 1] - m_values[i]) / (m_times[i + 1] - m_times[i]);
         }
         if (m_scheme == InterpolationScheme::Akima ||
             m_scheme == InterpolationScheme::MixedLinearCubic) {
@@ -554,10 +559,8 @@ private:
             const double invLambda = m_tensionInvLambda[j];
             return m_tensionM[j] * (invLambda * std::sinh(sigma * (m_times[j + 1] - t))) +
                    m_tensionM[j + 1] * (invLambda * std::sinh(sigma * (t - m_times[j]))) +
-                   (m_values[j] - m_tensionM[j] / (sigma * sigma)) *
-                       ((m_times[j + 1] - t) / h) +
-                   (m_values[j + 1] - m_tensionM[j + 1] / (sigma * sigma)) *
-                       ((t - m_times[j]) / h);
+                   (m_values[j] - m_tensionM[j] / (sigma * sigma)) * ((m_times[j + 1] - t) / h) +
+                   (m_values[j + 1] - m_tensionM[j + 1] / (sigma * sigma)) * ((t - m_times[j]) / h);
         }
         return m_values[i] + dx * (m_values[i + 1] - m_values[i]) / (m_times[i + 1] - m_times[i]);
     }
@@ -593,9 +596,7 @@ private:
         return (m_values[1] - m_values[0]) / (m_times[1] - m_times[0]);
     }
 
-    static double primalValue(const DoubleT& x) {
-        return quantape::math::detail::primalValue(x);
-    }
+    static double primalValue(const DoubleT& x) { return quantape::math::detail::primalValue(x); }
 
     static DoubleT expImpl(const DoubleT& x) {
         if constexpr (std::is_same_v<DoubleT, double>) {

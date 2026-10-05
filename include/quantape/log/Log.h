@@ -22,15 +22,15 @@ struct Config {
     Level level = Level::Info;
     bool console = true;
     bool colored = true;
-    std::string file;  // empty = no file sink
+    std::string file; // empty = no file sink
     std::size_t maxFileBytes = 64ull * 1024 * 1024;
     std::uint32_t maxFiles = 5;
     ComponentDisplay component = ComponentDisplay::Auto;
     TimestampDisplay timestamps = TimestampDisplay::Auto;
     /// Raw overrides for the severity-split console patterns. Empty means the
     /// display policy applies: info/debug terse, warn+ with source location.
-    std::string pattern;            // info/debug lines
-    std::string diagnosticPattern;  // warn/error/critical lines
+    std::string pattern;           // info/debug lines
+    std::string diagnosticPattern; // warn/error/critical lines
 };
 
 /// Configures logging. Idempotent: subsequent calls only update the level.

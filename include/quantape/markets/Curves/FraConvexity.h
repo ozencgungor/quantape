@@ -36,4 +36,4 @@ auto impliedFraMarketRate(const ForwardT& forward, double convexityExponent, dou
     return ((1.0 + forward * accrual) * exp(convexityExponent) - 1.0) / accrual;
 }
 
-}  // namespace quantape::markets
+} // namespace quantape::markets

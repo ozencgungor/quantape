@@ -15,6 +15,7 @@
 
 #include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/calibration/HestonCalibration.h"
+#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/mc/Gradients.h"
@@ -24,6 +25,7 @@
 #include "quantape/mc/processes/HestonQeProcess.h"
 #include "quantape/mc/processes/SdeProcesses.h"
 #include "quantape/models/HestonModel.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -34,9 +36,6 @@
 #include <cstring>
 #include <type_traits>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -56,7 +55,6 @@ using quantape::processes::HestonQeProcess;
 
 namespace {
 
-
 bool bitwiseEqual(double a, double b) {
     std::uint64_t ba = 0;
     std::uint64_t bb = 0;
@@ -64,7 +62,6 @@ bool bitwiseEqual(double a, double b) {
     std::memcpy(&bb, &b, sizeof(double));
     return ba == bb;
 }
-
 
 /// Terminal call on the Heston (lnS, V) state.
 struct HestonCallPayoff {
@@ -127,8 +124,7 @@ void testThetaEquivalence() {
         diffs += bitwiseEqual(euEmpty(i), euFilled(i)) ? 0 : 1;
     }
     checkClose("theta equivalence (QE + Euler)", static_cast<double>(diffs), 0.0, 0.0);
-    QTA_LOG_INFO("test",
-                 "  [ok] theta-driven paths bitwise equal to member-driven (QE + Euler)");
+    QTA_LOG_INFO("test", "  [ok] theta-driven paths bitwise equal to member-driven (QE + Euler)");
 }
 
 // ── 2. catalog: QE + Sobol QMC vs analytic ──
@@ -314,8 +310,7 @@ void testFlagshipSdeToIft() {
     const double productStrike = 1.0;
     const HestonCallPayoff payoff{productStrike};
     if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        QTA_LOG_WARN("test",
-                     "  [skip] flagship chain: no compile-time Sobol table configured");
+        QTA_LOG_WARN("test", "  [skip] flagship chain: no compile-time Sobol table configured");
         return;
     }
     const auto generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
@@ -430,8 +425,7 @@ void testFlagshipSdeToIft() {
                  static_cast<long>(ift.dbda.rows()), static_cast<long>(ift.dbda.cols()),
                  quantape::util::num(worstRatio, 2));
     checkClose("flagship MC+IFT risk vs analytic", worstRatio, 0.0, 1.0);
-    QTA_LOG_INFO("test",
-                 "  [ok] SDE -> calibration IFT -> market risk chain (worst ratio {})",
+    QTA_LOG_INFO("test", "  [ok] SDE -> calibration IFT -> market risk chain (worst ratio {})",
                  quantape::util::num(worstRatio, 2));
 }
 
@@ -494,8 +488,7 @@ void testQeStepConvergence() {
     };
     const double bias64 = priceAt(process, x0, theta, 2.0, 64, 1.0, 999) - exact;
     const double bias256 = priceAt(process, x0, theta, 2.0, 256, 1.0, 999) - exact;
-    QTA_LOG_INFO("test",
-                 "  extreme corner (sigma=0.75, T=2): bias 64 steps {}, 256 steps {}",
+    QTA_LOG_INFO("test", "  extreme corner (sigma=0.75, T=2): bias 64 steps {}, 256 steps {}",
                  quantape::util::num(bias64, 2), quantape::util::num(bias256, 2));
     CHECK(bias64 < 0.0 && bias256 < 0.0);
     CHECK(std::fabs(bias256) < 0.75 * std::fabs(bias64));
@@ -511,9 +504,8 @@ void testQeStepConvergence() {
     QTA_LOG_INFO("test", "  moderate (sigma=0.30, T=1): bias at 64 steps {}",
                  quantape::util::num(biasModerate, 2));
     CHECK(std::fabs(biasModerate) < 2e-3);
-    QTA_LOG_INFO("test",
-                 "  [ok] QE step convergence (first order; large constant only in the "
-                 "extreme Feller-violating corner)");
+    QTA_LOG_INFO("test", "  [ok] QE step convergence (first order; large constant only in the "
+                         "extreme Feller-violating corner)");
 }
 
 } // namespace

@@ -55,32 +55,58 @@ enum class DayCount : std::uint8_t {
 
 constexpr std::string_view dayCountName(DayCount convention) {
     switch (convention) {
-        case DayCount::Actual360: return "ACT/360";
-        case DayCount::Actual364: return "ACT/364";
-        case DayCount::Actual365Fixed: return "ACT/365F";
-        case DayCount::Actual365_25: return "ACT/365.25";
-        case DayCount::Actual366: return "ACT/366";
-        case DayCount::NL365: return "NL/365";
-        case DayCount::NL360: return "NL/360";
-        case DayCount::ActualActualISDA: return "ACT/ACT ISDA";
-        case DayCount::ActualActualAFB: return "ACT/ACT AFB";
-        case DayCount::ActualActualYear: return "ACT/ACT Year";
-        case DayCount::ActualActualICMA: return "ACT/ACT ICMA";
-        case DayCount::Actual365Actual: return "ACT/365 Actual";
-        case DayCount::Actual365L: return "ACT/365L";
-        case DayCount::OneOne: return "1/1";
-        case DayCount::Simple: return "SIMPLE";
-        case DayCount::Thirty360US: return "30/360 US";
-        case DayCount::ThirtyU360EOM: return "30U/360 EOM";
-        case DayCount::Thirty360BondBasis: return "30/360 Bond Basis";
-        case DayCount::ThirtyE360: return "30E/360";
-        case DayCount::ThirtyE360ISDA: return "30E/360 ISDA";
-        case DayCount::ThirtyEPlus360: return "30E+/360";
-        case DayCount::Thirty360Italian: return "30/360 Italian";
-        case DayCount::Thirty360PSA: return "30/360 PSA";
-        case DayCount::Thirty365: return "30/365";
-        case DayCount::ThirtyE365: return "30E/365";
-        case DayCount::Bus252: return "BUS/252";
+        case DayCount::Actual360:
+            return "ACT/360";
+        case DayCount::Actual364:
+            return "ACT/364";
+        case DayCount::Actual365Fixed:
+            return "ACT/365F";
+        case DayCount::Actual365_25:
+            return "ACT/365.25";
+        case DayCount::Actual366:
+            return "ACT/366";
+        case DayCount::NL365:
+            return "NL/365";
+        case DayCount::NL360:
+            return "NL/360";
+        case DayCount::ActualActualISDA:
+            return "ACT/ACT ISDA";
+        case DayCount::ActualActualAFB:
+            return "ACT/ACT AFB";
+        case DayCount::ActualActualYear:
+            return "ACT/ACT Year";
+        case DayCount::ActualActualICMA:
+            return "ACT/ACT ICMA";
+        case DayCount::Actual365Actual:
+            return "ACT/365 Actual";
+        case DayCount::Actual365L:
+            return "ACT/365L";
+        case DayCount::OneOne:
+            return "1/1";
+        case DayCount::Simple:
+            return "SIMPLE";
+        case DayCount::Thirty360US:
+            return "30/360 US";
+        case DayCount::ThirtyU360EOM:
+            return "30U/360 EOM";
+        case DayCount::Thirty360BondBasis:
+            return "30/360 Bond Basis";
+        case DayCount::ThirtyE360:
+            return "30E/360";
+        case DayCount::ThirtyE360ISDA:
+            return "30E/360 ISDA";
+        case DayCount::ThirtyEPlus360:
+            return "30E+/360";
+        case DayCount::Thirty360Italian:
+            return "30/360 Italian";
+        case DayCount::Thirty360PSA:
+            return "30/360 PSA";
+        case DayCount::Thirty365:
+            return "30/365";
+        case DayCount::ThirtyE365:
+            return "30E/365";
+        case DayCount::Bus252:
+            return "BUS/252";
     }
     return "?";
 }
@@ -94,15 +120,15 @@ struct DayCountContext {
     std::optional<Date> refEnd;
     std::optional<Date> termination;
     Frequency frequency = Frequency::Annual;
-    const Calendar* calendar = nullptr;  // BUS/252
-    const Schedule* schedule = nullptr;  // ACT/ACT ICMA
+    const Calendar* calendar = nullptr; // BUS/252
+    const Schedule* schedule = nullptr; // ACT/ACT ICMA
 };
 
 struct DayCountCacheStats {
     std::uint64_t hits = 0;
     std::uint64_t misses = 0;
-    std::size_t slots = 0;      // configured slots in the calling thread
-    std::size_t bytes = 0;      // slots * slot size
+    std::size_t slots = 0; // configured slots in the calling thread
+    std::size_t bytes = 0; // slots * slot size
 };
 
 void enableDayCountCache(bool enabled) noexcept;
@@ -139,7 +165,7 @@ inline std::atomic<bool>& cacheEnabledFlag() noexcept {
     return flag;
 }
 inline std::atomic<std::uint32_t>& cacheSlotBits() noexcept {
-    static std::atomic<std::uint32_t> bits{16};  // 65,536 slots = 1.5 MB
+    static std::atomic<std::uint32_t> bits{16}; // 65,536 slots = 1.5 MB
     return bits;
 }
 inline std::atomic<std::uint64_t>& cacheHits() noexcept {
@@ -213,7 +239,7 @@ inline bool cacheUsable(DayCount convention, const DayCountContext& context) {
     return true;
 }
 
-}  // namespace detail
+} // namespace detail
 
 class DayCounter {
 public:
@@ -239,7 +265,7 @@ public:
             static_cast<std::uint32_t>(d2.serial());
         const std::uint64_t index =
             detail::splitmix64(key ^ (static_cast<std::uint64_t>(convention_) + 1) *
-                                           0x9E3779B97F4A7C15ULL) &
+                                         0x9E3779B97F4A7C15ULL) &
             (cache.slots.size() - 1);
         detail::DayCountCacheSlot& slot = cache.slots[static_cast<std::size_t>(index)];
         if (slot.key == key && slot.convention == convention_) {
@@ -267,6 +293,6 @@ private:
     DayCountContext context_{};
 };
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime
 
 #include "quantape/datetime/DayCounters.h"

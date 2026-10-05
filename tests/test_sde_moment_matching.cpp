@@ -10,12 +10,14 @@
 //     negatives, reproducible across runs
 //
 // Stan-free.
+#include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/MomentMatching.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SdePrimitives.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -25,9 +27,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -39,8 +38,6 @@ using quantape::mc::StateMatrix;
 using quantape::mc::TimeGrid;
 
 namespace {
-
-
 
 // ── qeSample moment checks across psi regimes ──
 
@@ -217,9 +214,8 @@ void testCirMomentMatching() {
             }
         }
         CHECK(diff == 0.0);
-        QTA_LOG_INFO("test",
-                     "  [ok] CIR QE nSteps={}: mean={} var={} (exact {} / {}), neg=0", nSteps,
-                     quantape::util::num(mean, 6), quantape::util::num(var, 3),
+        QTA_LOG_INFO("test", "  [ok] CIR QE nSteps={}: mean={} var={} (exact {} / {}), neg=0",
+                     nSteps, quantape::util::num(mean, 6), quantape::util::num(var, 3),
                      quantape::util::num(exactMean, 6), quantape::util::num(exactVar, 3));
     }
 }

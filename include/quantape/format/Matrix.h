@@ -24,9 +24,9 @@
 namespace quantape::format {
 
 struct MatrixOptions {
-    int precision = 4;  // significant digits; < 0 = shortest round-trip
-    int maxRows = 12;   // 0 = unlimited
-    int maxCols = 12;   // 0 = unlimited
+    int precision = 4; // significant digits; < 0 = shortest round-trip
+    int maxRows = 12;  // 0 = unlimited
+    int maxCols = 12;  // 0 = unlimited
 };
 
 /// Owning, async-safe snapshot of an Eigen matrix/vector.
@@ -121,6 +121,6 @@ inline std::string formatMatrix(const Eigen::MatrixXd& m, const MatrixOptions& o
     return out;
 }
 
-}  // namespace detail
+} // namespace detail
 
-}  // namespace quantape::format
+} // namespace quantape::format

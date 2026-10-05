@@ -9,17 +9,16 @@
 // Run: ./test_tanh_sinh
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Integrals/TanhSinhIntegrator.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::math::TanhSinhIntegrator;
 
@@ -118,8 +117,7 @@ int main() {
             },
             x0, fx, grad);
 
-        QTA_LOG_INFO("test", "var: I(theta) = {} (expected 1.333333...)",
-                     quantape::util::num(fx));
+        QTA_LOG_INFO("test", "var: I(theta) = {} (expected 1.333333...)", quantape::util::num(fx));
         CHECK(close(fx, 4.0 / 3.0, 1e-9));
         QTA_LOG_INFO("test", "     dI/dtheta = {} (expected 1.333333...)",
                      quantape::util::num(grad(0)));

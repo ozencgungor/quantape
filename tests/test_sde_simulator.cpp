@@ -11,11 +11,13 @@
 //   - Estimator: mean/variance/SE
 //
 // Stan-free: includes only mc/ headers + Eigen.
+#include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/Schemes.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -26,9 +28,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
@@ -56,7 +55,6 @@ bool bitwiseEqual(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b) {
 
 // Bitwise finiteness guard: under -ffast-math the compiler folds
 // isnan/isfinite to constants, so NaN/Inf silently pass `<=` comparisons.
-
 
 double bsCall(double s0, double k, double r, double sigma, double t) {
     const double sqrtT = std::sqrt(t);
@@ -327,8 +325,7 @@ void testCirMean() {
     checkClose("CIR mean", mean, e, 5.0 * std::sqrt(v / nPaths));
     checkClose("CIR var (approx)", var, v, 0.1 * v);
     CHECK(negatives * 10 < nPaths); // Euler may dip negative rarely; not the norm
-    QTA_LOG_INFO("test", "  [ok] CIR: mean exact recursion, var close, negatives={}",
-                 negatives);
+    QTA_LOG_INFO("test", "  [ok] CIR: mean exact recursion, var close, negatives={}", negatives);
 }
 
 void testReproducibility() {

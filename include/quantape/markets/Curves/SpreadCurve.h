@@ -67,9 +67,7 @@ public:
     std::size_t size() const { return m_spread.size(); }
 
     const ParentT& parent() const { return *m_parent; }
-    const std::shared_ptr<const ParentT>& parentPointer() const {
-        return m_parent;
-    }
+    const std::shared_ptr<const ParentT>& parentPointer() const { return m_parent; }
     const DiscountCurve<DoubleT>& spreadNodes() const { return m_spread; }
 
 private:
@@ -99,11 +97,11 @@ concept CurveProvider = requires(const P& provider, double t1, double t2) {
 /// A `CurveProvider` that also exposes its solved node grid and interpolation
 /// weights, so it can back a spread curve or a chained forecast curve.
 template <typename C>
-concept CurveNodeProvider = CurveProvider<C, double> && requires(const C& curve, double t,
-                                                                 std::vector<double>& weights) {
-    { curve.size() } -> std::convertible_to<std::size_t>;
-    curve.zeroNodeWeights(t, weights);
-    { curve.zeroDayCounter() } -> std::same_as<const datetime::DayCounter&>;
-};
+concept CurveNodeProvider =
+    CurveProvider<C, double> && requires(const C& curve, double t, std::vector<double>& weights) {
+        { curve.size() } -> std::convertible_to<std::size_t>;
+        curve.zeroNodeWeights(t, weights);
+        { curve.zeroDayCounter() } -> std::same_as<const datetime::DayCounter&>;
+    };
 
 } // namespace quantape::markets

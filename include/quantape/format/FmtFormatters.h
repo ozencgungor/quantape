@@ -12,11 +12,11 @@
 #include "quantape/format/Matrix.h"
 #include "quantape/format/Number.h"
 
-#include "quill/DeferredFormatCodec.h"
-#include "quill/bundled/fmt/format.h"
-
 #include <string>
 #include <string_view>
+
+#include "quill/DeferredFormatCodec.h"
+#include "quill/bundled/fmt/format.h"
 
 namespace fmtquill {
 
@@ -27,11 +27,11 @@ struct formatter<quantape::format::Num, char> {
     template <typename FormatContext>
     auto format(const quantape::format::Num& value, FormatContext& ctx) const {
         char buffer[quantape::format::kMaxDoubleChars];
-        char* end = quantape::format::write(
-            value.value, buffer, sizeof(buffer),
-            value.precision < 0 ? quantape::format::FloatFormat::Shortest
-                                : quantape::format::FloatFormat::General,
-            value.precision);
+        char* end =
+            quantape::format::write(value.value, buffer, sizeof(buffer),
+                                    value.precision < 0 ? quantape::format::FloatFormat::Shortest
+                                                        : quantape::format::FloatFormat::General,
+                                    value.precision);
         return fmtquill::format_to(ctx.out(), "{}", std::string_view(buffer, end - buffer));
     }
 };
@@ -45,13 +45,12 @@ struct formatter<quantape::format::Matrix, char> {
         if (!value.data) {
             return fmtquill::format_to(ctx.out(), "[]");
         }
-        const std::string text =
-            quantape::format::detail::formatMatrix(*value.data, value.options);
+        const std::string text = quantape::format::detail::formatMatrix(*value.data, value.options);
         return fmtquill::format_to(ctx.out(), "{}", std::string_view(text));
     }
 };
 
-}  // namespace fmtquill
+} // namespace fmtquill
 
 // Queue codecs: both wrappers own their data (Num by value, Matrix by shared
 // snapshot), so deferred formatting on the backend is safe.

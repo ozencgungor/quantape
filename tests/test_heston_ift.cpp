@@ -23,12 +23,14 @@
 #include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/calibration/HestonCalibration.h"
 #include "quantape/calibration/ImplicitFunction.h"
+#include "quantape/log/Log.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/models/HestonModel.h"
 #include "quantape/pricing/BlackScholes.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -38,9 +40,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using quantape::math::Bounds;
@@ -54,7 +53,6 @@ using quantape::models::HestonMarket;
 using quantape::models::HestonModel;
 
 namespace {
-
 
 double impliedVol(double price, double S, double K, double r, double q, double T) {
     double lo = 1e-6;
@@ -430,8 +428,7 @@ void testHestonUnconstrained() {
     }
     checkClose("KKT vs instrument route", (ift.dbda - inst.dbda).norm(), 0.0,
                1e-4 * std::max(1.0, ift.dbda.norm()));
-    QTA_LOG_INFO("test",
-                 "  [ok] unconstrained: KKT vs FD, product risk, instrument route");
+    QTA_LOG_INFO("test", "  [ok] unconstrained: KKT vs FD, product risk, instrument route");
 }
 
 void testHestonFellerConstrained() {
@@ -480,11 +477,11 @@ void testHestonFellerConstrained() {
         return out;
     });
     const double dlRel = (ift.dlambdaDa - dlambdaFd).norm() / std::max(1e-12, dlambdaFd.norm());
-    QTA_LOG_INFO("test", "  dlambda/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
-                 quantape::util::num(ift.dlambdaDa(0, 0), 6),
-                 quantape::util::num(ift.dlambdaDa(0, 1), 6),
-                 quantape::util::num(ift.dlambdaDa(0, 2), 6), quantape::util::num(dlambdaFd(0, 0), 6),
-                 quantape::util::num(dlambdaFd(0, 1), 6), quantape::util::num(dlambdaFd(0, 2), 6));
+    QTA_LOG_INFO(
+        "test", "  dlambda/da (IFT) = [{}, {}, {}], FD = [{}, {}, {}]",
+        quantape::util::num(ift.dlambdaDa(0, 0), 6), quantape::util::num(ift.dlambdaDa(0, 1), 6),
+        quantape::util::num(ift.dlambdaDa(0, 2), 6), quantape::util::num(dlambdaFd(0, 0), 6),
+        quantape::util::num(dlambdaFd(0, 1), 6), quantape::util::num(dlambdaFd(0, 2), 6));
     checkClose("dlambda/da vs bump-recalibrate", dlRel, 0.0, 5e-2);
     // Independent boundary reference: sigma = sqrt(2 kappa theta), 4 free
     // parameters; Richardson FD of that well-conditioned optimum avoids the
@@ -640,8 +637,7 @@ void testStanInterop() {
         };
         const auto [xF, usF] = solve(fixedObjective, start);
         const auto [x9, us9] = solve(objective, start);
-        QTA_LOG_INFO("test",
-                     "  AD solve: 5-param {} us, 9-param {} us ({}x), optimum diff {}",
+        QTA_LOG_INFO("test", "  AD solve: 5-param {} us, 9-param {} us ({}x), optimum diff {}",
                      quantape::util::num(usF, 1), quantape::util::num(us9, 1),
                      quantape::util::num(us9 / usF, 2), quantape::util::num((xF - x9).norm(), 2));
         checkClose("fixed-market AD optimum == 9-param", (xF - x9).norm(), 0.0, 1e-6);
@@ -672,8 +668,7 @@ void testStanInterop() {
         const Eigen::VectorXd xAd = owning(x);
         const auto ift = quantape::math::calibrationIft(fx.problem, xAd, fx.a);
         const double rel = (adDbda - ift.dbda).norm() / std::max(1.0, ift.dbda.norm());
-        QTA_LOG_INFO("test",
-                     "  AD IFT (minimizeDifferential) vs analytic chain: rel err = {}",
+        QTA_LOG_INFO("test", "  AD IFT (minimizeDifferential) vs analytic chain: rel err = {}",
                      quantape::util::num(rel, 2));
         checkClose("AD IFT == analytic chain", rel, 0.0, 1e-6);
 

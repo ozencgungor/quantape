@@ -126,30 +126,43 @@ public:
     /// Coupon frequency implied by the tenor.
     Frequency frequency() const {
         switch (tenorMonths()) {
-            case 12: return Frequency::Annual;
-            case 6: return Frequency::Semiannual;
-            case 3: return Frequency::Quarterly;
-            case 2: return Frequency::Bimonthly;
-            case 1: return Frequency::Monthly;
-            default: return Frequency::Other;
+            case 12:
+                return Frequency::Annual;
+            case 6:
+                return Frequency::Semiannual;
+            case 3:
+                return Frequency::Quarterly;
+            case 2:
+                return Frequency::Bimonthly;
+            case 1:
+                return Frequency::Monthly;
+            default:
+                return Frequency::Other;
         }
     }
 
     int tenorMonths() const {
         switch (tenor_.unit()) {
-            case TimeUnit::Months: return tenor_.length();
-            case TimeUnit::Years: return tenor_.length() * 12;
-            default: return 0;
+            case TimeUnit::Months:
+                return tenor_.length();
+            case TimeUnit::Years:
+                return tenor_.length() * 12;
+            default:
+                return 0;
         }
     }
 
 private:
     Date advanceBackward(const Date& date) const {
         switch (tenor_.unit()) {
-            case TimeUnit::Days: return date.plusDays(-tenor_.length());
-            case TimeUnit::Weeks: return date.plusWeeks(-tenor_.length());
-            case TimeUnit::Months: return date.plusMonths(-tenor_.length(), endOfMonth_);
-            case TimeUnit::Years: return date.plusYears(-tenor_.length(), endOfMonth_);
+            case TimeUnit::Days:
+                return date.plusDays(-tenor_.length());
+            case TimeUnit::Weeks:
+                return date.plusWeeks(-tenor_.length());
+            case TimeUnit::Months:
+                return date.plusMonths(-tenor_.length(), endOfMonth_);
+            case TimeUnit::Years:
+                return date.plusYears(-tenor_.length(), endOfMonth_);
         }
         return date;
     }
@@ -164,4 +177,4 @@ private:
     std::vector<Date> adjusted_;
 };
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

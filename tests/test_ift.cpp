@@ -11,11 +11,13 @@
 #include "quantape/math/StanMath.h"
 
 #include "quantape/calibration/ImplicitFunction.h"
+#include "quantape/log/Log.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/math/Optimization/OptimizerStanPrimitives.h"
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -23,9 +25,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 
 using stan::math::var;
@@ -36,7 +35,6 @@ static bool converged(quantape::math::OptimizeResult r) {
            r == quantape::math::OptimizeResult::FtolReached ||
            r == quantape::math::OptimizeResult::XtolReached;
 }
-
 
 // ============================================================================
 // Fixture 1: linear least squares (unconstrained)
@@ -125,8 +123,7 @@ void testUnconstrainedLsq() {
             checkClose("lsq dp/dm vs FD", dp_dm[i * M + j], fd, 1e-6);
         }
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] unconstrained LSQ: IFT vs analytic 1e-10, vs FD 1e-6, cond={}",
+    QTA_LOG_INFO("test", "  [ok] unconstrained LSQ: IFT vs analytic 1e-10, vs FD 1e-6, cond={}",
                  quantape::util::num(ift.conditionNumber, 3));
 }
 
@@ -449,8 +446,8 @@ void testDegenerate() {
     CHECK(ift.pseudo_inverse);
     CHECK(ift.rank < 3);
     checkClose("degenerate dp/dm", dp_dm[0], 0.0, 1e-8);
-    QTA_LOG_INFO("test",
-                 "  [ok] degenerate KKT: pseudo-inverse fallback, dp/dm = 0 (rank={})", ift.rank);
+    QTA_LOG_INFO("test", "  [ok] degenerate KKT: pseudo-inverse fallback, dp/dm = 0 (rank={})",
+                 ift.rank);
 }
 
 // ============================================================================
@@ -475,8 +472,7 @@ void testBoundsOnly() {
     checkClose("bounds dp0/dm1", dp_dm[1], 0.0, 1e-12);
     checkClose("bounds dp1/dm0", dp_dm[2], 0.0, 1e-12);
     checkClose("bounds dp1/dm1", dp_dm[3], 1.0, 1e-12);
-    QTA_LOG_INFO("test",
-                 "  [ok] box-bound-active KKT (no callables): dp0 = 0, dp1/dm1 = 1");
+    QTA_LOG_INFO("test", "  [ok] box-bound-active KKT (no callables): dp0 = 0, dp1/dm1 = 1");
 }
 
 // ============================================================================
@@ -541,8 +537,7 @@ void testVarComposition() {
             ref += w[i] * d(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j));
         checkClose("var composition grad_m", m_var[j].adj(), ref, 1e-10);
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] var composition: caller-tape grad matches w^T dp/dm (1e-10)");
+    QTA_LOG_INFO("test", "  [ok] var composition: caller-tape grad matches w^T dp/dm (1e-10)");
 }
 
 // ============================================================================
@@ -643,8 +638,7 @@ void testNonlinearConstraint() {
         CHECK(converged(rj) || rj == quantape::math::OptimizeResult::RoundoffLimited);
         checkClose("disk dp0/dm0 FD", dp_dm[0], (xp[0] - x_hat[0]) / h, 1e-6);
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] nonlinear active constraint: lambda*H_g in H_L + FD (disk)");
+    QTA_LOG_INFO("test", "  [ok] nonlinear active constraint: lambda*H_g in H_L + FD (disk)");
 }
 
 // ============================================================================

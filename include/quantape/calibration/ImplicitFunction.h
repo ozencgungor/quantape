@@ -71,13 +71,13 @@ struct IftOptions {
 
 /// Diagnostics of an IFT solve
 struct IftResult {
-    double conditionNumber = 0.0;          ///< lambda_max/lambda_min or 1/rcond(K)
-    double ridgeUsed = 0.0;                ///< regularization added to H (0 = none)
-    bool regularized = false;               ///< H was not positive definite
-    bool pseudo_inverse = false;            ///< KKT system used the pseudo-inverse path
-    std::size_t rank = 0;                   ///< rank used by the pseudo-inverse solve
-    std::vector<std::size_t> activeInequalities;   ///< indices of active inequality rows
-    std::vector<std::size_t> activeBounds; ///< parameters pinned by a bound
+    double conditionNumber = 0.0;                ///< lambda_max/lambda_min or 1/rcond(K)
+    double ridgeUsed = 0.0;                      ///< regularization added to H (0 = none)
+    bool regularized = false;                    ///< H was not positive definite
+    bool pseudo_inverse = false;                 ///< KKT system used the pseudo-inverse path
+    std::size_t rank = 0;                        ///< rank used by the pseudo-inverse solve
+    std::vector<std::size_t> activeInequalities; ///< indices of active inequality rows
+    std::vector<std::size_t> activeBounds;       ///< parameters pinned by a bound
 };
 
 namespace detail {
@@ -595,13 +595,12 @@ minimizeDifferentialVar(const F2& f2, const G2& g2, const H2& h2, const Bounds& 
         for (std::size_t j = 0; j < M; ++j) {
             row[j] = dp_dm[k * M + j];
         }
-        p_hat[k] = stan::math::make_callback_var(
-            x[k], [marketVaris, row, M](auto& vi) {
-                const double adj = vi.adj();
-                for (std::size_t j = 0; j < M; ++j) {
-                    marketVaris[j]->adj_ += adj * row[j];
-                }
-            });
+        p_hat[k] = stan::math::make_callback_var(x[k], [marketVaris, row, M](auto& vi) {
+            const double adj = vi.adj();
+            for (std::size_t j = 0; j < M; ++j) {
+                marketVaris[j]->adj_ += adj * row[j];
+            }
+        });
     }
     if (ift_out) {
         *ift_out = ift;

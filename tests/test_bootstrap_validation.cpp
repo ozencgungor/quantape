@@ -12,10 +12,9 @@
  *  - malformed inputs are rejected with clear errors.
  */
 
+#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
-
-#include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
 
 #include <cmath>
@@ -56,9 +55,8 @@ const std::vector<SchemeCase>& schemeMatrix() {
     return matrix;
 }
 
-DiscountCurve<double> makeTarget(const SchemeCase& item,
-                                 const std::vector<datetime::Date>& dates, double base,
-                                 double slope, double curvature) {
+DiscountCurve<double> makeTarget(const SchemeCase& item, const std::vector<datetime::Date>& dates,
+                                 double base, double slope, double curvature) {
     std::vector<double> zeros;
     zeros.reserve(dates.size());
     for (const datetime::Date& date : dates) {
@@ -126,8 +124,7 @@ void testNodeAlignedRecovery() {
         dates.push_back(kReference.plusYears(year));
     }
     for (const SchemeCase& item : schemeMatrix()) {
-        const DiscountCurve<double> target =
-            makeTarget(item, dates, 0.025, 0.0015, -0.00008);
+        const DiscountCurve<double> target = makeTarget(item, dates, 0.025, 0.0015, -0.00008);
         const std::vector<CurvePillar> pillars = annualOisPillars(
             target, dates, calendar, datetime::Period(1, datetime::TimeUnit::Years), 0);
         const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
@@ -152,9 +149,8 @@ void testOffNodeCashflowsAndLags() {
         // Semi-annual fixed coupons on annual nodes evaluate inside interpolation
         // segments; Akima/mixed/tension stencils then need nodes beyond the own
         // pillar, which is exactly the whole-grid fixed point.
-        const std::vector<CurvePillar> pillars =
-            annualOisPillars(target, dates, calendar,
-                             datetime::Period(6, datetime::TimeUnit::Months), 2);
+        const std::vector<CurvePillar> pillars = annualOisPillars(
+            target, dates, calendar, datetime::Period(6, datetime::TimeUnit::Months), 2);
         const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
             kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
         checkExactFit("off-node/lag", curve, pillars);
@@ -172,9 +168,8 @@ void testStubsAndNegativeRates() {
     }
     for (const SchemeCase& item : schemeMatrix()) {
         const DiscountCurve<double> target = makeTarget(item, dates, -0.002, 0.0, 0.0);
-        const std::vector<CurvePillar> pillars =
-            annualOisPillars(target, dates, calendar,
-                             datetime::Period(1, datetime::TimeUnit::Years), 0);
+        const std::vector<CurvePillar> pillars = annualOisPillars(
+            target, dates, calendar, datetime::Period(1, datetime::TimeUnit::Years), 0);
         const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
             kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
         checkExactFit("stub/negative", curve, pillars);
@@ -210,9 +205,8 @@ void testBasisCurveValidation() {
                 pillar.spread = spreadOnParentLeg ? level : -level;
                 basisPillars.push_back(pillar);
             }
-            const markets::SpreadCurve<double> child =
-                markets::bootstrapSpreadCurve(parent, kReference, kZeroDc, spreadScheme,
-                                              basisPillars, 1e-14, 0.0, nullptr);
+            const markets::SpreadCurve<double> child = markets::bootstrapSpreadCurve(
+                parent, kReference, kZeroDc, spreadScheme, basisPillars, 1e-14, 0.0, nullptr);
             for (const BasisPillar& pillar : basisPillars) {
                 util::checkClose("basis reprice",
                                  markets::impliedBasisSpread(child, pillar, kReference, kZeroDc),
@@ -260,7 +254,7 @@ void testErrorPaths() {
     CHECK(threw);
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     testNodeAlignedRecovery();

@@ -1,16 +1,15 @@
+#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/StackRisk.h"
-#include "quantape/math/LinearAlgebra/DenseSolve.h"
-#include <variant>
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
-
-#include "quantape/log/Log.h"
+#include "quantape/math/LinearAlgebra/DenseSolve.h"
 #include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <variant>
 #include <vector>
 
 using namespace quantape;
@@ -34,10 +33,9 @@ void testXccyConstNotionalBootstrap() {
             const double t = datetime::yearFraction(reference, dates[i], zeroDc);
             zeros.push_back(base + slope * t);
         }
-        return DiscountCurve<double>(reference, std::vector<datetime::Date>(dates.begin() + 1,
-                                                                            dates.end()),
-                                     zeroDc, zeros, InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+        return DiscountCurve<double>(
+            reference, std::vector<datetime::Date>(dates.begin() + 1, dates.end()), zeroDc, zeros,
+            InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     };
     const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
     const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004);
@@ -54,9 +52,9 @@ void testXccyConstNotionalBootstrap() {
         pillar.domesticTenor = datetime::Period(3, datetime::TimeUnit::Months);
         pillar.domesticCalendar = calendar;
         pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
-        pillar.spread = markets::impliedXccyBasisSpread(
-            foreignTarget, foreignForecast, domesticDiscount, domesticForecast, pillar,
-            reference, zeroDc);
+        pillar.spread =
+            markets::impliedXccyBasisSpread(foreignTarget, foreignForecast, domesticDiscount,
+                                            domesticForecast, pillar, reference, zeroDc);
         CHECK(std::isfinite(pillar.spread));
         CHECK(std::abs(pillar.spread) < 0.05);
         pillars.push_back(pillar);
@@ -67,22 +65,21 @@ void testXccyConstNotionalBootstrap() {
         InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     CHECK(curve.size() == pillars.size() + 1);
     for (std::size_t i = 0; i < pillars.size(); ++i) {
-        util::checkClose("xccy recovered zero", curve.zeros()[i + 1],
-                         foreignTarget.zeros()[i + 1], 1e-10);
+        util::checkClose("xccy recovered zero", curve.zeros()[i + 1], foreignTarget.zeros()[i + 1],
+                         1e-10);
         util::checkClose("xccy reprice",
-                         markets::impliedXccyBasisSpread(curve, foreignForecast,
-                                                         domesticDiscount, domesticForecast,
-                                                         pillars[i], reference, zeroDc),
+                         markets::impliedXccyBasisSpread(curve, foreignForecast, domesticDiscount,
+                                                         domesticForecast, pillars[i], reference,
+                                                         zeroDc),
                          pillars[i].spread, 1e-10);
     }
 
     bool threw = false;
     try {
         std::vector<markets::XccyPillar> unsorted{pillars[2], pillars[1]};
-        (void)markets::bootstrapXccyDiscountCurve(domesticDiscount, domesticForecast,
-                                                  foreignForecast, reference, zeroDc,
-                                                  InterpolationSpace::LogDiscount,
-                                                  InterpolationScheme::Linear, unsorted);
+        (void)markets::bootstrapXccyDiscountCurve(
+            domesticDiscount, domesticForecast, foreignForecast, reference, zeroDc,
+            InterpolationSpace::LogDiscount, InterpolationScheme::Linear, unsorted);
     } catch (const std::invalid_argument&) {
         threw = true;
     }
@@ -102,10 +99,9 @@ void testXccySpreadForecastsAndSpreadSide() {
         for (std::size_t i = 1; i < dates.size(); ++i) {
             zeros.push_back(base + slope * datetime::yearFraction(reference, dates[i], zeroDc));
         }
-        return DiscountCurve<double>(reference,
-                                     std::vector<datetime::Date>(dates.begin() + 1, dates.end()),
-                                     zeroDc, zeros, InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+        return DiscountCurve<double>(
+            reference, std::vector<datetime::Date>(dates.begin() + 1, dates.end()), zeroDc, zeros,
+            InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     };
     const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
     const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0006);
@@ -119,10 +115,8 @@ void testXccySpreadForecastsAndSpreadSide() {
         domesticSpreads.push_back(0.0005 + 0.0001 * static_cast<double>(i));
         foreignSpreads.push_back(0.0002 + 0.0001 * static_cast<double>(i));
     }
-    const markets::SpreadCurve<double> domesticForecast(domesticBase, spreadTimes,
-                                                        domesticSpreads);
-    const markets::SpreadCurve<double> foreignForecast(foreignBase, spreadTimes,
-                                                       foreignSpreads);
+    const markets::SpreadCurve<double> domesticForecast(domesticBase, spreadTimes, domesticSpreads);
+    const markets::SpreadCurve<double> foreignForecast(foreignBase, spreadTimes, foreignSpreads);
 
     // Bench vs spread and spread vs spread forecasts; spread on either leg.
     for (const bool spreadOnForeign : {true, false}) {
@@ -140,9 +134,9 @@ void testXccySpreadForecastsAndSpreadSide() {
             pillar.domesticCalendar = calendar;
             pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
             pillar.spreadOnForeignLeg = spreadOnForeign;
-            pillar.spread = markets::impliedXccyBasisSpread(
-                foreignTarget, foreignForecast, domesticDiscount, domesticForecast, pillar,
-                reference, zeroDc);
+            pillar.spread =
+                markets::impliedXccyBasisSpread(foreignTarget, foreignForecast, domesticDiscount,
+                                                domesticForecast, pillar, reference, zeroDc);
             CHECK(std::isfinite(pillar.spread));
             pillars.push_back(pillar);
         }
@@ -150,8 +144,8 @@ void testXccySpreadForecastsAndSpreadSide() {
             domesticDiscount, domesticForecast, foreignForecast, reference, zeroDc,
             InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
         for (std::size_t i = 0; i < pillars.size(); ++i) {
-            util::checkClose("xccy spread-forecast recovered",
-                             curve.zeros()[i + 1], foreignTarget.zeros()[i + 1], 1e-10);
+            util::checkClose("xccy spread-forecast recovered", curve.zeros()[i + 1],
+                             foreignTarget.zeros()[i + 1], 1e-10);
             util::checkClose("xccy spread-forecast reprice",
                              markets::impliedXccyBasisSpread(curve, foreignForecast,
                                                              domesticDiscount, domesticForecast,
@@ -178,8 +172,7 @@ void testXccyCoupledBootstrap() {
             zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDayCounter));
         }
         return DiscountCurve<double>(reference, pillarDates, zeroDayCounter, zeros,
-                                     InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     };
     const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005, 5);
     const DiscountCurve<double> domesticForecast = domesticDiscount;
@@ -198,12 +191,12 @@ void testXccyCoupledBootstrap() {
         coupled.xccy.foreignCalendar = calendar;
         coupled.xccy.domesticCalendar = calendar;
         coupled.xccy.spread = markets::impliedXccyBasisSpread(
-            xccyTarget, spreadTarget, domesticDiscount, domesticForecast, coupled.xccy,
-            reference, zeroDayCounter);
+            xccyTarget, spreadTarget, domesticDiscount, domesticForecast, coupled.xccy, reference,
+            zeroDayCounter);
         coupled.basis.maturity = maturity;
         coupled.basis.calendar = calendar;
         coupled.basis.spread = markets::impliedBasisSpread(spreadTarget, coupled.basis, reference,
-                                                          zeroDayCounter, &xccyTarget);
+                                                           zeroDayCounter, &xccyTarget);
         pillars.push_back(coupled);
     }
 
@@ -254,8 +247,7 @@ void testXccyJointFallbackAndRisk() {
             zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDayCounter));
         }
         return DiscountCurve<double>(reference, pillarDates, zeroDayCounter, zeros,
-                                     InterpolationSpace::LogDiscount,
-                                     InterpolationScheme::Linear);
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     };
     const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005, 5);
     const DiscountCurve<double> xccyTarget = buildCurve(0.030, 0.0005, 3);
@@ -274,9 +266,9 @@ void testXccyJointFallbackAndRisk() {
         cp.xccy.domesticCalendar = calendar;
         cp.basis.maturity = maturity;
         cp.basis.calendar = calendar;
-        cp.xccy.spread = markets::impliedXccyBasisSpread(xccyTarget, spreadTarget,
-                                                         domesticDiscount, domesticDiscount,
-                                                         cp.xccy, reference, zeroDayCounter);
+        cp.xccy.spread =
+            markets::impliedXccyBasisSpread(xccyTarget, spreadTarget, domesticDiscount,
+                                            domesticDiscount, cp.xccy, reference, zeroDayCounter);
         cp.basis.spread = markets::impliedBasisSpread(spreadTarget, cp.basis, reference,
                                                       zeroDayCounter, &xccyTarget);
         coupledPillars.push_back(cp);
@@ -288,8 +280,8 @@ void testXccyJointFallbackAndRisk() {
     options.maxPasses = 1;
     const markets::XccyCoupledResult fallback = markets::bootstrapXccyCoupled(
         domesticDiscount, domesticDiscount, foreignBase, reference, zeroDayCounter,
-        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, coupledPillars,
-        1e-14, 0.0, 1, options);
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, coupledPillars, 1e-14, 0.0, 1,
+        options);
     CHECK(fallback.usedJointFallback);
     CHECK(!fallback.converged);
     CHECK(fallback.passes == 1);
@@ -309,9 +301,8 @@ void testXccyJointFallbackAndRisk() {
     const auto foreignBumped = [&](std::size_t node, double delta) {
         std::vector<double> z = xccyTarget.zeros();
         z[node] += delta;
-        return DiscountCurve<double>(xccyTarget.times(), z, xccyTarget.space(),
-                                     xccyTarget.scheme(), xccyTarget.tension(),
-                                     xccyTarget.switchIndex());
+        return DiscountCurve<double>(xccyTarget.times(), z, xccyTarget.space(), xccyTarget.scheme(),
+                                     xccyTarget.tension(), xccyTarget.switchIndex());
     };
     const auto domesticBumped = [&](std::size_t node, double delta) {
         std::vector<double> z = domesticDiscount.zeros();
@@ -326,10 +317,14 @@ void testXccyJointFallbackAndRisk() {
     };
     util::checkClose("xccy foreign row FD", f[0],
                      (quote(foreignBumped(1, h), domesticDiscount) -
-                      quote(foreignBumped(1, -h), domesticDiscount)) / (2.0 * h), 1e-8);
-    util::checkClose("xccy domestic row FD", c[0],
-                     (quote(xccyTarget, domesticBumped(1, h)) -
-                      quote(xccyTarget, domesticBumped(1, -h))) / (2.0 * h), 1e-8);
+                      quote(foreignBumped(1, -h), domesticDiscount)) /
+                         (2.0 * h),
+                     1e-8);
+    util::checkClose(
+        "xccy domestic row FD", c[0],
+        (quote(xccyTarget, domesticBumped(1, h)) - quote(xccyTarget, domesticBumped(1, -h))) /
+            (2.0 * h),
+        1e-8);
 
     // Chain-aware root rows and forecast factor rows.
     auto domesticBase = std::make_shared<DiscountCurve<double>>(domesticDiscount);
@@ -342,8 +337,8 @@ void testXccyJointFallbackAndRisk() {
     std::vector<double> gFull;
     std::vector<double> hFull;
     markets::xccySwapJacobianRows(xccyTarget, spreadTarget, domesticDiscount,
-                                  domesticForecastSpread, xccyPillars[0], reference,
-                                  zeroDayCounter, fFull, cFull, gFull, hFull);
+                                  domesticForecastSpread, xccyPillars[0], reference, zeroDayCounter,
+                                  fFull, cFull, gFull, hFull);
     const auto quoteChain = [&](const DiscountCurve<double>& rootCurve) {
         auto parent = std::make_shared<DiscountCurve<double>>(rootCurve);
         const auto& nodes = domesticForecastSpread.spreadNodes();
@@ -352,10 +347,9 @@ void testXccyJointFallbackAndRisk() {
         return markets::impliedXccyBasisSpread(xccyTarget, spreadTarget, rootCurve, forecast,
                                                xccyPillars[0], reference, zeroDayCounter);
     };
-    util::checkClose("xccy chain root row FD", cFull[0],
-                     (quoteChain(domesticBumped(1, h)) - quoteChain(domesticBumped(1, -h))) /
-                         (2.0 * h),
-                     1e-8);
+    util::checkClose(
+        "xccy chain root row FD", cFull[0],
+        (quoteChain(domesticBumped(1, h)) - quoteChain(domesticBumped(1, -h))) / (2.0 * h), 1e-8);
     const auto quoteForward = [&](std::size_t node, double delta) {
         const auto& nodes = spreadTarget.spreadNodes();
         std::vector<double> spreads = nodes.zeros();
@@ -410,8 +404,8 @@ void testXccyJointFallbackAndRisk() {
     std::vector<std::variant<decltype(child)>> children{child};
     std::vector<double> dVdRoot(domesticDiscount.size(), 0.0);
     dVdRoot[1] = 1.0;
-    const std::vector<markets::StackRiskEntry> entries = markets::stackQuoteRiskXccy(
-        domesticDiscount, rootPillars, dVdRoot, children, reference);
+    const std::vector<markets::StackRiskEntry> entries =
+        markets::stackQuoteRiskXccy(domesticDiscount, rootPillars, dVdRoot, children, reference);
     CHECK(entries.size() == 4);
     CHECK(entries[0].quoteDeltas.size() == rootPillars.size());
     CHECK(entries[1].quoteDeltas.size() == n);

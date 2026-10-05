@@ -1,4 +1,6 @@
 // test_util.cpp — util/FloatingPoint.h, util/Constants.h, util/Numeric.h gates
+#include "quantape/log/Log.h"
+#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 #include "quantape/util/FloatingPoint.h"
 #include "quantape/util/Numeric.h"
@@ -12,9 +14,6 @@
 #include <limits>
 #include <random>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::util::alignUp;
 using quantape::util::ceilDiv;
@@ -75,9 +74,9 @@ int main() {
     CHECK(isClose(1.0, 1.0 + 1e-13));
     CHECK(!isClose(1.0, 1.0 + 1e-10));
     CHECK(isClose(-1.0, -1.0 - 1e-13));
-    CHECK(isClose(0.0, 1e-16));  // absolute floor
+    CHECK(isClose(0.0, 1e-16)); // absolute floor
     CHECK(!isClose(0.0, 1e-3));
-    CHECK(isClose(100.0, 100.1, 1e-3, 0.0));  // rtol only: 0.1 <= 1e-3 * 100.1
+    CHECK(isClose(100.0, 100.1, 1e-3, 0.0)); // rtol only: 0.1 <= 1e-3 * 100.1
     CHECK(!isClose(100.0, 100.2, 1e-3, 0.0));
     CHECK(isClose(kNaN, kNaN, 1e-12, 1e-15, true));
     CHECK(!isClose(kNaN, kNaN));
@@ -92,25 +91,18 @@ int main() {
 
     // ── constants: HiLo split is correctly rounded and d-d ready ──
     const double eps = std::numeric_limits<double>::epsilon();
-    const quantape::util::HiLo all[] = {quantape::util::kPi,
-                                        quantape::util::kTwoPi,
-                                        quantape::util::kHalfPi,
-                                        quantape::util::kQuarterPi,
-                                        quantape::util::kInvPi,
-                                        quantape::util::kSqrt2,
-                                        quantape::util::kInvSqrt2,
-                                        quantape::util::kSqrt2Pi,
-                                        quantape::util::kInvSqrt2Pi,
-                                        quantape::util::kLn2,
-                                        quantape::util::kLn10,
-                                        quantape::util::kE,
-                                        quantape::util::kEulerGamma};
+    const quantape::util::HiLo all[] = {
+        quantape::util::kPi,        quantape::util::kTwoPi,   quantape::util::kHalfPi,
+        quantape::util::kQuarterPi, quantape::util::kInvPi,   quantape::util::kSqrt2,
+        quantape::util::kInvSqrt2,  quantape::util::kSqrt2Pi, quantape::util::kInvSqrt2Pi,
+        quantape::util::kLn2,       quantape::util::kLn10,    quantape::util::kE,
+        quantape::util::kEulerGamma};
     for (const HiLo& c : all) {
         CHECK(c.hi > 0.0);
         CHECK(std::fabs(c.lo) <= eps * c.hi); // |residual| <= one ulp
     }
-    CHECK(quantape::util::kPi.lo > 0.0);      // pi rounds down
-    CHECK(quantape::util::kSqrt2.lo < 0.0);   // sqrt(2) rounds up
+    CHECK(quantape::util::kPi.lo > 0.0);    // pi rounds down
+    CHECK(quantape::util::kSqrt2.lo < 0.0); // sqrt(2) rounds up
     CHECK(quantape::util::kInvSqrt2.lo < 0.0);
     CHECK(quantape::util::kInvPi.lo < 0.0);
     CHECK(quantape::util::kLn2.lo > 0.0);

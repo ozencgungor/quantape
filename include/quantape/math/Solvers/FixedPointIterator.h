@@ -16,9 +16,9 @@ namespace quantape::math {
  */
 
 struct FixedPointOptions {
-    double xtol = 1e-12; ///< Convergence tolerance on the update norm
-    int maxPasses = 20;  ///< Hard pass limit
-    int stablePasses = 1;///< Consecutive passes below tolerance required
+    double xtol = 1e-12;  ///< Convergence tolerance on the update norm
+    int maxPasses = 20;   ///< Hard pass limit
+    int stablePasses = 1; ///< Consecutive passes below tolerance required
 };
 
 struct FixedPointResult {

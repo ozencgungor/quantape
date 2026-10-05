@@ -6,18 +6,18 @@
  * and market data objects with both double and AD types.
  */
 
-#include "quantape/math/Autodiff/PrimalExtraction.h"
 #include "quantape/math/StanMath.h"
+
+#include "quantape/log/Log.h"
 #include "quantape/markets/MarketData.h"
+#include "quantape/math/Autodiff/PrimalExtraction.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <utility>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using namespace quantape::markets;
 
@@ -37,8 +37,8 @@ void testIRCurve() {
     for (double t : {0.5, 1.0, 2.5, 5.0, 10.0}) {
         double df = curve.discountFactor(t);
         double r = curve.zeroRate(t);
-        QTA_LOG_INFO("test", "  t={}: DF={}, r={}", quantape::util::num(t),
-                     quantape::util::num(df), quantape::util::num(r));
+        QTA_LOG_INFO("test", "  t={}: DF={}, r={}", quantape::util::num(t), quantape::util::num(df),
+                     quantape::util::num(r));
     }
 
     // Test forward rate
@@ -84,7 +84,8 @@ void testSurvivalProbabilityCurve() {
         double pd = spCurve.defaultProb(t);
         double avgHazard = spCurve.avgHazardRate(t);
         QTA_LOG_INFO("test", "  t={}: SP={}, PD={}, avg hazard={}", quantape::util::num(t),
-                     quantape::util::num(sp), quantape::util::num(pd), quantape::util::num(avgHazard));
+                     quantape::util::num(sp), quantape::util::num(pd),
+                     quantape::util::num(avgHazard));
     }
 
     // AD compile/value check: the curve instantiates and evaluates for the
@@ -265,16 +266,14 @@ void testVolSurfaceOperations() {
     QTA_LOG_INFO("test", "Test 1: Scale by 1.1");
     EQDVolatility<double> volSurf1 = volSurf;
     volSurf1.scale(1.1);
-    QTA_LOG_INFO("test", "  After scaling: {}",
-                 quantape::util::num(volSurf1.vol(1.0, 100.0)));
+    QTA_LOG_INFO("test", "  After scaling: {}", quantape::util::num(volSurf1.vol(1.0, 100.0)));
     QTA_LOG_INFO("test", "  Expected: {}", quantape::util::num(0.18 * 1.1));
 
     // Test 2: Shift by +0.01 (100 bp vol increase)
     QTA_LOG_INFO("test", "Test 2: Shift by +0.01");
     EQDVolatility<double> volSurf2 = volSurf;
     volSurf2.shift(0.01);
-    QTA_LOG_INFO("test", "  After shifting: {}",
-                 quantape::util::num(volSurf2.vol(1.0, 100.0)));
+    QTA_LOG_INFO("test", "  After shifting: {}", quantape::util::num(volSurf2.vol(1.0, 100.0)));
     QTA_LOG_INFO("test", "  Expected: {}", quantape::util::num(0.18 + 0.01));
 
     // Test 3: Apply function (square each vol)
@@ -294,10 +293,8 @@ void testVolSurfaceOperations() {
         return v + smileAdj;
     });
     QTA_LOG_INFO("test", "  ATM (100): {}", quantape::util::num(volSurf4.vol(1.0, 100.0)));
-    QTA_LOG_INFO("test", "  OTM Put (90): {}",
-                 quantape::util::num(volSurf4.vol(1.0, 90.0)));
-    QTA_LOG_INFO("test", "  OTM Call (110): {}",
-                 quantape::util::num(volSurf4.vol(1.0, 110.0)));
+    QTA_LOG_INFO("test", "  OTM Put (90): {}", quantape::util::num(volSurf4.vol(1.0, 90.0)));
+    QTA_LOG_INFO("test", "  OTM Call (110): {}", quantape::util::num(volSurf4.vol(1.0, 110.0)));
 
     // Test 5: Bump specific point
     QTA_LOG_INFO("test", "Test 5: Bump specific point (1y, 100 strike)");

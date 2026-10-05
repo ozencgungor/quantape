@@ -1,15 +1,14 @@
+#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations/BicubicInterpolation.h"
 #include "quantape/math/Interpolations/BilinearInterpolation.h"
 #include "quantape/math/Interpolations/CubicInterpolation.h"
 #include "quantape/math/Interpolations/LogLinearInterpolation.h"
+#include "quantape/util/Check.h"
 
 #include <cassert>
 #include <cmath>
 #include <iostream>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 void testLogLinearInterpolation() {
     QTA_LOG_INFO("test", "=== Log-Linear Interpolation Tests ===");
@@ -85,8 +84,7 @@ void testBilinearInterpolation() {
     std::vector<std::vector<double>> z = {{0, 1}, {1, 2}};
     quantape::math::BilinearInterpolation<double> interp(x, y, z);
     double val = interp(0.5, 0.5);
-    QTA_LOG_INFO("test", "Value at (0.5, 0.5): {} (expected: 1.0)",
-                 quantape::util::num(val));
+    QTA_LOG_INFO("test", "Value at (0.5, 0.5): {} (expected: 1.0)", quantape::util::num(val));
     assert(std::abs(val - 1.0) < 1e-9);
     QTA_LOG_INFO("test", "Bilinear interpolation tests passed!");
 }

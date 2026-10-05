@@ -144,15 +144,14 @@ struct QuoteGamma {
 /// Returns false when the pillar is numerically degenerate (non-positive
 /// annuity or discount).
 template <typename CurveT>
-    requires std::same_as<std::remove_cvref_t<decltype(std::declval<const CurveT&>().discount(0.0))>,
-                      double>
+    requires std::same_as<
+        std::remove_cvref_t<decltype(std::declval<const CurveT&>().discount(0.0))>, double>
 bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenceDate,
                        const CurveT& curve, std::vector<double>& row) {
     const std::size_t n = curve.size();
     row.assign(n - 1, 0.0); // solved nodes only (node 0 is fixed)
     std::vector<double> weights;
-    const auto accumulateInto = [&](std::vector<double>& target, double dRdD, double t,
-                                    double df) {
+    const auto accumulateInto = [&](std::vector<double>& target, double dRdD, double t, double df) {
         if (t <= 0.0) {
             return; // D(0) = 1 carries no node risk
         }
@@ -172,8 +171,8 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
             const datetime::Date maturity = adjustedMaturity(pillar);
             const double tau =
                 datetime::yearFraction(referenceDate, maturity, pillar.quoteDayCounter);
-            const double t = datetime::yearFraction(referenceDate, maturity,
-                                                    curve.zeroDayCounter());
+            const double t =
+                datetime::yearFraction(referenceDate, maturity, curve.zeroDayCounter());
             const double df = curve.discount(t);
             accumulate(-1.0 / (tau * df * df), t, df);
             return true;
@@ -181,10 +180,9 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
         case PillarKind::Fra: {
             const datetime::Date start = adjustedStart(pillar);
             const datetime::Date maturity = adjustedMaturity(pillar);
-            const double t1 = datetime::yearFraction(referenceDate, start,
-                                                     curve.zeroDayCounter());
-            const double t2 = datetime::yearFraction(referenceDate, maturity,
-                                                     curve.zeroDayCounter());
+            const double t1 = datetime::yearFraction(referenceDate, start, curve.zeroDayCounter());
+            const double t2 =
+                datetime::yearFraction(referenceDate, maturity, curve.zeroDayCounter());
             const double tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
             const double d1 = curve.discount(t1);
             const double d2 = curve.discount(t2);
@@ -213,10 +211,10 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                 std::vector<double> weightsStart;
                 std::vector<double> weightsEnd;
                 for (std::size_t k = 0; k < periods; ++k) {
-                    const double tau = datetime::yearFraction(fixings[k], fixings[k + 1],
-                                                              pillar.quoteDayCounter);
-                    const double t1 = datetime::yearFraction(referenceDate, fixings[k],
-                                                             curve.zeroDayCounter());
+                    const double tau =
+                        datetime::yearFraction(fixings[k], fixings[k + 1], pillar.quoteDayCounter);
+                    const double t1 =
+                        datetime::yearFraction(referenceDate, fixings[k], curve.zeroDayCounter());
                     const double t2 = datetime::yearFraction(referenceDate, fixings[k + 1],
                                                              curve.zeroDayCounter());
                     const double d1 = curve.discount(t1);
@@ -229,8 +227,8 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                     const double ratio = d1 / d2;
                     const double scale = 1.0 / (tau * d2);
                     for (std::size_t i = 1; i < n; ++i) {
-                        row[i - 1] += scale * (-t1 * d1 * weightsStart[i] +
-                                               ratio * t2 * d2 * weightsEnd[i]);
+                        row[i - 1] +=
+                            scale * (-t1 * d1 * weightsStart[i] + ratio * t2 * d2 * weightsEnd[i]);
                     }
                 }
                 for (std::size_t i = 0; i < n - 1; ++i) {
@@ -241,10 +239,10 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
             // Averaged+Compounded falls through here: the daily compounding
             // product telescopes to the period discount ratio, so the
             // simple-rate row is exact.
-            const double t1 = datetime::yearFraction(referenceDate, pillar.start,
-                                                     curve.zeroDayCounter());
-            const double t2 = datetime::yearFraction(referenceDate, pillar.maturity,
-                                                     curve.zeroDayCounter());
+            const double t1 =
+                datetime::yearFraction(referenceDate, pillar.start, curve.zeroDayCounter());
+            const double t2 =
+                datetime::yearFraction(referenceDate, pillar.maturity, curve.zeroDayCounter());
             const double tau =
                 datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
             const double d1 = curve.discount(t1);
@@ -283,12 +281,12 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                 const datetime::Date payDate = pillar.calendar.advance(
                     dates[k + 1], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
                     pillar.businessDayConvention);
-                payTimes[k] = datetime::yearFraction(referenceDate, payDate,
-                                                    curve.zeroDayCounter());
-                startTimes[k] = datetime::yearFraction(referenceDate, dates[k],
-                                                       curve.zeroDayCounter());
-                endTimes[k] = datetime::yearFraction(referenceDate, dates[k + 1],
-                                                     curve.zeroDayCounter());
+                payTimes[k] =
+                    datetime::yearFraction(referenceDate, payDate, curve.zeroDayCounter());
+                startTimes[k] =
+                    datetime::yearFraction(referenceDate, dates[k], curve.zeroDayCounter());
+                endTimes[k] =
+                    datetime::yearFraction(referenceDate, dates[k + 1], curve.zeroDayCounter());
                 taus[k] = datetime::yearFraction(dates[k], dates[k + 1], pillar.quoteDayCounter);
                 payDf[k] = curve.discount(payTimes[k]);
                 startDf[k] = curve.discount(startTimes[k]);
@@ -311,12 +309,10 @@ bool pillarJacobianRow(const CurvePillar& pillar, const datetime::Date& referenc
                     accumulateInto(rowFloating, taus[k] * pillar.firstCouponRate, payTimes[k],
                                    payDf[k]);
                 } else {
-                    accumulateInto(rowFloating, startDf[k] / endDf[k] - 1.0, payTimes[k],
-                                   payDf[k]);
+                    accumulateInto(rowFloating, startDf[k] / endDf[k] - 1.0, payTimes[k], payDf[k]);
                     accumulateInto(rowFloating, payDf[k] / endDf[k], startTimes[k], startDf[k]);
-                    accumulateInto(rowFloating,
-                                   -payDf[k] * startDf[k] / (endDf[k] * endDf[k]), endTimes[k],
-                                   endDf[k]);
+                    accumulateInto(rowFloating, -payDf[k] * startDf[k] / (endDf[k] * endDf[k]),
+                                   endTimes[k], endDf[k]);
                 }
                 accumulateInto(rowAnnuity, taus[k], payTimes[k], payDf[k]);
             }
@@ -449,8 +445,7 @@ QuoteGamma transformQuoteGamma(const CurveT& curve, const std::vector<CurvePilla
     // asymmetric residual even though the analytic transform is symmetric.
     for (std::size_t i = 0; i < m; ++i) {
         for (std::size_t j = i + 1; j < m; ++j) {
-            const double symmetric =
-                0.5 * (result.hessian[i * m + j] + result.hessian[j * m + i]);
+            const double symmetric = 0.5 * (result.hessian[i * m + j] + result.hessian[j * m + i]);
             result.hessian[i * m + j] = symmetric;
             result.hessian[j * m + i] = symmetric;
         }

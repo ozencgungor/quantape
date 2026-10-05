@@ -7,14 +7,13 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/log/Log.h"
 #include "quantape/pricing/StanPrimitives.h"
+#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <iomanip>
 #include <iostream>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::pricing::Black76;
 using quantape::pricing::black76Analytical;
@@ -43,9 +42,8 @@ void checkB76Greeks1_FD(double DF, double F, double K, double vol, double T, Opt
 
     QTA_LOG_INFO("test", "  1st-order Greeks vs FD:");
     auto row = [](const char* name, double anal, double fd) {
-        QTA_LOG_INFO("test", "    {}  anal={}  FD={}  err={}", name,
-                     quantape::format::num(anal), quantape::format::num(fd),
-                     quantape::format::num(std::abs(anal - fd), 2));
+        QTA_LOG_INFO("test", "    {}  anal={}  FD={}  err={}", name, quantape::format::num(anal),
+                     quantape::format::num(fd), quantape::format::num(std::abs(anal - fd), 2));
     };
     row("dV/dD", res.g1.dV_dDF, fd_dD);
     row("dV/dF", res.g1.dV_dF, fd_dF);
@@ -68,9 +66,8 @@ void checkB76Greeks2_FD(double DF, double F, double K, double vol, double T, Opt
 
     QTA_LOG_INFO("test", "  2nd-order Greeks vs FD:");
     auto row = [](const char* name, double anal, double fd) {
-        QTA_LOG_INFO("test", "    {}  anal={}  FD={}  err={}", name,
-                     quantape::util::num(anal), quantape::util::num(fd),
-                     quantape::util::num(std::abs(anal - fd), 2));
+        QTA_LOG_INFO("test", "    {}  anal={}  FD={}  err={}", name, quantape::util::num(anal),
+                     quantape::util::num(fd), quantape::util::num(std::abs(anal - fd), 2));
     };
     row("d2V/dD_dF", res.g2.d2V_dDF_dF, (g1_Dp.dV_dF - g1_Dm.dV_dF) / (2 * eps));
     row("d2V/dD_dK", res.g2.d2V_dDF_dK, (g1_Dp.dV_dK - g1_Dm.dV_dK) / (2 * eps));
@@ -92,9 +89,8 @@ void checkB76StanVar(double DF0, double F0, double K0, double vol0, double T, Op
 
     QTA_LOG_INFO("test", "  Stan var vs analytical:");
     auto row = [](const char* name, double ad, double anal) {
-        QTA_LOG_INFO("test", "    {}  AD={}  anal={}  err={}", name,
-                     quantape::util::num(ad), quantape::util::num(anal),
-                     quantape::util::num(std::abs(ad - anal), 2));
+        QTA_LOG_INFO("test", "    {}  AD={}  anal={}  err={}", name, quantape::util::num(ad),
+                     quantape::util::num(anal), quantape::util::num(std::abs(ad - anal), 2));
     };
     row("price", price.val(), res.price);
     row("dV/dDF", DF.adj(), res.g1.dV_dDF);
@@ -156,8 +152,8 @@ void checkGBSEquivalence(double S, double K, double r_disc, double b, double vol
     double DF = std::exp(-r_disc * T);
     double b76_price = Black76<double>{DF, F, K, vol, T, type}.price();
     double gbs_price = GBS<double>{S, K, r_disc, b, vol, T, type}.price();
-    QTA_LOG_INFO("test", "  GBS vs B76: b76={}  gbs={}  err={}",
-                 quantape::util::num(b76_price), quantape::util::num(gbs_price),
+    QTA_LOG_INFO("test", "  GBS vs B76: b76={}  gbs={}  err={}", quantape::util::num(b76_price),
+                 quantape::util::num(gbs_price),
                  quantape::util::num(std::abs(b76_price - gbs_price), 2));
 }
 

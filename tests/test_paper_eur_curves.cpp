@@ -318,8 +318,9 @@ void testEuriborShortEndCurves() {
         irsPillar(date(2014, 12, 15), 0.098, dt::Period(1, dt::TimeUnit::Months)).irs;
     const double par6m2y = mk::impliedIrsRate(curve6m, ois, sixMonthAt2y, kReference, kZeroDc);
     const double par1m2y = mk::impliedIrsRate(curve1m, ois, oneMonthAt2y, kReference, kZeroDc);
-    QTA_LOG_INFO("test", "1M 2Y par {:.2f} bp versus 6M implied {:.2f} bp less 22.60 bp = "
-                         "{:.2f} bp",
+    QTA_LOG_INFO("test",
+                 "1M 2Y par {:.2f} bp versus 6M implied {:.2f} bp less 22.60 bp = "
+                 "{:.2f} bp",
                  par1m2y * 1e4, par6m2y * 1e4, (par6m2y - 22.60e-4) * 1e4);
     CHECK(std::abs(par1m2y - (par6m2y - 22.60e-4)) < 0.5e-4);
 
@@ -389,9 +390,9 @@ void testEuriborShortEndCurves() {
 void testSelectedShortEndInstruments() {
     const mk::DiscountCurve<double> ois = buildOisEcb();
     const auto parent = std::make_shared<mk::DiscountCurve<double>>(ois);
-    const mk::SpreadCurve<double> curve3m = mk::bootstrapForecastCurve(
-        parent, &ois, kReference, kZeroDc, mk::InterpolationScheme::Linear,
-        euribor3mSyntheticPillars());
+    const mk::SpreadCurve<double> curve3m =
+        mk::bootstrapForecastCurve(parent, &ois, kReference, kZeroDc,
+                                   mk::InterpolationScheme::Linear, euribor3mSyntheticPillars());
     const double listedPercent[8] = {0.1775, 0.1274, 0.1222, 0.1269,
                                      0.1565, 0.1961, 0.2556, 0.3101};
     double worstForward = 0.0;

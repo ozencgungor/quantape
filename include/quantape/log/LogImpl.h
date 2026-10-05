@@ -3,9 +3,10 @@
 // Implementation header for the logging macros. Only included when logging is
 // enabled (see Log.h); pulls in quill's macro API and the component registry.
 
+#include "quantape/format/FmtFormatters.h" // format::num / format::matrix in logs
+
 #include <string_view>
 
-#include "quantape/format/FmtFormatters.h" // format::num / format::matrix in logs
 #include "quill/LogMacros.h"
 #include "quill/Logger.h"
 #include "quill/backend/ThreadUtilities.h" // inline get_thread_id/get_thread_name

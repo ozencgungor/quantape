@@ -29,11 +29,20 @@ public:
         const char suffix = text.back();
         TimeUnit unit;
         switch (suffix) {
-            case 'D': unit = TimeUnit::Days; break;
-            case 'W': unit = TimeUnit::Weeks; break;
-            case 'M': unit = TimeUnit::Months; break;
-            case 'Y': unit = TimeUnit::Years; break;
-            default: throw std::invalid_argument("Period::parse: unknown unit");
+            case 'D':
+                unit = TimeUnit::Days;
+                break;
+            case 'W':
+                unit = TimeUnit::Weeks;
+                break;
+            case 'M':
+                unit = TimeUnit::Months;
+                break;
+            case 'Y':
+                unit = TimeUnit::Years;
+                break;
+            default:
+                throw std::invalid_argument("Period::parse: unknown unit");
         }
         int value = 0;
         for (std::size_t i = 0; i + 1 < text.size(); ++i) {
@@ -53,10 +62,14 @@ public:
     /// Approximate month scale, ordering only (1M = 4W = 30D).
     constexpr std::int32_t approxMonthsTimes4() const {
         switch (unit_) {
-            case TimeUnit::Days: return length_ * 4 / 30;
-            case TimeUnit::Weeks: return length_;
-            case TimeUnit::Months: return length_ * 4;
-            case TimeUnit::Years: return length_ * 48;
+            case TimeUnit::Days:
+                return length_ * 4 / 30;
+            case TimeUnit::Weeks:
+                return length_;
+            case TimeUnit::Months:
+                return length_ * 4;
+            case TimeUnit::Years:
+                return length_ * 48;
         }
         return 0;
     }
@@ -71,10 +84,14 @@ public:
     /// Calendar-date advance (no business-day adjustment).
     constexpr Date advance(const Date& date, bool endOfMonth = false) const {
         switch (unit_) {
-            case TimeUnit::Days: return date.plusDays(length_);
-            case TimeUnit::Weeks: return date.plusWeeks(length_);
-            case TimeUnit::Months: return date.plusMonths(length_, endOfMonth);
-            case TimeUnit::Years: return date.plusYears(length_, endOfMonth);
+            case TimeUnit::Days:
+                return date.plusDays(length_);
+            case TimeUnit::Weeks:
+                return date.plusWeeks(length_);
+            case TimeUnit::Months:
+                return date.plusMonths(length_, endOfMonth);
+            case TimeUnit::Years:
+                return date.plusYears(length_, endOfMonth);
         }
         return date;
     }
@@ -91,4 +108,4 @@ private:
 
 using Tenor = Period;
 
-}  // namespace quantape::datetime
+} // namespace quantape::datetime

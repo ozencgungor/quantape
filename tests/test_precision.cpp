@@ -6,17 +6,16 @@
 // 3. an oscillatory integral whose exact value is a complex double-double
 //    (k! / (1 - i w)^(k+1)) computed with our own quadrature-free formula
 
+#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Precision/DoubleDouble.h"
+#include "quantape/util/Check.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using quantape::math::DoubleDouble;
 
@@ -82,8 +81,7 @@ void testArithmetic() {
         quantape::math::sin(DoubleDouble(1.5707963267948966, 6.123233995736766e-17));
     checkRel("sin(pi/2)", sPi2, DoubleDouble(1.0), 1e-31);
 
-    QTA_LOG_INFO("test",
-                 "  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)");
+    QTA_LOG_INFO("test", "  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)");
 }
 
 void testSiCiAnchors() {
@@ -150,8 +148,7 @@ void testOscillatoryExactMoment() {
                                     std::max(1e-300, std::fabs(reference.value())));
     }
     CHECK(worst < 1e-10);
-    QTA_LOG_INFO("test",
-                 "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
+    QTA_LOG_INFO("test", "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
                  quantape::util::num(worst, 2));
 }
 

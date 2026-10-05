@@ -10,6 +10,7 @@
 //   - layout validation (table too small throws), dimension mapping
 //
 // Stan-free: Sobol headers + mc/ + processes/.
+#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/GF2.h"
 #include "quantape/math/Random/Sobol/SobolGenerator.h"
 #include "quantape/math/Random/Sobol/SobolQuality.h"
@@ -19,6 +20,7 @@
 #include "quantape/mc/SobolSource.h"
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/processes/SdeProcesses.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -31,9 +33,6 @@
 #include <random>
 #include <thread>
 #include <vector>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -155,8 +154,7 @@ int main() {
         }
         const double mean = sum / reps;
         CHECK(std::fabs(mean - reference) < 2e-3);
-        QTA_LOG_INFO("test",
-                     "  [ok] digital shifts: reproducible, E[exp(sigma Z)]={} vs {}",
+        QTA_LOG_INFO("test", "  [ok] digital shifts: reproducible, E[exp(sigma Z)]={} vs {}",
                      quantape::util::num(mean, 6), quantape::util::num(reference, 6));
     }
 
@@ -332,8 +330,7 @@ int main() {
         s0.fillPath(3, 4, a, 0);
         s1.fillPath(3, 4, b, 0);
         CHECK(a(0, 0) != b(0, 0));
-        QTA_LOG_INFO("test",
-                     "  [ok] replicas, maxBits 32/64 consistency, prepared dimensions");
+        QTA_LOG_INFO("test", "  [ok] replicas, maxBits 32/64 consistency, prepared dimensions");
     }
 
     // ── RNG contract: jump-ahead (arbitrary point order), seeds, threads ──
@@ -412,9 +409,8 @@ int main() {
             w.join();
         }
         CHECK(seqOut == parOut);
-        QTA_LOG_INFO("test",
-                     "  [ok] RNG contract: jump-ahead/gray order, seed reproducibility, "
-                     "parallel thread equivalence");
+        QTA_LOG_INFO("test", "  [ok] RNG contract: jump-ahead/gray order, seed reproducibility, "
+                             "parallel thread equivalence");
     }
 
     // ── Optional: the real 65,536-dimension refined table ──

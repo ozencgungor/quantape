@@ -1,15 +1,16 @@
-#include <cmath>
 #include "quantape/markets/Curves/CurveConfig.h"
+
 #include "quantape/markets/Curves/FraConvexity.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
 
-#include <nlohmann/json.hpp>
-
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+
+#include <nlohmann/json.hpp>
 
 namespace quantape::markets {
 
@@ -103,8 +104,7 @@ datetime::Period asPeriod(const Json& node, const std::string& where) {
     if (unit == "Years") {
         return datetime::Period(length, datetime::TimeUnit::Years);
     }
-    fail(where, "unknown period unit '" + unit +
-                    "' (expected Days, Weeks, Months or Years)");
+    fail(where, "unknown period unit '" + unit + "' (expected Days, Weeks, Months or Years)");
 }
 
 CurveKey asKey(const Json& node, const std::string& where) {
@@ -170,8 +170,8 @@ InterpolationSpace spaceFromName(std::string_view name, const std::string& where
     if (name == "LogDiscount") {
         return InterpolationSpace::LogDiscount;
     }
-    fail(where, "unknown interpolation space '" + std::string(name) +
-                    "' (expected Zero or LogDiscount)");
+    fail(where,
+         "unknown interpolation space '" + std::string(name) + "' (expected Zero or LogDiscount)");
 }
 
 InterpolationScheme schemeFromName(const std::string& name, const std::string& where) {
@@ -223,28 +223,40 @@ datetime::DayCounter dayCounterFromName(std::string_view name) {
 
 std::string conventionName(datetime::BusinessDayConvention convention) {
     switch (convention) {
-        case datetime::BusinessDayConvention::Unadjusted: return "Unadjusted";
-        case datetime::BusinessDayConvention::Following: return "Following";
-        case datetime::BusinessDayConvention::ModifiedFollowing: return "ModifiedFollowing";
+        case datetime::BusinessDayConvention::Unadjusted:
+            return "Unadjusted";
+        case datetime::BusinessDayConvention::Following:
+            return "Following";
+        case datetime::BusinessDayConvention::ModifiedFollowing:
+            return "ModifiedFollowing";
         case datetime::BusinessDayConvention::HalfMonthModifiedFollowing:
             return "HalfMonthModifiedFollowing";
-        case datetime::BusinessDayConvention::Preceding: return "Preceding";
-        case datetime::BusinessDayConvention::ModifiedPreceding: return "ModifiedPreceding";
-        case datetime::BusinessDayConvention::Nearest: return "Nearest";
+        case datetime::BusinessDayConvention::Preceding:
+            return "Preceding";
+        case datetime::BusinessDayConvention::ModifiedPreceding:
+            return "ModifiedPreceding";
+        case datetime::BusinessDayConvention::Nearest:
+            return "Nearest";
     }
     return "Unknown";
 }
 
 datetime::BusinessDayConvention conventionFromName(std::string_view name) {
-    if (name == "Unadjusted") return datetime::BusinessDayConvention::Unadjusted;
-    if (name == "Following") return datetime::BusinessDayConvention::Following;
-    if (name == "ModifiedFollowing") return datetime::BusinessDayConvention::ModifiedFollowing;
+    if (name == "Unadjusted")
+        return datetime::BusinessDayConvention::Unadjusted;
+    if (name == "Following")
+        return datetime::BusinessDayConvention::Following;
+    if (name == "ModifiedFollowing")
+        return datetime::BusinessDayConvention::ModifiedFollowing;
     if (name == "HalfMonthModifiedFollowing") {
         return datetime::BusinessDayConvention::HalfMonthModifiedFollowing;
     }
-    if (name == "Preceding") return datetime::BusinessDayConvention::Preceding;
-    if (name == "ModifiedPreceding") return datetime::BusinessDayConvention::ModifiedPreceding;
-    if (name == "Nearest") return datetime::BusinessDayConvention::Nearest;
+    if (name == "Preceding")
+        return datetime::BusinessDayConvention::Preceding;
+    if (name == "ModifiedPreceding")
+        return datetime::BusinessDayConvention::ModifiedPreceding;
+    if (name == "Nearest")
+        return datetime::BusinessDayConvention::Nearest;
     throw std::invalid_argument(
         "CurveConfig: unknown convention name '" + std::string(name) +
         "' (expected Unadjusted, Following, ModifiedFollowing, HalfMonthModifiedFollowing, "
@@ -367,12 +379,11 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             }
             const std::string model = asString(fraNode, "model", where + ".fraConvexity");
             if (model != "ShiftedLognormal") {
-                fail(where + ".fraConvexity", "unknown FRA convexity model '" + model +
-                                                  "' (expected ShiftedLognormal)");
+                fail(where + ".fraConvexity",
+                     "unknown FRA convexity model '" + model + "' (expected ShiftedLognormal)");
             }
             spec.fraConvexity.enabled = true;
-            spec.fraConvexity.sigmaIndex =
-                asDouble(fraNode, "sigmaIndex", where + ".fraConvexity");
+            spec.fraConvexity.sigmaIndex = asDouble(fraNode, "sigmaIndex", where + ".fraConvexity");
             spec.fraConvexity.sigmaDiscount =
                 asDouble(fraNode, "sigmaDiscount", where + ".fraConvexity");
             spec.fraConvexity.correlation =
@@ -391,12 +402,11 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             }
             const std::string model = asString(convexityNode, "model", where + ".convexity");
             if (model != "HullWhite") {
-                fail(where + ".convexity", "unknown convexity model '" + model +
-                                                "' (expected HullWhite)");
+                fail(where + ".convexity",
+                     "unknown convexity model '" + model + "' (expected HullWhite)");
             }
             spec.convexity.enabled = true;
-            spec.convexity.sigma =
-                asDouble(convexityNode, "sigma", where + ".convexity");
+            spec.convexity.sigma = asDouble(convexityNode, "sigma", where + ".convexity");
             spec.convexity.meanReversion =
                 asDouble(convexityNode, "meanReversion", where + ".convexity");
             if (!(spec.convexity.sigma > 0.0)) {
@@ -407,12 +417,11 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             }
             if (convexityNode.contains("referenceCurve")) {
                 spec.convexity.hasReference = true;
-                spec.convexity.referenceCurve = asKey(
-                    convexityNode.at("referenceCurve"), where + ".convexity.referenceCurve");
+                spec.convexity.referenceCurve =
+                    asKey(convexityNode.at("referenceCurve"), where + ".convexity.referenceCurve");
                 if (spec.convexity.referenceCurve == spec.key) {
-                    fail(where + ".convexity",
-                         "'referenceCurve' must differ from the curve key '" +
-                             keyLabel(spec.key) + "'");
+                    fail(where + ".convexity", "'referenceCurve' must differ from the curve key '" +
+                                                   keyLabel(spec.key) + "'");
                 }
             }
         }
@@ -447,14 +456,13 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             if (!spaceExplicit) {
                 spec.space = InterpolationSpace::Zero;
             } else if (spec.space != InterpolationSpace::Zero) {
-                fail(where + ".interpolation",
-                     "forecast curves require 'space': 'Zero' (got '" +
-                         std::string(interpolationSpaceName(spec.space)) + "')");
+                fail(where + ".interpolation", "forecast curves require 'space': 'Zero' (got '" +
+                                                   std::string(interpolationSpaceName(spec.space)) +
+                                                   "')");
             }
             if (spec.switchIndex != 1) {
-                fail(where + ".interpolation",
-                     "'switchIndex' must be 1 for forecast curves (got " +
-                         std::to_string(spec.switchIndex) + ")");
+                fail(where + ".interpolation", "'switchIndex' must be 1 for forecast curves (got " +
+                                                   std::to_string(spec.switchIndex) + ")");
             }
         }
         if (node.contains("bootstrap")) {
@@ -485,7 +493,8 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             if (pillarNode.contains("start")) {
                 pillar.start = asDate(pillarNode, "start", pillarWhere);
             }
-            pillar.kind = pillarKindFromName(asString(pillarNode, "kind", pillarWhere), pillarWhere);
+            pillar.kind =
+                pillarKindFromName(asString(pillarNode, "kind", pillarWhere), pillarWhere);
             if ((pillar.kind == PillarKind::Fra || pillar.kind == PillarKind::Future) &&
                 !pillarNode.contains("start")) {
                 fail(pillarWhere, "Fra/Future pillars require a 'start' date");
@@ -499,11 +508,12 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                 pillar.calendar = calendarFromName(asString(pillarNode, "calendar", pillarWhere));
             }
             if (pillarNode.contains("businessDayConvention")) {
-                pillar.businessDayConvention = conventionFromName(
-                    asString(pillarNode, "businessDayConvention", pillarWhere));
+                pillar.businessDayConvention =
+                    conventionFromName(asString(pillarNode, "businessDayConvention", pillarWhere));
             }
             if (pillarNode.contains("fixedTenor")) {
-                pillar.fixedTenor = asPeriod(pillarNode.at("fixedTenor"), pillarWhere + ".fixedTenor");
+                pillar.fixedTenor =
+                    asPeriod(pillarNode.at("fixedTenor"), pillarWhere + ".fixedTenor");
             }
             if (pillarNode.contains("firstFixing")) {
                 if (pillar.kind != PillarKind::OisSwap) {
@@ -587,10 +597,9 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                 if (pillarNode.contains("start")) {
                     pillar.start = asDate(pillarNode, "start", pillarWhere);
                 }
-                pillar.kind = forecastPillarKindFromName(
-                    asString(pillarNode, "kind", pillarWhere), pillarWhere);
-                if (pillar.kind == ForecastPillar::Kind::Future &&
-                    !pillarNode.contains("start")) {
+                pillar.kind = forecastPillarKindFromName(asString(pillarNode, "kind", pillarWhere),
+                                                         pillarWhere);
+                if (pillar.kind == ForecastPillar::Kind::Future && !pillarNode.contains("start")) {
                     fail(pillarWhere, "Future forecast pillars require a 'start' date");
                 }
                 if (pillarNode.contains("quote")) {
@@ -619,8 +628,7 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                 }
                 if (pillarNode.contains("averaging")) {
                     if (pillar.kind != ForecastPillar::Kind::Future) {
-                        fail(pillarWhere,
-                             "'averaging' is only valid for Future forecast pillars");
+                        fail(pillarWhere, "'averaging' is only valid for Future forecast pillars");
                     }
                     if (pillar.futureStyle != FutureStyle::Averaged) {
                         fail(pillarWhere,
@@ -647,20 +655,21 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                     pillar.convexityAdjustmentSet = true;
                 }
                 if (pillarNode.contains("calendar")) {
-                    pillar.calendar = calendarFromName(asString(pillarNode, "calendar", pillarWhere));
+                    pillar.calendar =
+                        calendarFromName(asString(pillarNode, "calendar", pillarWhere));
                 } else if (pillarNode.contains("floatCalendar")) {
                     pillar.calendar =
                         calendarFromName(asString(pillarNode, "floatCalendar", pillarWhere));
                 }
                 if (pillarNode.contains("quoteDayCounter")) {
-                    pillar.quoteDayCounter = dayCounterFromName(
-                        asString(pillarNode, "quoteDayCounter", pillarWhere));
+                    pillar.quoteDayCounter =
+                        dayCounterFromName(asString(pillarNode, "quoteDayCounter", pillarWhere));
                 } else if (pillarNode.contains("dayCounter")) {
                     pillar.quoteDayCounter =
                         dayCounterFromName(asString(pillarNode, "dayCounter", pillarWhere));
                 } else if (pillarNode.contains("floatDayCounter")) {
-                    pillar.quoteDayCounter = dayCounterFromName(
-                        asString(pillarNode, "floatDayCounter", pillarWhere));
+                    pillar.quoteDayCounter =
+                        dayCounterFromName(asString(pillarNode, "floatDayCounter", pillarWhere));
                 }
                 if (pillarNode.contains("businessDayConvention")) {
                     pillar.businessDayConvention = conventionFromName(
@@ -716,8 +725,7 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                         fail(pillarWhere,
                              "'firstCouponRate' is only valid for Irs forecast pillars");
                     }
-                    pillar.firstCouponRate =
-                        asDouble(pillarNode, "firstCouponRate", pillarWhere);
+                    pillar.firstCouponRate = asDouble(pillarNode, "firstCouponRate", pillarWhere);
                     pillar.firstCouponFixed = true;
                 }
                 if (pillarNode.contains("firstCouponFixed")) {
@@ -732,13 +740,11 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
                         fail(pillarWhere,
                              "'spreadOnParentLeg' is only valid for BasisSwap forecast pillars");
                     }
-                    pillar.spreadOnParentLeg =
-                        asBool(pillarNode, "spreadOnParentLeg", pillarWhere);
+                    pillar.spreadOnParentLeg = asBool(pillarNode, "spreadOnParentLeg", pillarWhere);
                 }
                 if (pillar.kind == ForecastPillar::Kind::Irs &&
                     (!pillarNode.contains("floatTenor") || !pillarNode.contains("fixedTenor"))) {
-                    fail(pillarWhere,
-                         "Irs forecast pillars require 'floatTenor' and 'fixedTenor'");
+                    fail(pillarWhere, "Irs forecast pillars require 'floatTenor' and 'fixedTenor'");
                 }
                 spec.forecastPillars.push_back(pillar);
             }
@@ -817,9 +823,9 @@ template <typename Pillar, typename Bootstrap, typename Verify>
 auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
                          std::vector<Pillar>& pillars,
                          const std::vector<CurveReference>& references,
-                         const std::vector<std::size_t>& modelFutures,
-                         std::string_view errorPrefix, const char* convergenceMessage,
-                         Bootstrap bootstrap, Verify verify) -> decltype(bootstrap()) {
+                         const std::vector<std::size_t>& modelFutures, std::string_view errorPrefix,
+                         const char* convergenceMessage, Bootstrap bootstrap, Verify verify)
+    -> decltype(bootstrap()) {
     using Curve = decltype(bootstrap());
     if (modelFutures.empty()) {
         return bootstrap();
@@ -828,8 +834,7 @@ auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
         const DiscountCurve<double>* reference =
             resolveReference(references, spec.convexity.referenceCurve);
         if (reference == nullptr) {
-            throw std::invalid_argument(std::string(errorPrefix) +
-                                        "convexity reference curve '" +
+            throw std::invalid_argument(std::string(errorPrefix) + "convexity reference curve '" +
                                         keyLabel(spec.convexity.referenceCurve) +
                                         "' not found in the supplied references");
         }
@@ -920,10 +925,9 @@ DiscountCurve<double> buildCurve(const CurveStackSpec& stack, const CurveSpec& s
                     pillar.calendar.adjust(pillar.start, pillar.businessDayConvention);
                 const double timeToFixing =
                     datetime::yearFraction(stack.asOf, adjustedStart, spec.zeroDayCounter);
-                out.fraConvexityExponent =
-                    fraConvexityExponent(spec.fraConvexity.sigmaIndex,
-                                         spec.fraConvexity.sigmaDiscount,
-                                         spec.fraConvexity.correlation, timeToFixing);
+                out.fraConvexityExponent = fraConvexityExponent(
+                    spec.fraConvexity.sigmaIndex, spec.fraConvexity.sigmaDiscount,
+                    spec.fraConvexity.correlation, timeToFixing);
             }
         }
         if (out.kind == PillarKind::Future) {
@@ -968,19 +972,20 @@ SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveS
                                     keyLabel(spec.key) + "' has no forecast pillars");
     }
     if (!spec.pillars.empty()) {
-        throw std::invalid_argument("CurveConfig: buildForecastCurve: curve '" + keyLabel(spec.key) +
+        throw std::invalid_argument("CurveConfig: buildForecastCurve: curve '" +
+                                    keyLabel(spec.key) +
                                     "' carries discount pillars; use buildCurve");
     }
     if (spec.key.role != CurveRole::Forecast) {
-        throw std::invalid_argument(
-            "CurveConfig: buildForecastCurve: curve role '" +
-            std::string(curveRoleToName(spec.key.role)) + "' cannot use 'forecastPillars'");
+        throw std::invalid_argument("CurveConfig: buildForecastCurve: curve role '" +
+                                    std::string(curveRoleToName(spec.key.role)) +
+                                    "' cannot use 'forecastPillars'");
     }
     if (const CurveSpec* sibling = findCurveSpec(stack, spec.key);
         sibling != nullptr && !sibling->pillars.empty()) {
-        throw std::invalid_argument(
-            "CurveConfig: buildForecastCurve: forecast curve key '" + keyLabel(spec.key) +
-            "' is also a parent curve key in the stack");
+        throw std::invalid_argument("CurveConfig: buildForecastCurve: forecast curve key '" +
+                                    keyLabel(spec.key) +
+                                    "' is also a parent curve key in the stack");
     }
     detail::validateConvexityReference(spec);
     std::vector<ForecastPillar> pillars;
@@ -1045,9 +1050,9 @@ SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveS
         pillars.push_back(out);
     }
     const auto bootstrap = [&]() {
-        return bootstrapForecastCurve<DiscountCurve<double>>(
-            parent, discount, stack.asOf, spec.zeroDayCounter, spec.scheme, pillars,
-            spec.accuracy, spec.tension);
+        return bootstrapForecastCurve<DiscountCurve<double>>(parent, discount, stack.asOf,
+                                                             spec.zeroDayCounter, spec.scheme,
+                                                             pillars, spec.accuracy, spec.tension);
     };
     const auto finish = [&](SpreadCurve<double> curve) {
         if (filledPillars != nullptr) {
@@ -1062,8 +1067,7 @@ SpreadCurve<double> buildForecastCurve(const CurveStackSpec& stack, const CurveS
     };
     return finish(detail::applyModelConvexity(
         stack, spec, pillars, references, modelFutures, "CurveConfig: buildForecastCurve: ",
-        "CurveConfig: forecast futures convexity fixed point did not converge", bootstrap,
-        verify));
+        "CurveConfig: forecast futures convexity fixed point did not converge", bootstrap, verify));
 }
 
 } // namespace quantape::markets

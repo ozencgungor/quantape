@@ -45,8 +45,8 @@ LevenbergMarquardtResult levenbergMarquardtAd(const Residual& residuals, std::ve
             throw std::invalid_argument("levenbergMarquardtAd: size mismatch");
         }
         const Eigen::Matrix<double, Eigen::Dynamic, 1> pointEigen =
-            Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 1>>(point.data(),
-                                                                       static_cast<Eigen::Index>(n));
+            Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 1>>(
+                point.data(), static_cast<Eigen::Index>(n));
         Eigen::Matrix<double, Eigen::Dynamic, 1> valueEigen;
         Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> jacobianEigen;
         stan::math::jacobian(
@@ -70,8 +70,8 @@ LevenbergMarquardtResult levenbergMarquardtAd(const Residual& residuals, std::ve
         }
         for (std::size_t i = 0; i < m; ++i) {
             for (std::size_t j = 0; j < n; ++j) {
-                flat[i * n + j] = jacobianEigen(static_cast<Eigen::Index>(i),
-                                                static_cast<Eigen::Index>(j));
+                flat[i * n + j] =
+                    jacobianEigen(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j));
             }
         }
     };

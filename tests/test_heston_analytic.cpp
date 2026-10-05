@@ -13,6 +13,7 @@
 //     analytic price within the documented QE discretization bias
 //     (high vol-of-vol; ~0.7% at 252 steps, converging as dt -> 0)
 //   - Complex-step parameter gradients vs central finite differences
+#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Integrals/GaussLaguerre.h"
 #include "quantape/math/Integrals/GaussLegendre.h"
@@ -24,6 +25,7 @@
 #include "quantape/mc/processes/SdeProcesses.h"
 #include "quantape/models/HestonModel.h"
 #include "quantape/pricing/BlackScholes.h"
+#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
@@ -33,15 +35,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 using quantape::util::checkClose;
 using quantape::util::isFiniteBitwise;
 
 namespace {
-
-
 
 double factorial(int n) {
     double out = 1.0;
@@ -66,8 +63,7 @@ void testQuadratures() {
         const double expected = (m % 2 == 0) ? 2.0 / static_cast<double>(m + 1) : 0.0;
         checkClose("legendre moment", integral, expected, 1e-12);
     }
-    QTA_LOG_INFO("test",
-                 "  [ok] quadrature moments exact (Laguerre k!, Legendre 2/(m+1))");
+    QTA_LOG_INFO("test", "  [ok] quadrature moments exact (Laguerre k!, Legendre 2/(m+1))");
 }
 
 void testCharacteristicIdentities() {
@@ -233,9 +229,8 @@ void testControlVariates() {
         const double reference = referenceModel.call(*paramSets[idx], *marketSets[idx]);
         const quantape::models::HestonModel model(quantape::models::HestonConfig{512, 200.0, cv});
         const double price = model.call(*paramSets[idx], *marketSets[idx]);
-        QTA_LOG_INFO("test", "    CV {} price={}  err={} (EFGL vs Gauss-Legendre)",
-                     names[idx], quantape::util::num(price, 12),
-                     quantape::util::num(price - reference, 2));
+        QTA_LOG_INFO("test", "    CV {} price={}  err={} (EFGL vs Gauss-Legendre)", names[idx],
+                     quantape::util::num(price, 12), quantape::util::num(price - reference, 2));
         checkClose(names[idx], price, reference, 1e-9);
         ++idx;
     }
@@ -258,8 +253,7 @@ void testControlVariates() {
                  "  low-order (24 nodes) errors: BS-CV {}, asymptotic-CV {} (auto CV chosen)",
                  quantape::util::num(errBs, 3), quantape::util::num(errAsym, 3));
     CHECK(errAsym < errBs);
-    QTA_LOG_INFO("test",
-                 "  [ok] control variates: Si/Ci anchors, CV identity, node stability");
+    QTA_LOG_INFO("test", "  [ok] control variates: Si/Ci anchors, CV identity, node stability");
 }
 
 void testSurrogate() {
@@ -315,7 +309,8 @@ void testSurrogate() {
                      "  timings: price {} us, CS gradient {} us, Hessian {} us, "
                      "surrogate build {} us, surrogate eval {} ns ({}x cheaper/eval, sink {})",
                      quantape::util::num(priceNs / 1000.0, 1),
-                     quantape::util::num(gradNs / 1000.0, 1), quantape::util::num(hessNs / 1000.0, 1),
+                     quantape::util::num(gradNs / 1000.0, 1),
+                     quantape::util::num(hessNs / 1000.0, 1),
                      quantape::util::num((priceNs + gradNs + hessNs) / 1000.0, 1),
                      quantape::util::num(evalNs, 0), quantape::util::num(priceNs / evalNs, 0),
                      quantape::util::num(sink, 3));
@@ -526,8 +521,7 @@ void testFullJacobians() {
     }
     const double exact = model.callFull(shifted, market.tMax);
     checkClose("full surrogate Taylor", surrogate.eval(dx), exact, 2e-6);
-    QTA_LOG_INFO("test",
-                 "  [ok] full 9-parameter surrogate: value/gradient/Hessian, Taylor err {}",
+    QTA_LOG_INFO("test", "  [ok] full 9-parameter surrogate: value/gradient/Hessian, Taylor err {}",
                  quantape::util::num(std::fabs(surrogate.eval(dx) - exact), 2));
 
     const auto now = [] { return std::chrono::steady_clock::now(); };
