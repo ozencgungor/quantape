@@ -31,4 +31,12 @@ quantape_enable_stan(test_optimizers_stress)
 quantape_set_warnings(test_optimizers_stress)
 quantape_register_test(test_optimizers_stress)
 
+foreach(_test test_mixed_hessian test_pricer_hessian)
+    add_executable(${_test} ${CMAKE_SOURCE_DIR}/tests/${_test}.cpp)
+    target_link_libraries(${_test} PRIVATE quantape)
+    quantape_enable_stan(${_test})
+    quantape_set_warnings(${_test})
+    quantape_register_test(${_test})
+endforeach()
+
 quantape_collect_executables()
