@@ -1236,7 +1236,7 @@ void runDepth2FiniteDifference(const char* prefix, bool exogenousRootDiscount) {
     }
 }
 
-void runDepth2GammaFiniteDifference(const char* prefix, bool exogenousRootDiscount) {
+void runDepth2GammaFiniteDifference(bool exogenousRootDiscount) {
     Depth2StackFixture fixture(exogenousRootDiscount);
     const Depth2Gradients gradients = depth2Gradients(fixture);
     const std::size_t mRoot = fixture.rootPillars.size();
@@ -1963,9 +1963,9 @@ TEST_F(CurveRiskTest, stackDepth2RiskAndGamma) {
     SCOPED_TRACE("depth-2 off-parent discount");
     runDepth2FiniteDifference("depth-2 off-parent discount", true);
     SCOPED_TRACE("depth-2 chain gamma");
-    runDepth2GammaFiniteDifference("depth-2 chain gamma", false);
+    runDepth2GammaFiniteDifference(false);
     SCOPED_TRACE("depth-2 off-parent discount gamma");
-    runDepth2GammaFiniteDifference("depth-2 off-parent discount gamma", true);
+    runDepth2GammaFiniteDifference(true);
 }
 
 TEST_F(CurveRiskTest, stackDepth1AndRebuildGates) {
