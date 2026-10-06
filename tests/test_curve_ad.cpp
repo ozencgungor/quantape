@@ -38,7 +38,7 @@
 #include <string>
 #include <vector>
 
-#include "paper_eur_curves_fixture.h"
+#include "support/fixtures/PaperEurCurves.h"
 
 using namespace quantape;
 
