@@ -6,35 +6,64 @@
 // 3. an oscillatory integral whose exact value is a complex double-double
 //    (k! / (1 - i w)^(k+1)) computed with our own quadrature-free formula
 
-#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Precision/DoubleDouble.h"
-#include "quantape/util/Check.h"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <initializer_list>
+#include <ostream>
+#include <string>
+
+#include "support/GtestSupport.h"
 
 using quantape::math::DoubleDouble;
 
 namespace {
 
-void checkRel(const char* label, const DoubleDouble& got, const DoubleDouble& expected,
+// Relative gate with the legacy semantics: the error is the double part of the
+// double-double difference, and the denominator floor is 1e-300.
+void checkRel(const std::string& label, const DoubleDouble& got, const DoubleDouble& expected,
               double tol) {
     const double denom = std::max(1e-300, std::fabs(expected.value()));
     const double err = std::fabs((got - expected).value()) / denom;
-    if (!(err <= tol)) {
-        QTA_LOG_ERROR("test", "FAIL: {} rel err {} tol {} (got {} expected {})", label,
-                      quantape::util::num(err, 3), quantape::util::num(tol, 3),
-                      quantape::util::num(got.value(), 20),
-                      quantape::util::num(expected.value(), 20));
-        std::exit(1);
-    }
+    CHECK_CLOSE(label, err, 0.0, tol);
 }
 
-void testArithmetic() {
+// Si(x) = sum (-1)^k x^(2k+1)/((2k+1)! (2k+1)) in double-double.
+DoubleDouble siSeries(const DoubleDouble& x) {
+    DoubleDouble term = x;
+    DoubleDouble sum = x;
+    const DoubleDouble x2 = x * x;
+    for (int k = 1; k < 60; ++k) {
+        const double d = static_cast<double>(2 * k) * static_cast<double>(2 * k + 1);
+        term = -term * x2 / DoubleDouble(d);
+        const DoubleDouble add = term / DoubleDouble(static_cast<double>(2 * k + 1));
+        sum = sum + add;
+        if (add.hi == 0.0) {
+            break;
+        }
+    }
+    return sum;
+}
+
+struct SiAnchor {
+    const char* id;
+    const char* label;
+    double x;
+    double expected;
+    double tol;
+};
+
+void PrintTo(const SiAnchor& anchor, std::ostream* os) {
+    *os << anchor.id;
+}
+
+class PrecisionSiTest : public ::testing::TestWithParam<SiAnchor> {};
+
+} // namespace
+
+TEST(Precision, errorFreeArithmetic) {
     // Exact cancellation: (1 + 1e-30) - 1 = 1e-30 in double-double.
     const DoubleDouble big(1.0);
     const DoubleDouble tiny(1e-30);
@@ -50,7 +79,8 @@ void testArithmetic() {
                                         std::max(1e-300, std::fabs(a)));
         }
     }
-    CHECK(worst < 1e-30);
+    SCOPED_TRACE("product round trip");
+    EXPECT_LT(worst, 1e-30);
 
     // sqrt: (sqrt(x))^2 == x
     worst = 0.0;
@@ -58,58 +88,53 @@ void testArithmetic() {
         const DoubleDouble r = quantape::math::sqrt(DoubleDouble(x));
         worst = std::max(worst, std::fabs((r * r - DoubleDouble(x)).value()) / x);
     }
-    CHECK(worst < 1e-30);
+    SCOPED_TRACE("sqrt squared");
+    EXPECT_LT(worst, 1e-30);
+}
 
-    // exp/log round trip: absolute error at the double-double floor (near
-    // zero the logarithm's absolute precision is the meaningful measure)
-    worst = 0.0;
+TEST(Precision, expLogRoundTrip) {
+    // Absolute error at the double-double floor (near zero the logarithm's
+    // absolute precision is the meaningful measure).
+    double worst = 0.0;
     for (double x : {0.1, 1.0, 2.5, 17.0, 1e-4, 300.0}) {
         const DoubleDouble l = quantape::math::log(quantape::math::exp(DoubleDouble(x)));
         worst = std::max(worst, std::fabs((l - DoubleDouble(x)).value()));
     }
-    CHECK(worst < 1e-29);
+    SCOPED_TRACE("exp/log round trip");
+    EXPECT_LT(worst, 1e-29);
+}
 
-    // sin^2 + cos^2 == 1 and sin(pi/2) == 1
-    worst = 0.0;
+TEST(Precision, trigonometricIdentities) {
+    // sin^2 + cos^2 == 1
+    double worst = 0.0;
     for (double x : {0.0, 0.3, 1.0, 3.0, 12.0, 1234.5678}) {
         const DoubleDouble s = quantape::math::sin(DoubleDouble(x));
         const DoubleDouble c = quantape::math::cos(DoubleDouble(x));
         worst = std::max(worst, std::fabs((s * s + c * c - DoubleDouble(1.0)).value()));
     }
-    CHECK(worst < 1e-31);
+    SCOPED_TRACE("sin^2 + cos^2");
+    EXPECT_LT(worst, 1e-31);
+
+    // sin(pi/2) == 1 (exact pi/2 as a double-double)
     const DoubleDouble sPi2 =
         quantape::math::sin(DoubleDouble(1.5707963267948966, 6.123233995736766e-17));
     checkRel("sin(pi/2)", sPi2, DoubleDouble(1.0), 1e-31);
-
-    QTA_LOG_INFO("test", "  [ok] double-double arithmetic (add/mul/div/sqrt/exp/log/sin/cos)");
 }
 
-void testSiCiAnchors() {
-    // Si(x) = sum (-1)^k x^(2k+1)/((2k+1)! (2k+1)) in double-double;
-    // anchors from the high-precision literature.
-    auto si = [](const DoubleDouble& x) {
-        DoubleDouble term = x;
-        DoubleDouble sum = x;
-        const DoubleDouble x2 = x * x;
-        for (int k = 1; k < 60; ++k) {
-            const double d = static_cast<double>(2 * k) * static_cast<double>(2 * k + 1);
-            term = -term * x2 / DoubleDouble(d);
-            const DoubleDouble add = term / DoubleDouble(static_cast<double>(2 * k + 1));
-            sum = sum + add;
-            if (add.hi == 0.0) {
-                break;
-            }
-        }
-        return sum;
-    };
-    const DoubleDouble si1 = si(DoubleDouble(1.0));
-    checkRel("Si(1)", si1, DoubleDouble(0.94608307036718301494), 1e-15);
-    const DoubleDouble si10 = si(DoubleDouble(10.0));
-    checkRel("Si(10)", si10, DoubleDouble(1.6583475942188740493), 1e-14);
-    QTA_LOG_INFO("test", "  [ok] Si anchors in double-double (Si(1), Si(10))");
+TEST_P(PrecisionSiTest, seriesAnchors) {
+    // Anchors from the high-precision literature.
+    SCOPED_TRACE(GetParam().label);
+    const DoubleDouble value = siSeries(DoubleDouble(GetParam().x));
+    checkRel(GetParam().label, value, DoubleDouble(GetParam().expected), GetParam().tol);
 }
 
-void testOscillatoryExactMoment() {
+INSTANTIATE_TEST_SUITE_P(
+    Table, PrecisionSiTest,
+    ::testing::Values(SiAnchor{"Si1", "Si(1)", 1.0, 0.94608307036718301494, 1e-15},
+                      SiAnchor{"Si10", "Si(10)", 10.0, 1.6583475942188740493, 1e-14}),
+    [](const ::testing::TestParamInfo<SiAnchor>& info) { return info.param.id; });
+
+TEST(Precision, oscillatoryMomentsMatchClosedForm) {
     // int_0^inf e^{-x} x^k cos(w x) dx = Re k! / (1 - i w)^{k+1}, computed as
     // a complex double-double division chain, against a double-double
     // tanh-sinh quadrature of the same integrand (independent reference).
@@ -147,18 +172,6 @@ void testOscillatoryExactMoment() {
         worst = std::max(worst, std::fabs((quadrature - reference).value()) /
                                     std::max(1e-300, std::fabs(reference.value())));
     }
-    CHECK(worst < 1e-10);
-    QTA_LOG_INFO("test", "  [ok] oscillatory moments: tanh-sinh vs closed form (worst rel {})",
-                 quantape::util::num(worst, 2));
-}
-
-} // namespace
-
-int main() {
-    QTA_LOG_INFO("test", "Double-double precision gates");
-    testArithmetic();
-    testSiCiAnchors();
-    testOscillatoryExactMoment();
-    QTA_LOG_INFO("test", "ALL PRECISION TESTS PASSED");
-    return 0;
+    SCOPED_TRACE("oscillatory moments k=0..8");
+    EXPECT_LT(worst, 1e-10);
 }
