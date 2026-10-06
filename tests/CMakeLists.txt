@@ -6,6 +6,7 @@
 # Each area owns one directory with its own CMakeLists.txt; the per-file
 # legacy target below is removed in the same commit as its conversion.
 add_subdirectory(unit/util)
+add_subdirectory(unit/pricing)
 
 # --- Sobol -------------------------------------------------------------------
 add_executable(test_sobol_quality test_sobol_quality.cpp)
@@ -194,12 +195,6 @@ target_link_libraries(test_levenberg_marquardt_ad PRIVATE quantape)
 quantape_enable_stan(test_levenberg_marquardt_ad)
 quantape_set_warnings(test_levenberg_marquardt_ad)
 quantape_register_test(test_levenberg_marquardt_ad)
-
-add_executable(test_black76 test_black76.cpp)
-target_link_libraries(test_black76 PRIVATE quantape)
-quantape_enable_stan(test_black76)
-quantape_set_warnings(test_black76)
-quantape_register_test(test_black76)
 
 foreach(_test test_cubic_weights test_bicubic_weights test_tanh_sinh
                test_integrator_primitives test_solvers_ad
