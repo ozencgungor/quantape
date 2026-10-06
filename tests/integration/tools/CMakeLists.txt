@@ -3,14 +3,14 @@
 # exist (guard kept; the test uses GTEST_SKIP when a macro is empty).
 
 if(TARGET extend_sobol AND TARGET refine_sobol AND TARGET verify_sobol)
-    add_executable(test_sobol_tools ${CMAKE_SOURCE_DIR}/tests/test_sobol_tools.cpp)
-    target_link_libraries(test_sobol_tools PRIVATE Threads::Threads quantape_log quantape_format)
-    target_compile_definitions(test_sobol_tools PRIVATE
-        EXTEND_BIN="$<TARGET_FILE:extend_sobol>"
-        REFINE_BIN="$<TARGET_FILE:refine_sobol>"
-        VERIFY_BIN="$<TARGET_FILE:verify_sobol>")
-    add_dependencies(test_sobol_tools extend_sobol refine_sobol verify_sobol)
-    quantape_register_test(test_sobol_tools)
+    quantape_add_gtest(qta_test_sobol_tools
+        SOURCES test_sobol_tools.cpp
+        LIBS Threads::Threads
+        DEFS EXTEND_BIN="$<TARGET_FILE:extend_sobol>"
+             REFINE_BIN="$<TARGET_FILE:refine_sobol>"
+             VERIFY_BIN="$<TARGET_FILE:verify_sobol>"
+        LABELS integration mc slow)
+    add_dependencies(qta_test_sobol_tools extend_sobol refine_sobol verify_sobol)
 else()
     message(STATUS "test_sobol_tools skipped: QUANTAPE_BUILD_TOOLS=OFF")
 endif()
