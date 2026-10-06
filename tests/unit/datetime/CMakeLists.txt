@@ -1,10 +1,6 @@
-# datetime/: date, day count, calendar and schedule gates (no engine link).
-
-foreach(_test test_date test_daycount test_calendar test_schedule)
-    add_executable(${_test} ${CMAKE_SOURCE_DIR}/tests/${_test}.cpp)
-    target_link_libraries(${_test} PRIVATE quantape_log quantape_format)
-    quantape_set_warnings(${_test})
-    quantape_register_test(${_test})
-endforeach()
+# datetime/: date, day count, calendar and schedule gates (plain, smoke tier).
+quantape_add_gtest(qta_test_datetime
+    SOURCES test_date.cpp test_daycount.cpp test_calendar.cpp test_schedule.cpp
+    LABELS unit datetime fast smoke)
 
 quantape_collect_executables()
