@@ -2,7 +2,8 @@
 #define QUANTAPE_TESTS_SUPPORT_GTEST_SUPPORT_H
 
 // Umbrella for plain test translation units: gtest + assertion macros +
-// printers. gtest/gmock may only enter the suite through this header (or
+// printers + fixtures/helpers (temp dirs, data files, scalar traits, process
+// runner). gtest/gmock may only enter the suite through this header (or
 // "support/StanTapeFixture.h", which pulls Stan).
 //
 // Include order:
@@ -14,7 +15,11 @@
 // must not leak into every plain TU.
 
 #include "support/Assertions.h"
+#include "support/BinaryRunner.h"
+#include "support/DataFiles.h"
 #include "support/Printers.h"
+#include "support/ScalarTraits.h"
+#include "support/TempDir.h"
 #include <gtest/gtest.h>
 
 #endif // QUANTAPE_TESTS_SUPPORT_GTEST_SUPPORT_H
