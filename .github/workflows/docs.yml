@@ -24,7 +24,7 @@ jobs:
       # Doxyfile has OUTPUT_DIRECTORY = docs and INPUT = include/quantape,
       # so it must be run from the repository root.
       - run: doxygen docs/Doxyfile
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: doxygen-html
           path: docs/html
