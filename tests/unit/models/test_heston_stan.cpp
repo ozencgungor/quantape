@@ -9,30 +9,21 @@
 
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
 #include "quantape/models/HestonStanPrimitives.h"
-#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
 #include <chrono>
 #include <cmath>
-#include <cstdio>
+#include <cstdint>
 #include <type_traits>
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 namespace {
 
 constexpr int P = quantape::models::HESTON_PARAM_COUNT;
-
-int failures = 0;
-
-void check(bool ok, const char* name, double got = 0.0, double tol = 0.0) {
-    if (!ok) {
-        ++failures;
-        QTA_LOG_ERROR("test", "FAIL: {} (got={} tol={})", name, quantape::util::num(got, 3),
-                      quantape::util::num(tol, 3));
-    }
-}
 
 using quantape::models::HestonFullPoint;
 using quantape::models::HestonModel;
@@ -67,35 +58,48 @@ Eigen::VectorXd makePoint() {
     return out;
 }
 
-void testStanGradientAndHessian() {
-    using quantape::models::HestonModel;
-    const HestonModel model;
-    const Eigen::VectorXd x = makePoint();
+HestonFullPoint asFullPoint(const Eigen::VectorXd& x) {
     HestonFullPoint point{};
     for (int i = 0; i < P; ++i) {
         point[static_cast<std::size_t>(i)] = x(i);
     }
+    return point;
+}
 
+class HestonStanTest : public StanTapeTest {};
+
+} // namespace
+
+TEST_F(HestonStanTest, varAdjointMatchesFullGradient) {
+    const HestonModel model;
+    const Eigen::VectorXd x = makePoint();
+    const HestonFullPoint point = asFullPoint(x);
     const double price = model.callFull(point, 1.0);
     const Eigen::Matrix<double, 1, P> g = model.fullGradient(point, 1.0);
-    const Eigen::Matrix<double, P, P> H = model.fullHessian(point, 1.0);
 
     HestonStanFunctor functor{&model, 1.0};
-
     double fx = 0.0;
     Eigen::VectorXd grad(P);
     stan::math::gradient(functor, x, fx, grad);
-    check(std::fabs(fx - price) < 1e-12, "stan var value == callFull", std::fabs(fx - price),
-          1e-12);
+    CHECK_CLOSE("stan var value == callFull", fx, price, 1e-12);
 
     double gradErr = 0.0;
     for (int i = 0; i < P; ++i) {
         gradErr = std::max(gradErr, std::fabs(grad(i) - g(i)));
     }
-    check(gradErr < 1e-9, "stan adjoint == fullGradient", gradErr, 1e-9);
-    QTA_LOG_INFO("test", "  [ok] var adjoint == fullGradient (max err {}, 1-node tape)",
-                 quantape::util::num(gradErr, 2));
+    CHECK_CLOSE("stan adjoint == fullGradient", gradErr, 0.0, 1e-9);
+    ::testing::Test::RecordProperty("stan_var_value_err",
+                                    quantape::util::num(std::fabs(fx - price), 3));
+    ::testing::Test::RecordProperty("stan_adjoint_err", quantape::util::num(gradErr, 3));
+}
 
+TEST_F(HestonStanTest, fvarHessianMatchesFullHessian) {
+    const HestonModel model;
+    const Eigen::VectorXd x = makePoint();
+    const HestonFullPoint point = asFullPoint(x);
+    const Eigen::Matrix<double, P, P> H = model.fullHessian(point, 1.0);
+
+    HestonStanFunctor functor{&model, 1.0};
     double fx2 = 0.0;
     Eigen::VectorXd grad2(P);
     Eigen::MatrixXd hess(P, P);
@@ -106,15 +110,21 @@ void testStanGradientAndHessian() {
             hessErr = std::max(hessErr, std::fabs(hess(i, j) - H(i, j)));
         }
     }
-    check(hessErr < 1e-9, "stan fvar<var> Hessian == fullHessian", hessErr, 1e-9);
-    QTA_LOG_INFO("test", "  [ok] fvar<var> Hessian == fullHessian (max err {}, 2-node tape)",
-                 quantape::util::num(hessErr, 2));
+    CHECK_CLOSE("stan fvar<var> Hessian == fullHessian", hessErr, 0.0, 1e-9);
+    ::testing::Test::RecordProperty("stan_hessian_err", quantape::util::num(hessErr, 3));
+}
+
+TEST_F(HestonStanTest, hessianColumnsMatchFiniteDifference) {
+    const HestonModel model;
+    const quantape::models::HestonFullPoint point = asFullPoint(makePoint());
+    const Eigen::Matrix<double, P, P> H = model.fullHessian(point, 1.0);
 
     // Independent FD of the re-evaluated gradient for three representative entries
     const double h = 1e-4;
     const int idx[3] = {quantape::models::HESTON_SIGMA, quantape::models::HESTON_SPOT,
                         quantape::models::HESTON_RATE};
     for (int k = 0; k < 3; ++k) {
+        SCOPED_TRACE(::testing::Message() << "column " << k);
         HestonFullPoint up = point, down = point;
         up[static_cast<std::size_t>(idx[k])] += h;
         down[static_cast<std::size_t>(idx[k])] -= h;
@@ -122,22 +132,17 @@ void testStanGradientAndHessian() {
         const Eigen::Matrix<double, 1, P> gd = model.fullGradient(down, 1.0);
         for (int i = 0; i < P; ++i) {
             const double fd = (gu(i) - gd(i)) / (2.0 * h);
-            check(std::fabs(fd - H(i, idx[k])) < 1e-5 * std::max(1.0, std::fabs(fd)),
-                  "fullHessian column vs FD(gradient)", std::fabs(fd - H(i, idx[k])), 1e-5);
+            CHECK_CLOSE("fullHessian column vs FD(gradient)", H(i, idx[k]), fd,
+                        1e-5 * std::max(1.0, std::fabs(fd)));
         }
     }
-    QTA_LOG_INFO("test", "  [ok] fullHessian columns vs central FD of fullGradient");
 }
 
-void testPrimalCache() {
+TEST_F(HestonStanTest, cachedHessianMatchesDirect) {
     const HestonModel model;
     const Eigen::VectorXd x = makePoint();
-    HestonFullPoint point{};
-    for (int i = 0; i < P; ++i) {
-        point[static_cast<std::size_t>(i)] = x(i);
-    }
+    const HestonFullPoint point = asFullPoint(x);
     const Eigen::Matrix<double, P, P> H = model.fullHessian(point, 1.0);
-    const auto g = model.fullGradient(point, 1.0);
 
     quantape::models::HestonSourceCache cache(model);
     auto cachedFunctor = [&](const auto& z) {
@@ -164,9 +169,9 @@ void testPrimalCache() {
             hessErr = std::max(hessErr, std::fabs(Hc(i, j) - H(i, j)));
         }
     }
-    check(hessErr < 1e-12, "cached fvar<var> Hessian == fullHessian", hessErr, 1e-12);
-    QTA_LOG_INFO("test", "  [ok] cached price: hessian err {}, rebuilds={}",
-                 quantape::util::num(hessErr, 2), cache.rebuilds());
+    CHECK_CLOSE("cached fvar<var> Hessian == fullHessian", hessErr, 0.0, 1e-12);
+    ::testing::Test::RecordProperty("cached_hessian_err", quantape::util::num(hessErr, 3));
+    ::testing::Test::RecordProperty("rebuilds", static_cast<int64_t>(cache.rebuilds()));
 
     // timing: cached vs uncached hessian
     HestonStanFunctor functor{&model, 1.0};
@@ -188,58 +193,7 @@ void testPrimalCache() {
         t1 = now();
         cached += us(t0, t1);
     }
-    QTA_LOG_INFO("test", "  timings: stan hessian plain {} us, primal-cached {} us ({}x)",
-                 quantape::util::num(plain / reps, 1), quantape::util::num(cached / reps, 1),
-                 quantape::util::num(plain / cached, 1));
-}
-
-void testTiming() {
-    const HestonModel model;
-    const Eigen::VectorXd x = makePoint();
-    HestonFullPoint point{};
-    for (int i = 0; i < P; ++i) {
-        point[static_cast<std::size_t>(i)] = x(i);
-    }
-    HestonStanFunctor functor{&model, 1.0};
-
-    const auto now = [] { return std::chrono::steady_clock::now(); };
-    const auto us = [](auto a, auto b) {
-        return std::chrono::duration<double, std::micro>(b - a).count();
-    };
-
-    const int reps = 5;
-    double gradUs = 0.0;
-    double hessUs = 0.0;
-    for (int r = 0; r < reps; ++r) {
-        double fx = 0.0;
-        Eigen::VectorXd grad(P);
-        auto t0 = now();
-        stan::math::gradient(functor, x, fx, grad);
-        auto t1 = now();
-        gradUs += us(t0, t1);
-        Eigen::MatrixXd H(P, P);
-        t0 = now();
-        stan::math::hessian(functor, x, fx, grad, H);
-        t1 = now();
-        hessUs += us(t0, t1);
-    }
-    QTA_LOG_INFO("test",
-                 "  timings: stan gradient (var, value+grad build) {} us, "
-                 "stan hessian (fvar<var>, value+grad+hess build) {} us",
-                 quantape::util::num(gradUs / reps, 1), quantape::util::num(hessUs / reps, 1));
-}
-
-} // namespace
-
-int main() {
-    QTA_LOG_INFO("test", "Heston Stan callback-var tests");
-    testStanGradientAndHessian();
-    testPrimalCache();
-    testTiming();
-    if (failures == 0) {
-        QTA_LOG_INFO("test", "ALL HESTON STAN TESTS PASSED");
-        return 0;
-    }
-    QTA_LOG_ERROR("test", "{} FAILURES", failures);
-    return 1;
+    ::testing::Test::RecordProperty("stan_hessian_plain_us", quantape::util::num(plain / reps, 1));
+    ::testing::Test::RecordProperty("stan_hessian_cached_us",
+                                    quantape::util::num(cached / reps, 1));
 }
