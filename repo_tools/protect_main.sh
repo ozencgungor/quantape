@@ -1,13 +1,18 @@
 #!/bin/bash
 # Protect the main branch with a repository ruleset (requires admin + gh auth).
 #
-#   repo_tools/protect_main.sh [--dry-run]
+#   repo_tools/protect_main.sh [--dry-run] [--strict] [--bypass-user LOGIN]
 #
 # Sets, for refs/heads/main:
 #   - block deletions and non-fast-forward (force) pushes
 #   - require a pull request before merging (0 approvals: solo maintainer)
 #   - require linear history
 #   - require the CI/analysis checks below
+#
+# By default the authenticated user is added as a bypass actor with mode
+# "always": the owner can still push directly to main, everyone else must open
+# a pull request. Use --strict to remove all bypass actors, or
+# --bypass-user LOGIN to bypass a different account.
 #
 # Run again after changing the check list: the ruleset is updated in place.
 set -euo pipefail
@@ -20,7 +25,23 @@ root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) || {
 cd "$root"
 
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+STRICT=0
+BYPASS_USER=${QUANTAPE_BYPASS_USER:-}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1 ;;
+        --strict) STRICT=1 ;;
+        --bypass-user)
+            shift
+            BYPASS_USER=${1:?--bypass-user needs a login}
+            ;;
+        *)
+            echo "usage: protect_main.sh [--dry-run] [--strict] [--bypass-user LOGIN]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 # Matrix jobs surface as "<job> (<os>, <build_type>)" check names.
 REQUIRED_CHECKS=(
@@ -38,6 +59,25 @@ checks_json=""
 for c in "${REQUIRED_CHECKS[@]}"; do
     checks_json+="${checks_json:+,}{\"context\":\"$c\"}"
 done
+
+# Bypass actor: the owner keeps direct-push access; everyone else must PR.
+bypass_json=""
+if [ "$STRICT" -eq 0 ]; then
+    actor_id=""
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        if [ -n "$BYPASS_USER" ]; then
+            actor_id=$(gh api "users/$BYPASS_USER" -q .id)
+        else
+            actor_id=$(gh api user -q .id)
+        fi
+    fi
+    if [ -n "$actor_id" ]; then
+        bypass_json="{\"actor_id\":$actor_id,\"actor_type\":\"User\",\"bypass_mode\":\"always\"}"
+    elif [ "$DRY_RUN" -eq 0 ]; then
+        echo "error: cannot resolve bypass user (gh unavailable/unauthenticated); use --strict" >&2
+        exit 2
+    fi
+fi
 
 payload=$(
     cat <<JSON
@@ -69,7 +109,8 @@ payload=$(
         "required_status_checks": [$checks_json]
       }
     }
-  ]
+  ],
+  "bypass_actors": [$bypass_json]
 }
 JSON
 )
