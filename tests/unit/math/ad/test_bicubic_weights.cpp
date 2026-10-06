@@ -8,22 +8,23 @@
 //      linear in the node values); zero away from kinks for the adaptive
 //      methods in non-smooth mode
 //   4. dispatch: usesWeightMatrix() true iff Spline/Parabolic with AD
-//
-// Run: ./test_bicubic_weights
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
-#include "quantape/util/Check.h"
 
+#include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
+#include <cstddef>
+#include <type_traits>
 #include <vector>
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using quantape::math::BicubicInterpolation;
 using quantape::math::CubicDerivativeApprox;
+
+class BicubicWeightsTest : public StanTapeTest {};
 
 namespace {
 
@@ -43,6 +44,15 @@ const auto g_z = baseZ();
 // evaluation points: (x, y) pairs inside the grid
 const std::vector<std::pair<double, double>> g_eval = {
     {0.25, 0.30}, {0.80, 1.00}, {1.55, 2.10}, {2.75, 3.00}, {4.20, 0.55}};
+
+const std::vector<CubicDerivativeApprox>& methods() {
+    static const std::vector<CubicDerivativeApprox> kMethods = {
+        CubicDerivativeApprox::Spline,   CubicDerivativeApprox::Parabolic,
+        CubicDerivativeApprox::Akima,    CubicDerivativeApprox::Kruger,
+        CubicDerivativeApprox::Harmonic,
+    };
+    return kMethods;
+}
 
 double evalDouble(const std::vector<std::vector<double>>& z, double x, double y,
                   CubicDerivativeApprox method, bool smooth) {
@@ -180,100 +190,74 @@ const char* methodName(CubicDerivativeApprox da) {
 
 } // namespace
 
-int main() {
-    const std::vector<CubicDerivativeApprox> methods = {
-        CubicDerivativeApprox::Spline,   CubicDerivativeApprox::Parabolic,
-        CubicDerivativeApprox::Akima,    CubicDerivativeApprox::Kruger,
-        CubicDerivativeApprox::Harmonic,
-    };
-
-    for (auto method : methods) {
+TEST_F(BicubicWeightsTest, valuesMatchDoublePath) {
+    for (CubicDerivativeApprox method : methods()) {
         for (bool smooth : {false, true}) {
-            // 1) value match, var vs double
             for (const auto& [x, y] : g_eval) {
+                SCOPED_TRACE(::testing::Message() << methodName(method) << " smooth=" << smooth
+                                                  << " (x,y)=(" << x << "," << y << ")");
                 const double ref = evalDouble(g_z, x, y, method, smooth);
-                std::vector<stan::math::var> vx; // placeholder to avoid
-                (void)vx;                        // unused warnings
                 const BicubicInterpolation<stan::math::var> interp(g_x, g_y, g_z, method, smooth);
                 const stan::math::var v = interp(stan::math::var(x), stan::math::var(y));
-                const double diff = std::abs(v.val() - ref);
-                if (diff > 1e-12 * (1.0 + std::abs(ref))) {
-                    QTA_LOG_ERROR(
-                        "test", "value mismatch: {} smooth={} (x,y)=({},{}) ref={} var={} diff={}",
-                        methodName(method), smooth, quantape::util::num(x), quantape::util::num(y),
-                        quantape::util::num(ref), quantape::util::num(v.val()),
-                        quantape::util::num(diff));
-                    CHECK(false);
-                }
+                CHECK_CLOSE("bicubic value vs double", v.val(), ref, 1e-12 * (1.0 + std::abs(ref)));
             }
+        }
+    }
+}
 
-            // 2) gradient vs finite differences (away from kinks)
+TEST_F(BicubicWeightsTest, gradientsMatchFiniteDifferences) {
+    for (CubicDerivativeApprox method : methods()) {
+        for (bool smooth : {false, true}) {
             for (const auto& [x, y] : g_eval) {
+                SCOPED_TRACE(::testing::Message() << methodName(method) << " smooth=" << smooth
+                                                  << " (x,y)=(" << x << "," << y << ")");
                 const auto fd = fdGradient(g_z, x, y, method, smooth);
                 const auto ad = adGradient(x, y, method, smooth);
                 for (size_t k = 0; k < fd.size(); ++k) {
                     const double tol = smooth ? 1e-4 : 1e-5;
-                    if (std::abs(fd[k] - ad[k]) > tol * (1.0 + std::abs(fd[k]))) {
-                        QTA_LOG_ERROR("test",
-                                      "gradient mismatch: {} smooth={} (x,y)=({},{}) k={} fd={} "
-                                      "ad={}",
-                                      methodName(method), smooth, quantape::util::num(x),
-                                      quantape::util::num(y), k, quantape::util::num(fd[k]),
-                                      quantape::util::num(ad[k]));
-                        CHECK(false);
-                    }
-                }
-            }
-
-            // 3) Hessian: identically zero for the exactly-linear methods
-            //    (Spline/Parabolic); for the adaptive methods the default AD
-            //    path exposes the true active-branch curvature, verified
-            //    against second-order finite differences (g_eval avoids kinks)
-            if (!smooth) {
-                const bool linearInZ = (method == CubicDerivativeApprox::Spline ||
-                                        method == CubicDerivativeApprox::Parabolic);
-                for (const auto& [x, y] : g_eval) {
-                    if (linearInZ) {
-                        const double h = maxHessian(x, y, method, smooth);
-                        if (h > 1e-7) {
-                            QTA_LOG_ERROR("test", "hessian not zero: {} (x,y)=({},{}) max|H|={}",
-                                          methodName(method), quantape::util::num(x),
-                                          quantape::util::num(y), quantape::util::num(h));
-                            CHECK(false);
-                        }
-                    } else {
-                        const auto H = adHessian(x, y, method, smooth);
-                        const auto fdH = fdHessian(x, y, method, smooth);
-                        double maxdiff = 0.0, maxref = 0.0;
-                        for (int i = 0; i < H.rows(); ++i) {
-                            for (int j = 0; j < H.cols(); ++j) {
-                                maxdiff = std::max(maxdiff, std::abs(H(i, j) - fdH[i][j]));
-                                maxref = std::max(maxref, std::abs(fdH[i][j]));
-                            }
-                        }
-                        if (maxdiff > 5e-3 * (1.0 + maxref)) {
-                            QTA_LOG_ERROR(
-                                "test", "hessian mismatch: {} (x,y)=({},{}) maxdiff={} maxref={}",
-                                methodName(method), quantape::util::num(x), quantape::util::num(y),
-                                quantape::util::num(maxdiff), quantape::util::num(maxref));
-                            CHECK(false);
-                        }
-                    }
+                    CHECK_CLOSE("bicubic gradient vs FD", ad[k], fd[k],
+                                tol * (1.0 + std::abs(fd[k])));
                 }
             }
         }
-
-        // 4) dispatch flag
-        {
-            const BicubicInterpolation<stan::math::var> interp(g_x, g_y, g_z, method);
-            const bool expectWeights = (method == CubicDerivativeApprox::Spline ||
-                                        method == CubicDerivativeApprox::Parabolic);
-            CHECK(interp.usesWeightMatrix() == expectWeights);
-        }
-
-        QTA_LOG_INFO("test", "{}: value/gradient/hessian all pass", methodName(method));
     }
+}
 
-    QTA_LOG_INFO("test", "test_bicubic_weights: all invariants hold");
-    return 0;
+TEST_F(BicubicWeightsTest, hessianMatchesFiniteDifferenceOrIsZero) {
+    // Identically zero for the exactly-linear methods (Spline/Parabolic); for
+    // the adaptive methods the default AD path exposes the true
+    // active-branch curvature, verified against second-order finite
+    // differences (g_eval avoids kinks).
+    for (CubicDerivativeApprox method : methods()) {
+        const bool linearInZ =
+            (method == CubicDerivativeApprox::Spline || method == CubicDerivativeApprox::Parabolic);
+        for (const auto& [x, y] : g_eval) {
+            SCOPED_TRACE(::testing::Message()
+                         << methodName(method) << " (x,y)=(" << x << "," << y << ")");
+            if (linearInZ) {
+                EXPECT_LE(maxHessian(x, y, method, false), 1e-7);
+            } else {
+                const auto H = adHessian(x, y, method, false);
+                const auto fdH = fdHessian(x, y, method, false);
+                double maxdiff = 0.0, maxref = 0.0;
+                for (int i = 0; i < H.rows(); ++i) {
+                    for (int j = 0; j < H.cols(); ++j) {
+                        maxdiff = std::max(maxdiff, std::abs(H(i, j) - fdH[i][j]));
+                        maxref = std::max(maxref, std::abs(fdH[i][j]));
+                    }
+                }
+                EXPECT_LE(maxdiff, 5e-3 * (1.0 + maxref));
+            }
+        }
+    }
+}
+
+TEST_F(BicubicWeightsTest, weightMatrixDispatch) {
+    for (CubicDerivativeApprox method : methods()) {
+        SCOPED_TRACE(methodName(method));
+        const BicubicInterpolation<stan::math::var> interp(g_x, g_y, g_z, method);
+        const bool expectWeights =
+            (method == CubicDerivativeApprox::Spline || method == CubicDerivativeApprox::Parabolic);
+        EXPECT_EQ(interp.usesWeightMatrix(), expectWeights);
+    }
 }
