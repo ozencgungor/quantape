@@ -138,10 +138,15 @@ function(quantape_add_gtest name)
     set(QUANTAPE_GTEST_EXTRA_ARGS "" CACHE STRING
         "Extra gtest arguments for discovery (nightly: --gtest_shuffle;--gtest_repeat=3)")
 
+    # gtest_discover_tests() forwards PROPERTIES through a script; a plain
+    # semicolon list is split into separate property name/value pairs there
+    # (LABELS keeps only its first label). Pre-escape the separators so the
+    # generated set_tests_properties() receives one list value.
+    string(REPLACE ";" "\\;" A_LABELS_ESCAPED "${A_LABELS}")
     gtest_discover_tests(${name}
         TEST_PREFIX "${name}."
         PROPERTIES
-            LABELS "${A_LABELS}"
+            LABELS "${A_LABELS_ESCAPED}"
             TIMEOUT ${A_TIMEOUT}
         DISCOVERY_MODE POST_BUILD
         DISCOVERY_TIMEOUT 60
