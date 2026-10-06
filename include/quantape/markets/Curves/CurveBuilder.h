@@ -6,6 +6,7 @@
 #include "quantape/datetime/Period.h"
 #include "quantape/datetime/Schedule.h"
 #include "quantape/datetime/TimeConversion.h"
+#include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/math/Solvers/BrentSolver.h"
@@ -1038,6 +1039,31 @@ inline DoubleT evaluatePillarQuote(const PillarQuoteTimes& times,
     throw std::invalid_argument("impliedQuote: unknown pillar kind");
 }
 
+/// Adapter that presents one tagged discount pillar as a plain bootstrap
+/// instrument: risk maturity and target come from the pillar, the model quote
+/// from its precomputed quote times through `evaluatePillarQuote`.
+class DiscountPillarInstrument {
+public:
+    DiscountPillarInstrument(const CurvePillar& pillar, PillarQuoteTimes times)
+        : m_date(pillarRiskMaturity(pillar)), m_target(pillar.quote), m_times(std::move(times)) {}
+
+    datetime::Date date() const { return m_date; }
+    double target() const { return m_target; }
+
+    template <typename ScalarT>
+    ScalarT impliedQuote(const DiscountSet<DiscountCurve<ScalarT>>& curves) const {
+        return evaluatePillarQuote(m_times, curves.curve);
+    }
+
+private:
+    datetime::Date m_date;
+    double m_target = 0.0;
+    PillarQuoteTimes m_times;
+};
+
+static_assert(BootstrapInstrument<DiscountPillarInstrument, DiscountSet<DiscountCurve<double>>>,
+              "DiscountPillarInstrument must model BootstrapInstrument on a discount set");
+
 inline SimpleForwardQuoteTimes
 makeSimpleForwardQuoteTimes(const ForecastPillar& pillar, const datetime::Date& referenceDate,
                             const datetime::DayCounter& zeroDayCounter) {
@@ -1660,13 +1686,16 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
     // date-constructed curve and uses the caller's clock. Precomputing both
     // keeps the solve and the check on their original clocks.
     const datetime::DayCounter trialZeroDayCounter(datetime::DayCount::Actual365Fixed);
-    std::vector<detail::PillarQuoteTimes> solveQuoteTimes(count);
-    std::vector<detail::PillarQuoteTimes> checkQuoteTimes(count);
+    std::vector<detail::DiscountPillarInstrument> solveInstruments;
+    std::vector<detail::DiscountPillarInstrument> checkInstruments;
+    solveInstruments.reserve(count);
+    checkInstruments.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        solveQuoteTimes[i] =
-            detail::makePillarQuoteTimes(pillars[i], referenceDate, trialZeroDayCounter);
-        checkQuoteTimes[i] =
-            detail::makePillarQuoteTimes(pillars[i], referenceDate, zeroDayCounter);
+        solveInstruments.emplace_back(
+            pillars[i],
+            detail::makePillarQuoteTimes(pillars[i], referenceDate, trialZeroDayCounter));
+        checkInstruments.emplace_back(
+            pillars[i], detail::makePillarQuoteTimes(pillars[i], referenceDate, zeroDayCounter));
     }
 
     const quantape::math::BrentSolver<double> solver;
@@ -1703,8 +1732,9 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
                                            switchIndex);
                     }
                     detail::CurveTrialUpdater::setNode(*trialCurve, i + 1, trialZero);
-                    cachedF =
-                        detail::evaluatePillarQuote(solveQuoteTimes[i], *trialCurve) - pillar.quote;
+                    cachedF = solveInstruments[i].template impliedQuote<double>(
+                                  DiscountSet<DiscountCurve<double>>{*trialCurve}) -
+                              solveInstruments[i].target();
                     cachedX = trialZero;
                     cacheValid = true;
                     return cachedF;
@@ -1745,8 +1775,9 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
                                           space, scheme, tension, switchIndex);
         double worst = 0.0;
         for (std::size_t i = 0; i < count; ++i) {
-            const double check =
-                detail::evaluatePillarQuote(checkQuoteTimes[i], curve) - pillars[i].quote;
+            const double check = checkInstruments[i].template impliedQuote<double>(
+                                     DiscountSet<DiscountCurve<double>>{curve}) -
+                                 checkInstruments[i].target();
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {
