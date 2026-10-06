@@ -98,6 +98,15 @@ target_link_libraries(test_bootstrap_validation PRIVATE quantape)
 quantape_set_warnings(test_bootstrap_validation)
 quantape_register_test(test_bootstrap_validation)
 
+# Instruments vocabulary: Cashflow layout, the BootstrapInstrument concept
+# (double/var/fvar<var>, including a std::variant Ladder) and the bitwise
+# old-vs-new discount-bootstrap gate; the AD gates instantiate Stan scalars.
+add_executable(test_instruments test_instruments.cpp)
+target_link_libraries(test_instruments PRIVATE quantape)
+quantape_enable_stan(test_instruments)
+quantape_set_warnings(test_instruments)
+quantape_register_test(test_instruments)
+
 add_executable(test_curve_risk_report test_curve_risk_report.cpp)
 target_link_libraries(test_curve_risk_report PRIVATE quantape)
 quantape_set_warnings(test_curve_risk_report)
@@ -152,6 +161,14 @@ target_link_libraries(test_fx_pricing PRIVATE quantape)
 quantape_enable_stan(test_fx_pricing)
 quantape_set_warnings(test_fx_pricing)
 quantape_register_test(test_fx_pricing)
+
+# Dated FX instruments: settlement-lag factories, cashflow materialization,
+# date-aware CIP/PV helpers and their var/fvar<var> gates.
+add_executable(test_fx_instruments test_fx_instruments.cpp)
+target_link_libraries(test_fx_instruments PRIVATE quantape)
+quantape_enable_stan(test_fx_instruments)
+quantape_set_warnings(test_fx_instruments)
+quantape_register_test(test_fx_instruments)
 
 # --- AD and Stan-backed ------------------------------------------------------
 add_executable(test_ad test_ad.cpp)

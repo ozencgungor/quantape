@@ -2,12 +2,16 @@
 
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/DayCounter.h"
+#include "quantape/instruments/FxInstruments.h"
+#include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Data/FXRate.h"
 #include "quantape/markets/Data/FxQuote.h"
 
 #include <cstddef>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace quantape::markets {
@@ -155,6 +159,210 @@ FxGreeks<double> fxGreeksFiniteDifference(const ValueFn& value, double spot, dou
     const double down = value(spot - step);
     const double center = value(spot);
     return FxGreeks<double>{(up - down) / (2.0 * step), (up - 2.0 * center + down) / (step * step)};
+}
+
+namespace detail {
+
+/// Scalar carried by a base/quote discount provider pair.
+template <typename BaseT, typename QuoteT>
+using FxDiscountScalar = std::decay_t<decltype(std::declval<const BaseT&>().discount(0.0))>;
+
+/// Common scalar of a base/quote provider pair and an explicit value.
+template <typename BaseT, typename QuoteT, typename ValueT>
+using FxScalar = std::common_type_t<FxDiscountScalar<BaseT, QuoteT>, std::decay_t<ValueT>>;
+
+} // namespace detail
+
+/// Covered-interest-parity outright of a payout at `maturityDate`: the base
+/// and quote discount providers are read at the payout date and combined as
+/// `F = S D_base / D_quote`. This is the AD-generic core behind the instrument
+/// quote helpers.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT cipOutright(const ScalarT& spot, const datetime::Date& maturityDate,
+                    const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+                    const FxSet<BaseT, QuoteT>& curves) {
+    const double t = zeroDayCounter.yearFraction(referenceDate, maturityDate);
+    return spot * curves.base(t) / curves.quote(t);
+}
+
+/// CIP outright of a dated forward, from an explicit spot.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT impliedFxOutright(const instruments::FxForward& forward, const FxSet<BaseT, QuoteT>& curves,
+                          const ScalarT& spot, const datetime::Date& referenceDate,
+                          const datetime::DayCounter& zeroDayCounter) {
+    return cipOutright(spot, forward.valueDate, referenceDate, zeroDayCounter, curves);
+}
+
+/// CIP outright of an FX swap's far leg, from an explicit spot.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT impliedFxOutright(const instruments::FxSwap& swap, const FxSet<BaseT, QuoteT>& curves,
+                          const ScalarT& spot, const datetime::Date& referenceDate,
+                          const datetime::DayCounter& zeroDayCounter) {
+    return cipOutright(spot, swap.maturity, referenceDate, zeroDayCounter, curves);
+}
+
+/// CIP outright of a dated forward, at the instrument's own spot.
+template <typename BaseT, typename QuoteT>
+auto impliedFxOutright(const instruments::FxForward& forward, const FxSet<BaseT, QuoteT>& curves,
+                       const datetime::Date& referenceDate,
+                       const datetime::DayCounter& zeroDayCounter) {
+    using ScalarT = detail::FxDiscountScalar<BaseT, QuoteT>;
+    return impliedFxOutright(forward, curves, ScalarT(forward.spot), referenceDate, zeroDayCounter);
+}
+
+/// CIP outright of an FX swap's far leg, at the instrument's own spot.
+template <typename BaseT, typename QuoteT>
+auto impliedFxOutright(const instruments::FxSwap& swap, const FxSet<BaseT, QuoteT>& curves,
+                       const datetime::Date& referenceDate,
+                       const datetime::DayCounter& zeroDayCounter) {
+    using ScalarT = detail::FxDiscountScalar<BaseT, QuoteT>;
+    return impliedFxOutright(swap, curves, ScalarT(swap.spot), referenceDate, zeroDayCounter);
+}
+
+/// CIP forward points of a dated forward: the model outright minus spot.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT impliedFxForwardPoints(const instruments::FxForward& forward,
+                               const FxSet<BaseT, QuoteT>& curves, const ScalarT& spot,
+                               const datetime::Date& referenceDate,
+                               const datetime::DayCounter& zeroDayCounter) {
+    return impliedFxOutright(forward, curves, spot, referenceDate, zeroDayCounter) - spot;
+}
+
+/// CIP forward points of an FX swap's far leg in point units: the model
+/// outright minus spot, divided by the price value of one point.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT impliedFxForwardPoints(const instruments::FxSwap& swap, const FxSet<BaseT, QuoteT>& curves,
+                               const ScalarT& spot, const datetime::Date& referenceDate,
+                               const datetime::DayCounter& zeroDayCounter) {
+    return (impliedFxOutright(swap, curves, spot, referenceDate, zeroDayCounter) - spot) /
+           ScalarT(swap.pointsScale);
+}
+
+/// CIP forward points of a dated forward, at the instrument's own spot.
+template <typename BaseT, typename QuoteT>
+auto impliedFxForwardPoints(const instruments::FxForward& forward,
+                            const FxSet<BaseT, QuoteT>& curves, const datetime::Date& referenceDate,
+                            const datetime::DayCounter& zeroDayCounter) {
+    using ScalarT = detail::FxDiscountScalar<BaseT, QuoteT>;
+    return impliedFxForwardPoints(forward, curves, ScalarT(forward.spot), referenceDate,
+                                  zeroDayCounter);
+}
+
+/// CIP forward points of an FX swap's far leg, at the instrument's own spot.
+template <typename BaseT, typename QuoteT>
+auto impliedFxForwardPoints(const instruments::FxSwap& swap, const FxSet<BaseT, QuoteT>& curves,
+                            const datetime::Date& referenceDate,
+                            const datetime::DayCounter& zeroDayCounter) {
+    using ScalarT = detail::FxDiscountScalar<BaseT, QuoteT>;
+    return impliedFxForwardPoints(swap, curves, ScalarT(swap.spot), referenceDate, zeroDayCounter);
+}
+
+/// PV of a dated spot trade: the base notional marked at the market spot and
+/// discounted on the base curve at the value date. Reads the stored value date
+/// or rolls it from `referenceDate` on the instrument's calendars.
+template <typename BaseT, typename QuoteT, typename ValueT>
+auto fxSpotPv(const instruments::FxSpot& trade, const FxSet<BaseT, QuoteT>& curves,
+              const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+              const ValueT& marketSpot, const ValueT& baseNotional) {
+    using ScalarT = detail::FxScalar<BaseT, QuoteT, ValueT>;
+    const datetime::Date payDate =
+        trade.valueDate.serial() != 0
+            ? trade.valueDate
+            : trade.resolveValueDate(referenceDate, trade.baseCalendar, trade.quoteCalendar);
+    const double t = zeroDayCounter.yearFraction(referenceDate, payDate);
+    return fxSpotPv(ScalarT(marketSpot), ScalarT(baseNotional)) * ScalarT(curves.base(t));
+}
+
+/// PV of a dated forward: the formula-level forward value with base and quote
+/// discounts read at the forward's value date.
+template <typename BaseT, typename QuoteT, typename ValueT>
+auto fxForwardPv(const instruments::FxForward& forward, const FxSet<BaseT, QuoteT>& curves,
+                 const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+                 const ValueT& marketSpot, const ValueT& baseNotional) {
+    using ScalarT = detail::FxScalar<BaseT, QuoteT, ValueT>;
+    const datetime::Date payDate =
+        forward.valueDate.serial() != 0
+            ? forward.valueDate
+            : forward.resolveValueDate(referenceDate, forward.baseCalendar, forward.quoteCalendar);
+    const double t = zeroDayCounter.yearFraction(referenceDate, payDate);
+    return fxForwardPv(ScalarT(marketSpot), ScalarT(forward.strike), ScalarT(curves.base(t)),
+                       ScalarT(curves.quote(t)), ScalarT(baseNotional));
+}
+
+/// PV of a dated FX swap: the formula-level swap value with both legs
+/// discounted at their actual settlement dates.
+template <typename BaseT, typename QuoteT, typename ValueT>
+auto fxSwapPv(const instruments::FxSwap& swap, const FxSet<BaseT, QuoteT>& curves,
+              const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+              const ValueT& marketSpot, const ValueT& baseNotional) {
+    using ScalarT = detail::FxScalar<BaseT, QuoteT, ValueT>;
+    const datetime::Date nearDate =
+        swap.start.serial() != 0
+            ? swap.start
+            : swap.resolveStart(referenceDate, swap.baseCalendar, swap.quoteCalendar);
+    const datetime::Date farDate =
+        swap.maturity.serial() != 0
+            ? swap.maturity
+            : swap.resolveMaturity(referenceDate, swap.baseCalendar, swap.quoteCalendar);
+    const double nearTime = zeroDayCounter.yearFraction(referenceDate, nearDate);
+    const double farTime = zeroDayCounter.yearFraction(referenceDate, farDate);
+    return fxSwapPv(ScalarT(marketSpot), ScalarT(swap.spot), ScalarT(curves.base(nearTime)),
+                    ScalarT(curves.quote(nearTime)), ScalarT(swap.quotedOutright()),
+                    ScalarT(curves.base(farTime)), ScalarT(curves.quote(farTime)),
+                    ScalarT(baseNotional));
+}
+
+/// Settlement cashflows of a spot trade with scalar-templated amounts.
+template <typename ScalarT>
+std::vector<instruments::CashflowT<ScalarT>>
+fxCashflows(const instruments::FxSpot& trade, const ScalarT& baseNotional,
+            const datetime::Date& referenceDate, const datetime::Calendar& baseCalendar,
+            const datetime::Calendar& quoteCalendar) {
+    return trade.template cashflowsT<ScalarT>(referenceDate, baseCalendar, quoteCalendar,
+                                              baseNotional);
+}
+
+/// Settlement cashflows of a forward with scalar-templated amounts.
+template <typename ScalarT>
+std::vector<instruments::CashflowT<ScalarT>>
+fxCashflows(const instruments::FxForward& forward, const ScalarT& baseNotional,
+            const datetime::Date& referenceDate, const datetime::Calendar& baseCalendar,
+            const datetime::Calendar& quoteCalendar) {
+    return forward.template cashflowsT<ScalarT>(referenceDate, baseCalendar, quoteCalendar,
+                                                baseNotional);
+}
+
+/// Settlement cashflows of an FX swap with scalar-templated amounts.
+template <typename ScalarT>
+std::vector<instruments::CashflowT<ScalarT>>
+fxCashflows(const instruments::FxSwap& swap, const ScalarT& baseNotional,
+            const datetime::Date& referenceDate, const datetime::Calendar& baseCalendar,
+            const datetime::Calendar& quoteCalendar) {
+    return swap.template cashflowsT<ScalarT>(referenceDate, baseCalendar, quoteCalendar,
+                                             baseNotional);
+}
+
+/// PV of materialized settlement cashflows over base/quote discount providers:
+/// base-currency flows are marked at spot and discounted on the base curve,
+/// quote-currency flows are discounted on the quote curve. The pair identifies
+/// which cashflow currency is the base one.
+template <typename ScalarT, typename BaseT, typename QuoteT>
+ScalarT fxCashflowPv(const FXDescriptor& pair,
+                     const std::vector<instruments::CashflowT<ScalarT>>& cashflows,
+                     const ScalarT& spot, const datetime::Date& referenceDate,
+                     const datetime::DayCounter& zeroDayCounter,
+                     const FxSet<BaseT, QuoteT>& curves) {
+    const instruments::Currency baseCurrency = instruments::currencyFromCode(pair.baseCcy);
+    ScalarT value = 0.0;
+    for (const instruments::CashflowT<ScalarT>& cashflow : cashflows) {
+        const double t = zeroDayCounter.yearFraction(referenceDate, cashflow.payDate);
+        if (cashflow.currency.code == baseCurrency.code) {
+            value += cashflow.amount * spot * ScalarT(curves.base(t));
+        } else {
+            value += cashflow.amount * ScalarT(curves.quote(t));
+        }
+    }
+    return value;
 }
 
 } // namespace quantape::markets
