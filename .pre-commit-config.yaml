@@ -3,7 +3,7 @@
 #
 # Setup:  pip install pre-commit && pre-commit install
 # Requires clang-format on PATH (same major version as CI, currently 21.x).
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -42,3 +42,13 @@ repos:
         entry: ./repo_tools/check_commit_msg.sh
         language: system
         stages: [commit-msg]
+      # Local-only fast tier; skips when build/debug is absent and never runs
+      # in the CI pre-commit jobs (those invoke the format/policy scripts
+      # directly, not pre-commit).
+      - id: fast-tests
+        name: fast tests (ctest -L fast, pre-push)
+        entry: ./repo_tools/check_fast_tests.sh
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
