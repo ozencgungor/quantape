@@ -15,6 +15,13 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       SAN_FLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
+      # oneTBB 2021.9 computes stack bounds via pthread_getattr_np(), which
+      # reports the ASan fake stack and trips its internal assertion on
+      # Linux/GCC ("stack size must be positive", UXL oneTBB #1726, fixed
+      # upstream after our pin). Disabling use-after-return detection keeps
+      # the real stack bounds. Job-level so build-time gtest discovery (which
+      # executes each test binary with --gtest_list_tests) sees it too.
+      ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:detect_stack_use_after_return=0
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +62,6 @@ jobs:
       # (the legacy _Exit gate was retired, D9), so no exclusions are needed.
       - name: Test
         env:
-          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
         run: >
           ctest --test-dir build-san -j 2 --output-on-failure --timeout 1800
