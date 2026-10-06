@@ -46,7 +46,7 @@ jobs:
           BUILD_DIR: build-ci
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            repo_tools/check_tidy.sh --changed "origin/${{ github.base_ref }}"
+            repo_tools/check_tidy.sh --changed "${{ github.event.pull_request.base.sha }}"
           else
             repo_tools/check_tidy.sh
           fi

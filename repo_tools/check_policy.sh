@@ -31,9 +31,11 @@ done < <(git grep -n -e '-ffast-math' -- 'CMakeLists.txt' '*.cmake' 2>/dev/null 
     grep -v -E ':[0-9]+:[[:space:]]*#' || true)
 
 # ── 2. AGPL / XAD ───────────────────────────────────────────────────────────
+# Scan code files only: the policy script, NOTICE and pre-commit config
+# legitimately mention AGPL when stating that it must not be used.
 while IFS= read -r line; do
     report "AGPL mention: $line"
-done < <(git grep -n -i 'agpl' 2>/dev/null || true)
+done < <(git grep -n -i 'agpl' -- '*.h' '*.hpp' '*.cpp' '*.cc' 'CMakeLists.txt' '*.cmake' 2>/dev/null || true)
 while IFS= read -r line; do
     report "XAD include: $line"
 done < <(git grep -n -E '#[[:space:]]*include[[:space:]]*[<"]xad/' 2>/dev/null || true)
