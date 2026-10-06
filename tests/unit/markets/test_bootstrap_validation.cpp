@@ -12,16 +12,16 @@
  *  - malformed inputs are rejected with clear errors.
  */
 
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape;
 
@@ -70,21 +70,20 @@ DiscountCurve<double> makeTarget(const SchemeCase& item, const std::vector<datet
 void checkExactFit(const std::string& label, const DiscountCurve<double>& curve,
                    const std::vector<CurvePillar>& pillars) {
     for (std::size_t i = 0; i < pillars.size(); ++i) {
-        util::checkClose((label + " reprice").c_str(),
-                         markets::impliedQuote(pillars[i], kReference, curve), pillars[i].quote,
-                         1e-9);
+        CHECK_CLOSE((label + " reprice").c_str(),
+                    markets::impliedQuote(pillars[i], kReference, curve), pillars[i].quote, 1e-9);
     }
 }
 
 void checkCurveSanity(const DiscountCurve<double>& curve, bool expectDecreasing) {
-    CHECK(curve.discount(0.0) == 1.0);
+    EXPECT_TRUE(curve.discount(0.0) == 1.0);
     double previous = curve.discount(0.0);
     for (double t = 0.25; t <= 10.0; t += 0.25) {
         const double df = curve.discount(t);
-        CHECK(std::isfinite(df));
-        CHECK(df > 0.0);
+        EXPECT_TRUE(std::isfinite(df));
+        EXPECT_TRUE(df > 0.0);
         if (expectDecreasing) {
-            CHECK(df < previous);
+            EXPECT_TRUE(df < previous);
         }
         previous = df;
     }
@@ -116,7 +115,9 @@ std::vector<CurvePillar> annualOisPillars(const DiscountCurve<double>& target,
     return pillars;
 }
 
-void testNodeAlignedRecovery() {
+} // namespace
+
+TEST(BootstrapValidation, nodeAlignedRecoveryAndSanity) {
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
     std::vector<datetime::Date> dates{
         datetime::Period(6, datetime::TimeUnit::Months).advance(kReference)};
@@ -133,12 +134,12 @@ void testNodeAlignedRecovery() {
         checkCurveSanity(curve, true);
         for (const datetime::Date& date : dates) {
             const double t = datetime::yearFraction(kReference, date, kZeroDc);
-            util::checkClose("node recovery", curve.zero(t), target.zero(t), 1e-10);
+            CHECK_CLOSE("node recovery", curve.zero(t), target.zero(t), 1e-10);
         }
     }
 }
 
-void testOffNodeCashflowsAndLags() {
+TEST(BootstrapValidation, offNodeCashflowsAndPaymentLags) {
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
     std::vector<datetime::Date> dates;
     for (int year = 1; year <= 6; ++year) {
@@ -158,7 +159,7 @@ void testOffNodeCashflowsAndLags() {
     }
 }
 
-void testStubsAndNegativeRates() {
+TEST(BootstrapValidation, stubsAndNegativeRates) {
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
     std::vector<datetime::Date> dates{
         datetime::Period(4, datetime::TimeUnit::Months).advance(kReference),
@@ -177,7 +178,7 @@ void testStubsAndNegativeRates() {
     }
 }
 
-void testBasisCurveValidation() {
+TEST(BasisValidation, spreadSchemeAndSide) {
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
     std::vector<datetime::Date> rootDates;
     for (int year = 1; year <= 5; ++year) {
@@ -208,20 +209,20 @@ void testBasisCurveValidation() {
             const markets::SpreadCurve<double> child = markets::bootstrapSpreadCurve(
                 parent, kReference, kZeroDc, spreadScheme, basisPillars, 1e-14, 0.0, nullptr);
             for (const BasisPillar& pillar : basisPillars) {
-                util::checkClose("basis reprice",
-                                 markets::impliedBasisSpread(child, pillar, kReference, kZeroDc),
-                                 pillar.spread, 1e-9);
+                CHECK_CLOSE("basis reprice",
+                            markets::impliedBasisSpread(child, pillar, kReference, kZeroDc),
+                            pillar.spread, 1e-9);
             }
             for (const datetime::Date& date : rootDates) {
                 const double t = datetime::yearFraction(kReference, date, kZeroDc);
-                CHECK(std::isfinite(child.discount(t)));
-                CHECK(child.discount(t) > 0.0);
+                EXPECT_TRUE(std::isfinite(child.discount(t)));
+                EXPECT_TRUE(child.discount(t) > 0.0);
             }
         }
     }
 }
 
-void testErrorPaths() {
+TEST(BootstrapValidation, rejectsUnsortedPillarsAndZeroTenorSchedule) {
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
     CurvePillar first;
     first.maturity = kReference.plusYears(2);
@@ -235,33 +236,12 @@ void testErrorPaths() {
     second.quoteDayCounter = kZeroDc;
     second.calendar = calendar;
     second.quote = 0.03;
-    bool threw = false;
-    try {
+    EXPECT_THROW(
         (void)markets::bootstrapDiscountCurve(kReference, kZeroDc, InterpolationSpace::LogDiscount,
-                                              InterpolationScheme::Linear, {first, second});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-
-    threw = false;
-    try {
-        (void)datetime::Schedule(kReference, kReference.plusYears(1),
-                                 datetime::Period(0, datetime::TimeUnit::Months), calendar);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-}
-
-} // namespace
-
-int main() {
-    testNodeAlignedRecovery();
-    testOffNodeCashflowsAndLags();
-    testStubsAndNegativeRates();
-    testBasisCurveValidation();
-    testErrorPaths();
-    QTA_LOG_INFO("test", "test_bootstrap_validation: ok");
-    return 0;
+                                              InterpolationScheme::Linear, {first, second}),
+        std::invalid_argument);
+    EXPECT_THROW((void)datetime::Schedule(kReference, kReference.plusYears(1),
+                                          datetime::Period(0, datetime::TimeUnit::Months),
+                                          calendar),
+                 std::invalid_argument);
 }
