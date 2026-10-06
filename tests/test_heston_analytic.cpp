@@ -26,6 +26,8 @@
 #include "quantape/models/HestonModel.h"
 #include "quantape/pricing/BlackScholes.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -410,7 +412,7 @@ void testOscillatoryValidator() {
     const double t = market.tMax;
     const double fwd = market.spot * std::exp((market.rate - market.dividend) * t);
     const double mu = std::log(market.spot / market.strike) + (market.rate - market.dividend) * t;
-    const double prefactor = std::sqrt(fwd * market.strike) * std::exp(-market.rate * t) / M_PI;
+    const double prefactor = std::sqrt(fwd * market.strike) * std::exp(-market.rate * t) / kPi;
 
     // CF-matched control volatility: sigma^2 = -(8/T) ln Re phi(-i/2)
     const std::complex<double> phiHalf =

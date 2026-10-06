@@ -26,6 +26,8 @@
 #include "quantape/mc/processes/SdeProcesses.h"
 #include "quantape/models/HestonModel.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -458,7 +460,7 @@ void testQeStepConvergence() {
             const double phiCv = std::exp(-0.5 * sigmaBs * sigmaBs * 2.0 * w);
             return ((std::complex<double>(phiCv, 0.0) - phi) / w).real();
         });
-        checkClose("DE-certified analytic reference", base + de / M_PI, exact, 1e-12);
+        checkClose("DE-certified analytic reference", base + de / kPi, exact, 1e-12);
     }
 
     // Extreme corner: bias decreases with refinement.

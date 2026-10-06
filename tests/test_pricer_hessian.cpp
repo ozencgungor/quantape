@@ -28,6 +28,8 @@
 
 #include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -150,7 +152,7 @@ struct VanillaEuropeanPricer : PricerCRTP<VanillaEuropeanPricer> {
 
 private:
     // ── Helpers ──
-    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * M_PI); }
+    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * kPi); }
     static double Phi(double x) { return 0.5 * std::erfc(-x * M_SQRT1_2); }
 
     struct D1D2 {
@@ -298,7 +300,7 @@ struct DigitalPricer : PricerCRTP<DigitalPricer> {
     }
 
 private:
-    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * M_PI); }
+    static double phi(double x) { return std::exp(-0.5 * x * x) / std::sqrt(2 * kPi); }
     static double Phi(double x) { return 0.5 * std::erfc(-x * M_SQRT1_2); }
 
     // Digital call: PV = e^{-rT} · Φ(d₂)
@@ -352,7 +354,7 @@ private:
         // d₂ as var — depends on S, σ, r
         var d2_var = (log(Sv / K) + (rv - sv * sv / 2.0) * T) / (sv * sqrtT);
         var disc_var = exp(-rv * T);
-        var nd2_var = exp(-d2_var * d2_var / 2.0) / std::sqrt(2 * M_PI);
+        var nd2_var = exp(-d2_var * d2_var / 2.0) / std::sqrt(2 * kPi);
         var Nd2_var = stan::math::Phi(d2_var);
 
         var dd2_dS = 1.0 / (Sv * sv * sqrtT);

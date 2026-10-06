@@ -5,6 +5,7 @@
 #include "quantape/math/Integrals/GaussLegendre.h"
 #include "quantape/math/SpecialFunctions/TrigIntegrals.h"
 #include "quantape/pricing/BlackScholes.h"
+#include "quantape/util/Constants.h"
 
 #include <Eigen/Dense>
 
@@ -17,6 +18,7 @@
 #include <vector>
 
 namespace quantape::models {
+using ::quantape::util::kPi;
 
 /**
  * @file HestonModel.h
@@ -341,7 +343,7 @@ public:
     static std::complex<double> PhiComplex(const std::complex<double>& z) {
         const double x = z.real();
         const double e = z.imag();
-        const double nd = std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+        const double nd = std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
         const double d1 = nd;                 // N'
         const double d2 = -x * nd;            // N''
         const double d3 = (x * x - 1.0) * nd; // N'''
@@ -415,7 +417,7 @@ private:
             using quantape::math::sinIntegral;
             cv.closed =
                 std::exp(cv.psi) * (-2.0 * cosIntegral(-0.5 * pf) * std::sin(0.5 * pf) +
-                                    std::cos(0.5 * pf) * (M_PI + 2.0 * sinIntegral(0.5 * pf)));
+                                    std::cos(0.5 * pf) * (kPi.hi + 2.0 * sinIntegral(0.5 * pf)));
             // Reference price from the affine Lewis identity
             //   C(phi) = S e^{-qT} - P Re[ integral e^{i u mu} phi(u - i/2) ... ]
             // (verified numerically for two Black-Scholes references:
@@ -425,7 +427,7 @@ private:
             const double spot = x[5].real(), strike = x[6].real();
             const double rate = x[7].real(), dividend = x[8].real();
             const double prefactor = std::sqrt(spot * std::exp((rate - dividend) * t) * strike) *
-                                     std::exp(-rate * t) / M_PI;
+                                     std::exp(-rate * t) / kPi;
             const std::complex<double> contour = std::exp(std::complex<double>(0.0, -0.5) * cv.phi);
             cv.base = spot * std::exp(-dividend * t) - prefactor * (contour * cv.closed).real();
             return cv;
@@ -486,9 +488,10 @@ private:
         using quantape::math::sinIntegral;
         const std::complex<double> closed =
             std::exp(cv.psi) * (-2.0 * cosIntegral(-0.5 * pf) * std::sin(0.5 * pf) +
-                                std::cos(0.5 * pf) * (M_PI + 2.0 * sinIntegral(0.5 * pf)));
+                                std::cos(0.5 * pf) * (kPi.hi + 2.0 * sinIntegral(0.5 * pf)));
         const std::complex<double> prefactor =
-            std::sqrt(x[5] * std::exp((x[7] - x[8]) * tMax) * x[6]) * std::exp(-x[7] * tMax) / M_PI;
+            std::sqrt(x[5] * std::exp((x[7] - x[8]) * tMax) * x[6]) * std::exp(-x[7] * tMax) /
+            kPi.hi;
         const std::complex<double> contour = std::exp(std::complex<double>(0.0, -0.5) * cv.phi);
         return x[5] * std::exp(-x[8] * tMax) - prefactor * (contour * closed);
     }
@@ -583,7 +586,8 @@ private:
             base = gbsComplex(x[5], x[6], x[7], x[7] - x[8], cv.sigmaBs, tMax);
         }
         const std::complex<double> prefactor =
-            std::sqrt(x[5] * std::exp((x[7] - x[8]) * tMax) * x[6]) * std::exp(-x[7] * tMax) / M_PI;
+            std::sqrt(x[5] * std::exp((x[7] - x[8]) * tMax) * x[6]) * std::exp(-x[7] * tMax) /
+            kPi.hi;
         return base + prefactor * integral;
     }
 

@@ -66,8 +66,8 @@ inline stan::math::var hestonCall(const HestonModel& model, const HestonStanVect
     });
 }
 
-/// Nested analytical form used by `stan::math::hessian`: value node plus a
-/// single tangent node that pushes `H . d` into the leaves.
+/// Nested analytical form used by stan::math::hessian: value node plus a
+/// single tangent node that pushes the Hessian-vector product into the leaves.
 inline stan::math::fvar<stan::math::var> hestonCall(const HestonModel& model,
                                                     const HestonStanFvarVector& x, double tMax) {
     using stan::math::fvar;
@@ -146,8 +146,8 @@ inline stan::math::var hestonCall(const HestonModel& model, const HestonStanMode
     });
 }
 
-/// `fvar<var>` model-only price: value node plus a tangent node pushing
-/// `H . d` (5x5 `callHessian`) for `stan::math::hessian`.
+/// Mixed fvar&lt;var&gt; model-only price: value node plus a tangent node pushing
+/// the Hessian-vector product (5x5 callHessian) for stan::math::hessian.
 inline stan::math::fvar<stan::math::var> hestonCall(const HestonModel& model,
                                                     const HestonStanModelFvarVector& x,
                                                     const HestonMarket& market) {

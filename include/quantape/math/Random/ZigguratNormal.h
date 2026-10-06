@@ -24,12 +24,15 @@
  *   5. Interior slow path: rejection test between y-bounds
  */
 
+#include "quantape/util/Constants.h"
+
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 
 namespace quantape::math::mc {
+using ::quantape::util::kPi;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TABLE GENERATION
@@ -72,7 +75,7 @@ inline ZigguratTables generateZigguratTables() {
         return std::sqrt(-2.0 * std::log(y));
     };
 
-    const double sqrt_pi_over_2 = std::sqrt(M_PI / 2.0);
+    const double sqrt_pi_over_2 = std::sqrt(kPi / 2.0);
 
     // v(r) = r·f(r) + √(π/2)·erfc(r/√2) = area of each layer
     auto volume = [&](double r) -> double {
@@ -197,7 +200,7 @@ inline ZigguratVerification verifyZigguratTables(const ZigguratTables& tab) {
     vr.monotone_x = true;
     vr.monotone_y = true;
 
-    const double sqrt_pi_over_2 = std::sqrt(M_PI / 2.0);
+    const double sqrt_pi_over_2 = std::sqrt(kPi / 2.0);
     const double A = tab.A;
 
     // Check base layer area: x[0]*y[0] + tail = v

@@ -20,14 +20,16 @@ namespace quantape::mc {
  *
  * ## Scheme interface
  *
- *   static constexpr std::size_t uniformStreams = 0;
- *   template <typename Scalar> struct Scratch { ... };   // reused buffers
- *   template <typename Scalar, typename DriftF, typename DiffusionF>
- *   void step(const StateMatrix<Scalar>& x, StateMatrix<Scalar>& xNext,
- *             double t, double dt, const Eigen::MatrixXd& z,
- *             const Eigen::MatrixXd& uniforms, const DriftF& drift,
- *             const DiffusionF& diffusion, const std::vector<Scalar>& theta,
- *             Scratch<Scalar>& scratch) const;
+ * @code
+ * static constexpr std::size_t uniformStreams = 0;
+ * template <typename Scalar> struct Scratch { ... };   // reused buffers
+ * template <typename Scalar, typename DriftF, typename DiffusionF>
+ * void step(const StateMatrix<Scalar>& x, StateMatrix<Scalar>& xNext,
+ *           double t, double dt, const Eigen::MatrixXd& z,
+ *           const Eigen::MatrixXd& uniforms, const DriftF& drift,
+ *           const DiffusionF& diffusion, const std::vector<Scalar>& theta,
+ *           Scratch<Scalar>& scratch) const;
+ * @endcode
  *
  * Schemes are cheap values held by the simulator (moment-matching schemes
  * carry a moments functor). `uniformStreams` tells the engine how many

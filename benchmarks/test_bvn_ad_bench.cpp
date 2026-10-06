@@ -14,6 +14,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
+
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -34,7 +37,7 @@ using stan::math::var;
 namespace bvn_detail {
 
 inline double phi(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
 }
 
 inline double Phi(double x) {
@@ -63,7 +66,7 @@ inline double bvnu(double dh, double dk, double r) {
         return Phi(-dh) * Phi(-dk);
     }
 
-    double tp = 2.0 * M_PI;
+    double tp = 2.0 * kPi;
 
     if (std::abs(r) < 0.925) {
         // ── Low/moderate correlation: direct GL quadrature ──
@@ -157,7 +160,7 @@ inline double bivariateNormalCdf(double x, double y, double rho) {
 inline double bivariateNormalPdf(double x, double y, double rho) {
     double onemrho2 = 1.0 - rho * rho;
     double z = (x * x - 2.0 * rho * x * y + y * y) / onemrho2;
-    return std::exp(-0.5 * z) / (2.0 * M_PI * std::sqrt(onemrho2));
+    return std::exp(-0.5 * z) / (2.0 * kPi * std::sqrt(onemrho2));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -190,7 +193,7 @@ DoubleT bivariateNormalCdfNaive(DoubleT x, DoubleT y, DoubleT rho) {
         }
     }
 
-    DoubleT tp = 2.0 * M_PI;
+    DoubleT tp = 2.0 * kPi;
 
     if (std::abs(r_val) < 0.925) {
         // ── Low/moderate correlation: single-pass GL quadrature ──

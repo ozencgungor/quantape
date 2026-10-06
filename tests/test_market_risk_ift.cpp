@@ -19,6 +19,8 @@
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -75,7 +77,7 @@ double bsCallDelta(double s0, double strike, double mu, double sigma, double tMa
 double bsCallVega(double s0, double strike, double mu, double sigma, double tMax) {
     const double sqrtT = std::sqrt(tMax);
     const double d1 = (std::log(s0 / strike) + (mu + 0.5 * sigma * sigma) * tMax) / (sigma * sqrtT);
-    const double phi = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
+    const double phi = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * kPi);
     return std::exp(mu * tMax) * s0 * sqrtT * phi;
 }
 

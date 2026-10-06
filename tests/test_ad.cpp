@@ -14,6 +14,8 @@
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <algorithm> // For std::copy
 #include <cmath>
@@ -96,14 +98,14 @@ void testAllCubicMethodsAD() {
     std::vector<ADVariableT> x;
     std::vector<ADVariableT> y;
     for (int i = 0; i <= 10; ++i) {
-        double xi = i * M_PI / 10.0;
+        double xi = i * kPi / 10.0;
         x.push_back(ADVariableT(xi));
         y.push_back(ADVariableT(std::sin(xi)));
     }
 
-    ADVariableT x_eval = M_PI / 4.0;
-    double expected_value = std::sin(M_PI / 4.0);
-    double expected_deriv = std::cos(M_PI / 4.0);
+    ADVariableT x_eval = kPi / 4.0;
+    double expected_value = std::sin(kPi / 4.0);
+    double expected_deriv = std::cos(kPi / 4.0);
 
     std::vector<std::pair<std::string, typename CubicInterpolation<ADVariableT>::DerivativeApprox>>
         methods = {{"Spline", CubicDerivativeApprox::Spline},
@@ -123,14 +125,14 @@ void testAllCubicMethodsAD() {
         std::vector<ADVariableT> x_copy;
         std::vector<ADVariableT> y_copy;
         for (int i = 0; i <= 10; ++i) {
-            double xi = i * M_PI / 10.0;
+            double xi = i * kPi / 10.0;
             x_copy.push_back(ADVariableT(xi));
             y_copy.push_back(ADVariableT(std::sin(xi)));
         }
 
         CubicInterpolation<ADVariableT> interp(x_copy, y_copy, method);
         // Recreate x_test after recover_memory to avoid using invalid AD variable
-        ADVariableT x_test = M_PI / 4.0;
+        ADVariableT x_test = kPi / 4.0;
         ADVariableT result = interp(x_test);
 
         stan::math::grad(result.vi_);

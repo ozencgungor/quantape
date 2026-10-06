@@ -1,11 +1,14 @@
 #ifndef QUANTAPE_MATH_SPECIAL_FUNCTIONS_TRIG_INTEGRALS_H
 #define QUANTAPE_MATH_SPECIAL_FUNCTIONS_TRIG_INTEGRALS_H
 
+#include "quantape/util/Constants.h"
+
 #include <cmath>
 #include <complex>
 #include <stdexcept>
 
 namespace quantape::math {
+using ::quantape::util::kHalfPi;
 /**
  * @file TrigIntegrals.h
  * @brief Trigonometric integrals Si, Ci (real and complex), in-house
@@ -167,7 +170,7 @@ inline double sinIntegral(double x) {
                                               x2 * (4.5049097575386581e-13 +
                                                     x2 * 3.21107051193712168e-16))))));
     }
-    return M_PI_2 - detail::galsimF(x) * cos(x) - detail::galsimG(x) * sin(x);
+    return kHalfPi - detail::galsimF(x) * cos(x) - detail::galsimG(x) * sin(x);
 }
 
 /// Cosine integral, real argument (principal branch, x > 0).

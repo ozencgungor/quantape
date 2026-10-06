@@ -1,6 +1,8 @@
 #include "quantape/log/Log.h"
 #include "quantape/math/NumericalMethods.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <cmath>
 #include <iomanip>
@@ -70,13 +72,13 @@ void testIntegration() {
         double exact = 2.0; // ∫₀^π sin(x) dx = 2
 
         TrapezoidIntegratorDefault<double> trap(1e-8, 1000);
-        double result_trap = trap(f_sin, 0.0, M_PI);
+        double result_trap = trap(f_sin, 0.0, kPi);
 
         SimpsonIntegrator<double> simpson(1e-8, 1000);
-        double result_simpson = simpson(f_sin, 0.0, M_PI);
+        double result_simpson = simpson(f_sin, 0.0, kPi);
 
         GaussLegendreIntegrator<double> gauss(20);
-        double result_gauss = gauss(f_sin, 0.0, M_PI);
+        double result_gauss = gauss(f_sin, 0.0, kPi);
 
         QTA_LOG_INFO("test", "Integral of sin(x) from 0 to π:");
         QTA_LOG_INFO("test", "  Trapezoid  = {} (error: {})", quantape::util::num(result_trap),

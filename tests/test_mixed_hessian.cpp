@@ -30,6 +30,8 @@
 
 #include "quantape/log/Log.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -244,7 +246,7 @@ struct CubicSplineInterp {
 namespace bs_layer {
 
 inline double phi(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
 }
 inline double Phi(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);

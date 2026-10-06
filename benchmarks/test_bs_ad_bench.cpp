@@ -12,6 +12,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
+
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -47,7 +50,7 @@ DoubleT blackScholesNaive(DoubleT S, DoubleT K, DoubleT sigma, DoubleT r, Double
 namespace quantape::math::detail {
 
 inline double phi_pdf(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
 }
 
 inline double Phi_cdf(double x) {

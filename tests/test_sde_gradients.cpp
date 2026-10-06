@@ -26,6 +26,8 @@
 #include "quantape/mc/mcfwdrev/LeanGradients.h"
 #include "quantape/payoffs/Indicators.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -69,7 +71,7 @@ double normalCdf(double x) {
 }
 
 double normalPdf(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
 }
 
 // ── Models (batch functors; theta = piecewise-constant per interval) ──

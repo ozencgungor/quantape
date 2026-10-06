@@ -527,7 +527,7 @@ private:
     Eigen::VectorXd m_market;
 };
 
-/// Inequality adapter for AugLag<double>/SLSQP<double> (`c_k = g_k <= 0`,
+/// Inequality adapter for AugLag&lt;double&gt;/SLSQP&lt;double&gt; (`c_k = g_k <= 0`,
 /// row-major Jacobian).
 template <CalibrationProblem P>
 struct CalibrationInequalityConstraint {

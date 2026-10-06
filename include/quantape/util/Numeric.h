@@ -16,9 +16,10 @@ namespace quantape::util {
  * because chunked tape pools, SIMD batches, and block loops all need them.
  */
 
-/// `std::clamp` equivalent, kept here for AD scalar symmetry and discoverability.
+/// Clamp to [lo, hi]. Returns by value: returning a reference could dangle
+/// when callers pass temporaries (the std::clamp pitfall).
 template <class T>
-constexpr const T& clamp(const T& value, const T& lo, const T& hi) noexcept {
+constexpr T clamp(const T& value, const T& lo, const T& hi) noexcept {
     return value < lo ? lo : (hi < value ? hi : value);
 }
 

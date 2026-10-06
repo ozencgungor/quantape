@@ -6,7 +6,7 @@
 
 namespace quantape::util {
 /**
- * @file fp.h
+ * @file FloatingPoint.h
  * @brief Floating-point predicates and tolerance comparisons, libm-free
  *
  * Every predicate reads the IEEE-754 bit pattern (`std::bit_cast`), so it is

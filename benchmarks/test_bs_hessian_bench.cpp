@@ -21,6 +21,9 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
+
 #include <Eigen/Dense>
 
 #include <chrono>
@@ -41,7 +44,7 @@ constexpr double T_FIX = 1.0;
 namespace bs {
 
 inline double phi(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
+    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
 }
 inline double Phi(double x) {
     return 0.5 * std::erfc(-x * M_SQRT1_2);
@@ -150,7 +153,7 @@ void hessian_reverse_on_greeks(double S0, double s0, double r0, double& fx, Eige
     var S(S0), sigma(s0), r(r0);
     var d1 = (log(S / K_FIX) + (r + sigma * sigma / 2.0) * T_FIX) / (sigma * sqrtT);
     var d2 = d1 - sigma * sqrtT;
-    var phi_d1 = exp(-d1 * d1 / 2.0) / std::sqrt(2.0 * M_PI);
+    var phi_d1 = exp(-d1 * d1 / 2.0) / std::sqrt(2.0 * kPi);
     var delta = stan::math::Phi(d1);
     var vega = S * phi_d1 * sqrtT;
     var rho_g = K_FIX * T_FIX * exp(-r * T_FIX) * stan::math::Phi(d2);

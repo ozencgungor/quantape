@@ -13,6 +13,8 @@
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 #include "quantape/math/Integrals/TanhSinhIntegrator.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <cmath>
 #include <cstdlib>
@@ -40,7 +42,7 @@ int main() {
         const double i_poly = integ([](double x) { return x * x; }, 0.0, 1.0);
         CHECK(close(i_poly, 1.0 / 3.0, 1e-9));
 
-        const double i_sin = integ([](double x) { return std::sin(x); }, 0.0, M_PI);
+        const double i_sin = integ([](double x) { return std::sin(x); }, 0.0, kPi);
         CHECK(close(i_sin, 2.0, 1e-9));
 
         // endpoint singularity: int_0^1 x^{-1/2} dx = 2
@@ -53,7 +55,7 @@ int main() {
         // both endpoints singular: int_{-1}^{1} 1/sqrt(1-x^2) dx = pi
         const double i_arcsin =
             integ([](double x) { return 1.0 / std::sqrt(1.0 - x * x); }, -1.0, 1.0);
-        CHECK(close(i_arcsin, M_PI, 1e-6));
+        CHECK(close(i_arcsin, kPi, 1e-6));
 
         // complement-aware path reaches full precision on the same integrals:
         // the functor uses the signed distance d to the nearer endpoint
@@ -73,7 +75,7 @@ int main() {
                 return 1.0 / std::sqrt(ad * (2.0 - ad)); // 1-x^2 near either end
             },
             -1.0, 1.0);
-        CHECK(close(i_arcsin_c, M_PI, 1e-9));
+        CHECK(close(i_arcsin_c, kPi, 1e-9));
 
         // reversed bounds flip the sign
         const double i_rev = integ([](double x) { return x * x; }, 1.0, 0.0);
@@ -81,7 +83,7 @@ int main() {
 
         // whole real line: int exp(-x^2) dx = sqrt(pi)
         const double i_gauss = integ.integrateInfinite([](double x) { return std::exp(-x * x); });
-        CHECK(close(i_gauss, std::sqrt(M_PI), 1e-8));
+        CHECK(close(i_gauss, std::sqrt(kPi), 1e-8));
 
         // half-line: int_0^inf x exp(-x) dx = 1
         const double i_exp =

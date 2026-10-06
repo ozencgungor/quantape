@@ -30,6 +30,8 @@
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
 #include "quantape/util/Check.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
@@ -234,7 +236,7 @@ double oneStepCallTruth(double s0, double mu, double sigma, double dt, double st
     const double b = s0 * sigma * std::sqrt(dt);
     const double d = (a - strike) / b;
     const double phi = 0.5 * std::erfc(-d * M_SQRT1_2);
-    const double pdf = std::exp(-0.5 * d * d) / std::sqrt(2.0 * M_PI);
+    const double pdf = std::exp(-0.5 * d * d) / std::sqrt(2.0 * kPi);
     return b * pdf + (a - strike) * phi;
 }
 

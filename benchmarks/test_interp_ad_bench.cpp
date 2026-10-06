@@ -17,6 +17,8 @@
 #include "quantape/log/Log.h"
 #include "quantape/math/Interpolations.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
+#include "quantape/util/Constants.h"
+using ::quantape::util::kPi;
 
 #include <chrono>
 #include <cmath>
@@ -445,7 +447,7 @@ void benchLinear() {
     std::vector<double> x_grid(NKNOTS);
     std::vector<double> y_vals(NKNOTS);
     for (int i = 0; i < NKNOTS; ++i) {
-        x_grid[i] = i * 2.0 * M_PI / (NKNOTS - 1);
+        x_grid[i] = i * 2.0 * kPi / (NKNOTS - 1);
         y_vals[i] = std::sin(x_grid[i]);
     }
 
@@ -566,9 +568,9 @@ void benchBilinear() {
     std::vector<double> x_grid(NX), y_grid(NY);
     std::vector<std::vector<double>> z_vals(NY, std::vector<double>(NX));
     for (int i = 0; i < NX; ++i)
-        x_grid[i] = i * M_PI / (NX - 1);
+        x_grid[i] = i * kPi / (NX - 1);
     for (int j = 0; j < NY; ++j)
-        y_grid[j] = j * M_PI / (NY - 1);
+        y_grid[j] = j * kPi / (NY - 1);
     for (int j = 0; j < NY; ++j)
         for (int i = 0; i < NX; ++i)
             z_vals[j][i] = std::sin(x_grid[i]) * std::cos(y_grid[j]);
@@ -685,7 +687,7 @@ void benchCubicSpline() {
     std::vector<double> x_grid(NKNOTS);
     std::vector<double> y_vals(NKNOTS);
     for (int i = 0; i < NKNOTS; ++i) {
-        x_grid[i] = i * 2.0 * M_PI / (NKNOTS - 1);
+        x_grid[i] = i * 2.0 * kPi / (NKNOTS - 1);
         y_vals[i] = std::sin(x_grid[i]);
     }
 
