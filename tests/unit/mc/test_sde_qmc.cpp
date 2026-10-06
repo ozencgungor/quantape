@@ -18,7 +18,6 @@
 // configured, skippable otherwise.
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/SobolGenerator.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/Gradients.h"
@@ -29,7 +28,6 @@
 #include "quantape/mc/SobolSource.h"
 #include "quantape/mc/TimeGrid.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
-#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 using ::quantape::util::kPi;
 
@@ -37,18 +35,13 @@ using ::quantape::util::kPi;
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <random>
 #include <vector>
-using quantape::util::checkClose;
-using quantape::util::isFiniteBitwise;
 
-using quantape::math::mc::sobol::Entry;
-using quantape::math::mc::sobol::SobolGenerator;
-using quantape::math::mc::sobol::SobolOptions;
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
+
 using quantape::mc::Euler;
 using quantape::mc::IidGaussianSource;
 using quantape::mc::PathBlock;
@@ -56,6 +49,10 @@ using quantape::mc::Schedule;
 using quantape::mc::SdeSimulator;
 using quantape::mc::SobolSource;
 using quantape::mc::TimeGrid;
+
+using quantape::math::mc::sobol::Entry;
+using quantape::math::mc::sobol::SobolGenerator;
+using quantape::math::mc::sobol::SobolOptions;
 
 static_assert(quantape::mc::RandomSource<SobolSource>);
 static_assert(quantape::mc::UniformRandomSource<SobolSource>);
@@ -155,32 +152,43 @@ struct CirQeMoments {
     }
 };
 
-// ── Source contract ──
+double oneStepCallTruth(double s0, double mu, double sigma, double dt, double strike) {
+    const double a = s0 * (1.0 + mu * dt);
+    const double b = s0 * sigma * std::sqrt(dt);
+    const double d = (a - strike) / b;
+    const double phi = 0.5 * std::erfc(-d * M_SQRT1_2);
+    const double pdf = std::exp(-0.5 * d * d) / std::sqrt(2.0 * kPi);
+    return b * pdf + (a - strike) * phi;
+}
 
-void testSourceContract() {
+} // namespace
+
+class SdeQmcTest : public StanTapeTest {};
+
+TEST_F(SdeQmcTest, sourceContractAgainstGenerator) {
     const std::size_t factors = 2;
     const std::size_t steps = 8;
     const std::size_t uniforms = 1;
     const auto generator = makeGenerator(424242, 32);
     const SobolSource source(generator, factors, steps, uniforms);
 
-    CHECK(source.factorCount() == factors);
+    EXPECT_EQ(source.factorCount(), factors);
     Eigen::MatrixXd block;
     source.fill(3, 5, 7, block);
-    CHECK(block.rows() == static_cast<Eigen::Index>(factors));
-    CHECK(block.cols() == 7);
+    EXPECT_EQ(block.rows(), static_cast<Eigen::Index>(factors));
+    EXPECT_EQ(block.cols(), 7);
     for (std::size_t p = 0; p < 7; ++p) {
         for (std::size_t j = 0; j < factors; ++j) {
             const double direct = generator->normal(5 + p, source.normalDim(3, j));
-            CHECK(block(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)) == direct);
+            EXPECT_EQ(block(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)), direct);
         }
     }
 
     Eigen::MatrixXd u;
     source.fillUniform(2, 5, 7, 0, 1, u);
     for (std::size_t p = 0; p < 7; ++p) {
-        CHECK(u(0, static_cast<Eigen::Index>(p)) ==
-              generator->uniform(5 + p, source.uniformDim(2, 0)));
+        EXPECT_EQ(u(0, static_cast<Eigen::Index>(p)),
+                  generator->uniform(5 + p, source.uniformDim(2, 0)));
     }
 
     // replicas: same layout, different digital shift
@@ -188,13 +196,10 @@ void testSourceContract() {
     const SobolSource shifted(replica, factors, steps, uniforms);
     Eigen::MatrixXd block2;
     shifted.fill(3, 5, 7, block2);
-    CHECK(!(block.array() == block2.array()).all());
-    QTA_LOG_INFO("test", "  [ok] Sobol source contract (blocks, uniforms, replica shifts)");
+    EXPECT_FALSE((block.array() == block2.array()).all());
 }
 
-// ── Engine invariants with QMC ──
-
-void testEngineWithSobol() {
+TEST_F(SdeQmcTest, enginePathBlockAndScheduleAreBitwise) {
     const std::size_t nSteps = 16;
     const TimeGrid grid(1.0, nSteps);
     const std::vector<double> theta = {0.05, 0.2};
@@ -210,9 +215,9 @@ void testEngineWithSobol() {
     const auto blocksPar = simulator.simulate(x0, quantape::mc::driftOf(GbmModel{}),
                                               quantape::mc::diffusionOf(GbmModel{}), source, 512,
                                               64, Schedule::Parallel);
-    CHECK(blocks.size() == blocksPar.size());
+    EXPECT_EQ(blocks.size(), blocksPar.size());
     for (std::size_t b = 0; b < blocks.size(); ++b) {
-        CHECK((blocks[b].states.back().array() == blocksPar[b].states.back().array()).all());
+        EXPECT_TRUE((blocks[b].states.back().array() == blocksPar[b].states.back().array()).all());
     }
 
     for (std::size_t i : {std::size_t(0), std::size_t(37), std::size_t(511)}) {
@@ -222,25 +227,13 @@ void testEngineWithSobol() {
         const std::size_t block = i / 64;
         const std::size_t column = i % 64;
         for (std::size_t k = 0; k <= nSteps; ++k) {
-            CHECK(path.states[k](0, 0) ==
-                  blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
+            EXPECT_EQ(path.states[k](0, 0),
+                      blocks[block].states[k](0, static_cast<Eigen::Index>(column)));
         }
     }
-    QTA_LOG_INFO("test", "  [ok] Sobol engine invariants (path/block/schedule bitwise)");
 }
 
-// ── Statistical accuracy ──
-
-double oneStepCallTruth(double s0, double mu, double sigma, double dt, double strike) {
-    const double a = s0 * (1.0 + mu * dt);
-    const double b = s0 * sigma * std::sqrt(dt);
-    const double d = (a - strike) / b;
-    const double phi = 0.5 * std::erfc(-d * M_SQRT1_2);
-    const double pdf = std::exp(-0.5 * d * d) / std::sqrt(2.0 * kPi);
-    return b * pdf + (a - strike) * phi;
-}
-
-void testQmcVarianceReduction() {
+TEST_F(SdeQmcTest, varianceReductionBeatsMonteCarlo) {
     const std::size_t nSteps = 1;
     const std::size_t nPaths = 1024;
     const std::size_t replicas = 16;
@@ -285,52 +278,48 @@ void testQmcVarianceReduction() {
     }
     const double mcRms = std::sqrt(mcSq / static_cast<double>(replicas));
     const double qmcRms = std::sqrt(qmcSq / static_cast<double>(replicas));
-    QTA_LOG_INFO("test", "  one-step call: MC rmse={}  QMC rmse={}  (ratio {})",
-                 quantape::util::num(mcRms, 3), quantape::util::num(qmcRms, 3),
-                 quantape::util::num(qmcRms / mcRms, 2));
-    CHECK(qmcRms < 0.5 * mcRms);
-
-    // multi-step Euler moments: E[S_T] and Var[S_T] are exact for the
-    // product-factor Euler discretization
-    {
-        const std::size_t steps = 8;
-        const std::size_t paths = 16384;
-        const TimeGrid g(1.0, steps);
-        const std::vector<std::vector<double>> th(steps, {mu, sigma});
-        const SdeSimulator<double> sim(g, th);
-        const double dt = 1.0 / static_cast<double>(steps);
-        const SobolSource src(makeGenerator(5150, 16), 1, steps, 0);
-        const auto blocks =
-            sim.simulate(Eigen::VectorXd::Constant(1, s0), quantape::mc::driftOf(GbmModel{}),
-                         quantape::mc::diffusionOf(GbmModel{}), src, paths, 1024);
-        double sum = 0.0;
-        double sumSq = 0.0;
-        for (const auto& b : blocks) {
-            const auto& x = b.states.back();
-            for (Eigen::Index p = 0; p < x.cols(); ++p) {
-                sum += x(0, p);
-                sumSq += x(0, p) * x(0, p);
-            }
-        }
-        const double n = static_cast<double>(paths);
-        const double mean = sum / n;
-        const double var = sumSq / n - mean * mean;
-        const double a = 1.0 + mu * dt;
-        const double exactMean = s0 * std::pow(a, static_cast<double>(steps));
-        const double exactVar = s0 * s0 *
-                                (std::pow(a * a + sigma * sigma * dt, static_cast<double>(steps)) -
-                                 std::pow(a, 2.0 * static_cast<double>(steps)));
-        // QMC with the fixture directions: mean is martingale-exact to well
-        // below MC error; the quadratic variance functional keeps ~0.1%
-        // (i.i.d. MC at this N would be ~1.1%).
-        checkClose("qmc euler mean", mean, exactMean, 1e-4 * s0);
-        checkClose("qmc euler var", var, exactVar, 1e-3 * exactVar);
-    }
+    EXPECT_LT(qmcRms, 0.5 * mcRms);
 }
 
-// ── QE scheme with Sobol uniforms ──
+TEST_F(SdeQmcTest, eulerMomentsWithFixtureDirections) {
+    const double mu = 0.05, sigma = 0.2, s0 = 100.0;
+    // multi-step Euler moments: E[S_T] and Var[S_T] are exact for the
+    // product-factor Euler discretization
+    const std::size_t steps = 8;
+    const std::size_t paths = 16384;
+    const TimeGrid g(1.0, steps);
+    const std::vector<std::vector<double>> th(steps, {mu, sigma});
+    const SdeSimulator<double> sim(g, th);
+    const double dt = 1.0 / static_cast<double>(steps);
+    const SobolSource src(makeGenerator(5150, 16), 1, steps, 0);
+    const auto blocks =
+        sim.simulate(Eigen::VectorXd::Constant(1, s0), quantape::mc::driftOf(GbmModel{}),
+                     quantape::mc::diffusionOf(GbmModel{}), src, paths, 1024);
+    double sum = 0.0;
+    double sumSq = 0.0;
+    for (const auto& b : blocks) {
+        const auto& x = b.states.back();
+        for (Eigen::Index p = 0; p < x.cols(); ++p) {
+            sum += x(0, p);
+            sumSq += x(0, p) * x(0, p);
+        }
+    }
+    const double n = static_cast<double>(paths);
+    const double mean = sum / n;
+    const double var = sumSq / n - mean * mean;
+    const double a = 1.0 + mu * dt;
+    const double exactMean = s0 * std::pow(a, static_cast<double>(steps));
+    const double exactVar = s0 * s0 *
+                            (std::pow(a * a + sigma * sigma * dt, static_cast<double>(steps)) -
+                             std::pow(a, 2.0 * static_cast<double>(steps)));
+    // QMC with the fixture directions: mean is martingale-exact to well
+    // below MC error; the quadratic variance functional keeps ~0.1%
+    // (i.i.d. MC at this N would be ~1.1%).
+    CHECK_CLOSE("qmc euler mean", mean, exactMean, 1e-4 * s0);
+    CHECK_CLOSE("qmc euler var", var, exactVar, 1e-3 * exactVar);
+}
 
-void testQeUniformsWithSobol() {
+TEST_F(SdeQmcTest, qeUniformsExactCirMoments) {
     const double kappa = 2.0, level = 0.04, sigma = 0.2, v0 = 0.04;
     const std::size_t steps = 4;
     const std::size_t nPaths = 20000;
@@ -365,15 +354,12 @@ void testQeUniformsWithSobol() {
         level * sigma * sigma * (1.0 - std::exp(-kappa)) * (1.0 - std::exp(-kappa)) / (2.0 * kappa);
     const double mean = sum / static_cast<double>(n);
     const double var = sumSq / static_cast<double>(n) - mean * mean;
-    CHECK(negatives == 0);
-    checkClose("qmc qe mean", mean, exactMean, 5e-4 * exactMean + 1e-5);
-    checkClose("qmc qe var", var, exactVar, 1e-3 * exactVar + 1e-5);
-    QTA_LOG_INFO("test", "  [ok] QE with Sobol uniforms: exact CIR moments, no negatives");
+    EXPECT_EQ(negatives, 0u);
+    CHECK_CLOSE("qmc qe mean", mean, exactMean, 5e-4 * exactMean + 1e-5);
+    CHECK_CLOSE("qmc qe var", var, exactVar, 1e-3 * exactVar + 1e-5);
 }
 
-// ── Pathwise AD with QMC ──
-
-void testQmcGradients() {
+TEST_F(SdeQmcTest, pathwiseAdReverseEqualsForward) {
     const std::size_t nSteps = 8;
     const std::size_t nPaths = 512;
     const TimeGrid grid(1.0, nSteps);
@@ -391,23 +377,9 @@ void testQmcGradients() {
         simulator, x0, theta, quantape::mc::driftOf(GbmModel{}),
         quantape::mc::diffusionOf(GbmModel{}), source, TerminalCall{100.0}, nPaths,
         Schedule::Parallel);
-    checkClose("qmc gradient value", forward.value, reverse.value, 1e-14);
+    CHECK_CLOSE("qmc gradient value", forward.value, reverse.value, 1e-14);
     for (int j = 0; j < 3; ++j) {
-        checkClose("qmc reverse vs forward", reverse.gradient(j), forward.gradient(j),
-                   1e-8 * std::max(1.0, std::fabs(forward.gradient(j))));
+        CHECK_CLOSE("qmc reverse vs forward", reverse.gradient(j), forward.gradient(j),
+                    1e-8 * std::max(1.0, std::fabs(forward.gradient(j))));
     }
-    QTA_LOG_INFO("test", "  [ok] QMC pathwise AD: reverse == forward on identical points");
-}
-
-} // namespace
-
-int main() {
-    QTA_LOG_INFO("test", "SDE QMC/Sobol tests");
-    testSourceContract();
-    testEngineWithSobol();
-    testQmcVarianceReduction();
-    testQeUniformsWithSobol();
-    testQmcGradients();
-    QTA_LOG_INFO("test", "ALL SDE QMC TESTS PASSED");
-    return 0;
 }
