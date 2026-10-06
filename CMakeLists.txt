@@ -60,7 +60,7 @@ include(QuantapeTargets)
 
 # Public headers are included as quantape/...
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${Boost_INCLUDE_DIRS})
+include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 
 # ============================================================================
 # Library
@@ -79,8 +79,8 @@ add_library(quantape STATIC ${QUANTAPE_SOURCES} ${QUANTAPE_HEADERS})
 target_include_directories(quantape PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
-    ${Boost_INCLUDE_DIRS}
 )
+target_include_directories(quantape SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
 quantape_set_warnings(quantape)
 
 # Infrastructure libraries: logging facade and number formatting. Both are

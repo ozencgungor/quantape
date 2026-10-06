@@ -7,11 +7,23 @@
 
 set(THIRD_PARTY_DIR ${PROJECT_SOURCE_DIR}/third-party)
 
+# Treat a dependency's include directories as system headers for all consumers
+# so third-party warnings do not pollute our build logs (and CI). Our own
+# headers keep full warning coverage.
+function(quantape_mark_system target)
+    if(TARGET ${target})
+        get_target_property(_quantape_incs ${target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_quantape_incs)
+            target_include_directories(${target} SYSTEM INTERFACE ${_quantape_incs})
+        endif()
+    endif()
+endfunction()
+
 # ----------------------------------------------------------------------------
 # Eigen (header-only linear algebra library)
 # ----------------------------------------------------------------------------
 set(EIGEN3_INCLUDE_DIR ${THIRD_PARTY_DIR}/eigen)
-include_directories(${EIGEN3_INCLUDE_DIR})
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------
 # Boost (download to third-party directory if not present)
@@ -73,6 +85,7 @@ if(NOT TARGET TBB::tbb)
     set(TBB_DISABLE_HWLOC_AUTOMATIC_SEARCH ON CACHE BOOL "Disable hwloc" FORCE)
 
     FetchContent_MakeAvailable(TBB)
+    quantape_mark_system(tbb)
 
     message(STATUS "TBB built successfully")
     set(TBB_LIBRARIES TBB::tbb)
@@ -118,15 +131,15 @@ if(NOT EXISTS "${STAN_MATH_INCLUDE_DIR}/stan/math.hpp")
     # layout changed: the checkout root is directly under stan-math/
     set(STAN_MATH_INCLUDE_DIR ${THIRD_PARTY_DIR}/stan-math)
 endif()
-include_directories(${STAN_MATH_INCLUDE_DIR})
+include_directories(SYSTEM ${STAN_MATH_INCLUDE_DIR})
 
 # Include SUNDIALS headers from the build
 if(TARGET SUNDIALS::generic)
     get_target_property(SUNDIALS_INCLUDE_DIRS SUNDIALS::generic INTERFACE_INCLUDE_DIRECTORIES)
-    include_directories(${SUNDIALS_INCLUDE_DIRS})
+    include_directories(SYSTEM ${SUNDIALS_INCLUDE_DIRS})
     # Also include the source directories
-    include_directories(${CMAKE_BINARY_DIR}/_deps/sundials-src/include)
-    include_directories(${CMAKE_BINARY_DIR}/_deps/sundials-build/include)
+    include_directories(SYSTEM ${CMAKE_BINARY_DIR}/_deps/sundials-src/include)
+    include_directories(SYSTEM ${CMAKE_BINARY_DIR}/_deps/sundials-build/include)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -144,6 +157,7 @@ if(QUANTAPE_ENABLE_LOGGING)
         URL https://github.com/odygrd/quill/archive/refs/tags/v13.0.0.tar.gz
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
     FetchContent_MakeAvailable(quill)
+    quantape_mark_system(quill)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -155,6 +169,7 @@ FetchContent_Declare(zmij
     URL https://github.com/vitaut/zmij/archive/refs/tags/v1.2.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(zmij)
+quantape_mark_system(zmij)
 # AppleClang rejects zmij's C++14 relaxed-constexpr table generation
 # ("read of element of array without known bound"); zmij's documented opt-out
 # costs a little table-init time at first use.
@@ -166,7 +181,7 @@ target_compile_definitions(zmij PUBLIC ZMIJ_USE_CONSTEXPR=0)
 if(EXISTS ${THIRD_PARTY_DIR}/nlohmann/nlohmann/json.hpp)
     # Offline-friendly path: a single header already present in third-party/.
     add_library(nlohmann_json INTERFACE)
-    target_include_directories(nlohmann_json INTERFACE ${THIRD_PARTY_DIR}/nlohmann)
+    target_include_directories(nlohmann_json SYSTEM INTERFACE ${THIRD_PARTY_DIR}/nlohmann)
     add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
     message(STATUS "Using existing nlohmann/json in third-party/")
 elseif(NOT TARGET nlohmann_json::nlohmann_json)
@@ -176,6 +191,7 @@ elseif(NOT TARGET nlohmann_json::nlohmann_json)
         URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
     FetchContent_MakeAvailable(nlohmann_json)
+    quantape_mark_system(nlohmann_json)
 endif()
 
 find_package(Threads REQUIRED)
