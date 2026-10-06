@@ -38,6 +38,20 @@ target_compile_definitions(bench_risk_alloc PRIVATE QUANTAPE_RISK_ALLOC_COUNTS=1
 target_link_libraries(bench_risk_alloc PRIVATE quantape)
 quantape_set_warnings(bench_risk_alloc)
 
+# FX pricing and cross-currency bootstrap harness (with AD scalar types).
+add_executable(bench_fx bench_fx.cpp)
+target_link_libraries(bench_fx PRIVATE quantape)
+quantape_enable_stan(bench_fx)
+quantape_set_warnings(bench_fx)
+
+# Allocation-tracking build of the FX harness: same malloc shim as
+# bench_risk_alloc; use it for allocation counts, bench_fx for timings.
+add_executable(bench_fx_alloc bench_fx.cpp)
+target_compile_definitions(bench_fx_alloc PRIVATE QUANTAPE_FX_ALLOC_COUNTS=1)
+target_link_libraries(bench_fx_alloc PRIVATE quantape)
+quantape_enable_stan(bench_fx_alloc)
+quantape_set_warnings(bench_fx_alloc)
+
 # --- Stan/AD micro-benchmarks -------------------------------------------------
 foreach(_bench test_bs_ad_bench test_interp_ad_bench test_fast_exp_log
                 test_bvn_ad_bench)
