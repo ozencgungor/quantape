@@ -8,25 +8,24 @@
 //   4. cubic (Spline): dI/dx = derivative(); mixed d2I/dxdy vs FD of the
 //                     spline derivative in y
 //   5. evaluateFixed: x adjoint stays zero (passive-abscissa policy)
-//
-// Run: ./test_interpolation_xad
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
 #include "quantape/math/Interpolations/InterpolationStanPrimitives.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <vector>
-using quantape::util::checkClose;
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using quantape::math::BilinearInterpolation;
 using quantape::math::CubicDerivativeApprox;
 using quantape::math::CubicInterpolation;
 using quantape::math::LinearInterpolation;
 using quantape::math::LogLinearInterpolation;
+
+class InterpolationXadTest : public StanTapeTest {};
 
 namespace {
 
@@ -89,8 +88,9 @@ Eigen::Matrix<double, -1, -1> hessian2D(double x, double y,
     return H;
 }
 
-void testLinear() {
-    QTA_LOG_INFO("test", "=== linear evaluation-point AD ===");
+} // namespace
+
+TEST_F(InterpolationXadTest, linearHessian) {
     const double x = 1.5;
 
     const auto H =
@@ -101,14 +101,13 @@ void testLinear() {
         });
 
     // value = 2.5 (y[1]=1, y[2]=4), slope = 3, mixed ±inv_dx = ±1
-    checkClose("linear hessian d2I/dx dy1", H(0, 2), -1.0, 1e-12);
-    checkClose("linear hessian d2I/dx dy2", H(0, 3), 1.0, 1e-12);
-    checkClose("linear hessian d2I/dx2", H(0, 0), 0.0, 1e-12);
-    checkClose("linear hessian d2I/dy1dy2", H(2, 3), 0.0, 1e-12);
+    CHECK_CLOSE("linear hessian d2I/dx dy1", H(0, 2), -1.0, 1e-12);
+    CHECK_CLOSE("linear hessian d2I/dx dy2", H(0, 3), 1.0, 1e-12);
+    CHECK_CLOSE("linear hessian d2I/dx2", H(0, 0), 0.0, 1e-12);
+    CHECK_CLOSE("linear hessian d2I/dy1dy2", H(2, 3), 0.0, 1e-12);
 }
 
-void testLogLinear() {
-    QTA_LOG_INFO("test", "=== log-linear evaluation-point AD ===");
+TEST_F(InterpolationXadTest, logLinearHessian) {
     const double x = 1.5;
     const double t = 0.5, dx = 1.0;
     const double L1 = std::log(1.0), L2 = std::log(4.0);
@@ -121,15 +120,14 @@ void testLogLinear() {
             return interp(xq);
         });
 
-    checkClose("loglin hessian d2I/dx dy1", H(0, 2),
-               f * ((1.0 - t) * (L2 - L1) - 1.0) / (g_y[1] * dx), 1e-10);
-    checkClose("loglin hessian d2I/dx dy2", H(0, 3), f * (t * (L2 - L1) + 1.0) / (g_y[2] * dx),
-               1e-10);
-    checkClose("loglin hessian d2I/dx2", H(0, 0), f * (L2 - L1) * (L2 - L1) / (dx * dx), 1e-10);
+    CHECK_CLOSE("loglin hessian d2I/dx dy1", H(0, 2),
+                f * ((1.0 - t) * (L2 - L1) - 1.0) / (g_y[1] * dx), 1e-10);
+    CHECK_CLOSE("loglin hessian d2I/dx dy2", H(0, 3), f * (t * (L2 - L1) + 1.0) / (g_y[2] * dx),
+                1e-10);
+    CHECK_CLOSE("loglin hessian d2I/dx2", H(0, 0), f * (L2 - L1) * (L2 - L1) / (dx * dx), 1e-10);
 }
 
-void testBilinear() {
-    QTA_LOG_INFO("test", "=== bilinear evaluation-point AD ===");
+TEST_F(InterpolationXadTest, bilinearHessian) {
     const std::vector<double> bx{0.0, 1.0, 2.0};
     const std::vector<double> by{0.0, 1.0};
     const std::vector<std::vector<double>> z{{1.0, 2.0, 3.0}, {4.0, 6.0, 8.0}};
@@ -144,14 +142,13 @@ void testBilinear() {
                              });
 
     // flat order: 0=x, 1=y, 2=z00, 3=z10, 4=z20, 5=z01, 6=z11, 7=z21
-    checkClose("bilinear d2I/dx dz00", H(0, 2), -0.5, 1e-12);
-    checkClose("bilinear d2I/dx dz10", H(0, 3), 0.5, 1e-12);
-    checkClose("bilinear d2I/dy dz00", H(1, 2), -0.5, 1e-12);
-    checkClose("bilinear d2I/dx dy", H(0, 1), 1.0, 1e-12); // (z11-z01)-(z10-z00)
+    CHECK_CLOSE("bilinear d2I/dx dz00", H(0, 2), -0.5, 1e-12);
+    CHECK_CLOSE("bilinear d2I/dx dz10", H(0, 3), 0.5, 1e-12);
+    CHECK_CLOSE("bilinear d2I/dy dz00", H(1, 2), -0.5, 1e-12);
+    CHECK_CLOSE("bilinear d2I/dx dy", H(0, 1), 1.0, 1e-12); // (z11-z01)-(z10-z00)
 }
 
-void testCubicSplineMixed() {
-    QTA_LOG_INFO("test", "=== cubic (Spline) mixed x/y Hessian ===");
+TEST_F(InterpolationXadTest, cubicSplineMixedHessian) {
     const double x = 1.55;
 
     const auto H =
@@ -173,46 +170,30 @@ void testCubicSplineMixed() {
         const double fd = (ip.derivative(x) - im.derivative(x)) / (2.0 * h);
         char label[64];
         std::snprintf(label, sizeof(label), "cubic d2I/dx dy%zu", j);
-        checkClose(label, H(0, static_cast<Eigen::Index>(j + 1)), fd, 1e-5 * (1.0 + std::fabs(fd)));
+        CHECK_CLOSE(label, H(0, static_cast<Eigen::Index>(j + 1)), fd,
+                    1e-5 * (1.0 + std::fabs(fd)));
     }
 }
 
-void testEvaluateFixed() {
-    QTA_LOG_INFO("test", "=== passive-abscissa policy ===");
-
+TEST_F(InterpolationXadTest, evaluateFixedAndDefaultAbscissaAdjoints) {
     {
-        stan::math::recover_memory();
         stan::math::var x = 1.5;
         std::vector<stan::math::var> y{0.0, 1.0, 4.0, 9.0};
         const LinearInterpolation<stan::math::var> interp(g_x, y);
 
         stan::math::var fixed = interp.evaluateFixed(x);
         fixed.grad();
-        checkClose("evaluateFixed x adjoint", x.adj(), 0.0, 1e-12);
-        checkClose("evaluateFixed y2 adjoint", y[2].adj(), 0.5, 1e-12);
+        CHECK_CLOSE("evaluateFixed x adjoint", x.adj(), 0.0, 1e-12);
+        CHECK_CLOSE("evaluateFixed y2 adjoint", y[2].adj(), 0.5, 1e-12);
     }
     {
-        stan::math::recover_memory();
         stan::math::var x = 1.5;
         std::vector<stan::math::var> y{0.0, 1.0, 4.0, 9.0};
         const LinearInterpolation<stan::math::var> interp(g_x, y);
 
         stan::math::var ad = interp(x);
         ad.grad();
-        checkClose("default x adjoint", x.adj(), 3.0, 1e-12);
-        checkClose("default y2 adjoint", y[2].adj(), 0.5, 1e-12);
+        CHECK_CLOSE("default x adjoint", x.adj(), 3.0, 1e-12);
+        CHECK_CLOSE("default y2 adjoint", y[2].adj(), 0.5, 1e-12);
     }
-}
-
-} // namespace
-
-int main() {
-    testLinear();
-    testLogLinear();
-    testBilinear();
-    testCubicSplineMixed();
-    testEvaluateFixed();
-    stan::math::recover_memory();
-    QTA_LOG_INFO("test", "test_interpolation_xad: all invariants hold");
-    return 0;
 }
