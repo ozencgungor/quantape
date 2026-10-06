@@ -51,9 +51,20 @@ jobs:
 
       # Leak checking is off for now: TBB/quill keep intentional process-lifetime
       # allocations. UBSan reports but does not abort (third-party deps are
-      # compiled with the same sanitizer flags).
+      # compiled with the same sanitizer flags). No death tests exist any more
+      # (the legacy _Exit gate was retired, D9), so no exclusions are needed.
       - name: Test
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
-        run: ctest --test-dir build-san -j 2 --output-on-failure --timeout 1800
+        run: >
+          ctest --test-dir build-san -j 2 --output-on-failure --timeout 1800
+          --output-junit sanitizers-junit.xml
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-asan-ubsan
+          path: build-san/sanitizers-junit.xml
+          if-no-files-found: ignore
