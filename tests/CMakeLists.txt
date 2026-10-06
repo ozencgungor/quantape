@@ -2,6 +2,11 @@
 # Test executables (registered with CTest, runnable directly as well).
 # ============================================================================
 
+# --- Converted GoogleTest areas ----------------------------------------------
+# Each area owns one directory with its own CMakeLists.txt; the per-file
+# legacy target below is removed in the same commit as its conversion.
+add_subdirectory(unit/util)
+
 # --- Sobol -------------------------------------------------------------------
 add_executable(test_sobol_quality test_sobol_quality.cpp)
 target_link_libraries(test_sobol_quality PRIVATE Threads::Threads quantape_log quantape_format)
@@ -39,11 +44,6 @@ add_executable(test_number_format test_number_format.cpp)
 target_link_libraries(test_number_format PRIVATE quantape)
 quantape_set_warnings(test_number_format)
 quantape_register_test(test_number_format)
-
-add_executable(test_util test_util.cpp)
-target_link_libraries(test_util PRIVATE quantape)
-quantape_set_warnings(test_util)
-quantape_register_test(test_util)
 
 # --- Time --------------------------------------------------------------------
 foreach(_test test_date test_daycount test_calendar test_schedule)
