@@ -1,34 +1,27 @@
 #ifndef QUANTAPE_UTIL_CHECK_H
 #define QUANTAPE_UTIL_CHECK_H
 
-#include "quantape/util/FloatingPoint.h"
-
 #include <charconv>
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
-#include <cstdlib>
 #include <iterator>
 #include <string>
 
 namespace quantape::util {
 /**
  * @file Check.h
- * @brief Test-support helpers (std-only) shared by the test executables
+ * @brief std-only diagnostic and formatting support for the test suite.
  *
- * Lives in `util` so tests depend on library headers directly instead of a
- * private test-support header: `CHECK`, `checkClose`, and the diagnostic `num`
- * formatters. Everything here is std-only (the `util` self-containment rule
- * holds), header-only, and non-throwing. Failures print to stderr and call
- * `std::_Exit(1)`: skipping static destruction is deliberate — failing while
- * nested AD tapes are still live must not unwind through exit-time
- * destructors.
+ * Lives in `util` so tests depend on the library headers directly instead of a
+ * private test-support header: `num` formats doubles for assertion messages,
+ * `RecordProperty` diagnostics and benchmark output, and the `detail`
+ * concepts back the sequence/AD close assertions in
+ * `tests/support/Assertions.h`. Everything here is std-only (the `util`
+ * self-containment rule holds), header-only, and non-throwing.
  *
- * `checkClose` is generic through templates: one scalar overload and one
- * element-wise overload for any sized range of scalar-convertible values.
- * Eigen vectors, matrices and dense expressions satisfy the range requirements
- * (`.size()`/`.begin()`/`.end()`), so no Eigen dependency is needed here —
- * std containers, C arrays, Eigen types, and any iterable all work.
+ * This header is no longer a test harness: the legacy `CHECK` macro family
+ * and its fatal `std::_Exit` failure path were retired with the googletest
+ * migration, and no gtest header is included here.
  */
 
 /// Shortest round-trip text for a double (status and diagnostic messages).
@@ -44,20 +37,6 @@ inline std::string num(double value, int precision) {
     const auto res = std::to_chars(buffer, buffer + sizeof(buffer), value,
                                    std::chars_format::general, precision);
     return std::string(buffer, res.ptr);
-}
-
-/// Report a failed check and terminate without unwinding.
-[[noreturn]] inline void fail(const char* file, int line, const char* expr) {
-    std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", file, line, expr);
-    std::fflush(nullptr);
-    std::_Exit(1);
-}
-
-/// Boolean gate behind the `CHECK` macro.
-inline void check(bool ok, const char* file, int line, const char* expr) {
-    if (!ok) {
-        fail(file, line, expr);
-    }
 }
 
 namespace detail {
@@ -86,7 +65,7 @@ concept IteratorSequence = requires(const R& r) {
     { *std::begin(r) } -> std::convertible_to<double>;
 };
 
-/// Anything checkClose can compare element-wise.
+/// Anything the sequence close assertions can compare element-wise.
 template <class R>
 concept ScalarSequence = ContiguousSequence<R> || IteratorSequence<R>;
 
@@ -110,102 +89,8 @@ concept ValAdjScalar = requires(const T& x) {
     { x.adj() } -> std::convertible_to<double>;
 };
 
-/// Common element/vector mismatch reporter (prints and terminates).
-[[noreturn]] inline void failClose(const char* label, std::size_t index, double got,
-                                   double expected, double tol) {
-    std::fprintf(stderr, "FAIL: %s[%zu] got=%s expected=%s tol=%s\n", label, index,
-                 num(got, 12).c_str(), num(expected, 12).c_str(), num(tol, 3).c_str());
-    std::fflush(nullptr);
-    std::_Exit(1);
-}
-
-/// AD-scalar mismatch reporter (value vs adjoint).
-[[noreturn]] inline void failAdPart(const char* label, const char* part, double got,
-                                    double expected, double tol) {
-    std::fprintf(stderr, "FAIL: %s %s got=%s expected=%s tol=%s\n", label, part,
-                 num(got, 12).c_str(), num(expected, 12).c_str(), num(tol, 3).c_str());
-    std::fflush(nullptr);
-    std::_Exit(1);
-}
-
 } // namespace detail
 
-/// Scalar tolerance gate: prints label/got/expected/tol and exits on mismatch.
-/// `FloatingPoint.h` semantics: NaN never passes, ±Inf only equals itself.
-inline void checkClose(const char* label, double got, double expected, double tol) {
-    if (!isCloseAbs(got, expected, tol)) {
-        detail::failClose(label, 0, got, expected, tol);
-    }
-}
-
-/// Relative (NumPy-style) tolerance gate: `|a - b| <= atol + rtol * |b|`.
-/// Use when the magnitudes are large enough that an absolute tolerance sits
-/// below one ULP (e.g. notional-scaled values around 1e5 with a 1e-12 tol).
-inline void checkCloseRel(const char* label, double got, double expected, double rtol,
-                          double atol = 0.0) {
-    if (!isClose(got, expected, rtol, atol)) {
-        std::fprintf(stderr, "FAIL: %s got=%s expected=%s rtol=%s atol=%s\n", label,
-                     num(got, 12).c_str(), num(expected, 12).c_str(), num(rtol, 3).c_str(),
-                     num(atol, 3).c_str());
-        std::fflush(nullptr);
-        std::_Exit(1);
-    }
-}
-
-/**
- * @brief Element-wise tolerance gate for any sized sequence of scalars.
- *
- * Works for `std::vector`, `std::array`, C arrays, `std::initializer_list`,
- * Eigen vectors, Eigen matrices and `.eval()`-ed dense expressions, and
- * anything else with `size()` plus iterators or linear `data()`, with elements
- * convertible to `double`. Sizes must match; the first mismatching element
- * prints as `label[index]` and exits. Lazy Eigen expressions must be evaluated
- * first (`.eval()`), since they have neither iterators nor `data()`.
- */
-template <detail::ScalarSequence R1, detail::ScalarSequence R2>
-inline void checkClose(const char* label, const R1& got, const R2& expected, double tol) {
-    const std::size_t gotSize = static_cast<std::size_t>(std::size(got));
-    const std::size_t expectedSize = static_cast<std::size_t>(std::size(expected));
-    if (gotSize != expectedSize) {
-        std::fprintf(stderr, "FAIL: %s size mismatch got=%zu expected=%zu\n", label, gotSize,
-                     expectedSize);
-        std::fflush(nullptr);
-        std::_Exit(1);
-    }
-    for (std::size_t i = 0; i < gotSize; ++i) {
-        const double g = detail::sequenceAt(got, i);
-        const double e = detail::sequenceAt(expected, i);
-        if (!isCloseAbs(g, e, tol)) {
-            detail::failClose(label, i, g, e, tol);
-        }
-    }
-}
-
-/**
- * @brief AD-scalar tolerance gate: checks **value and adjoint**.
- *
- * Matches any type exposing `val()`/`adj()` convertible to `double` (Stan
- * `var` in the tests today, future chains by the same shape). Both parts must
- * be close within `tol`; mismatches report `label value` / `label adjoint`.
- * Use the `double` overload (or `.val()`) when only the primal should be
- * compared.
- */
-template <detail::ValAdjScalar T, detail::ValAdjScalar U>
-inline void checkClose(const char* label, const T& got, const U& expected, double tol) {
-    const double gotValue = static_cast<double>(got.val());
-    const double expectedValue = static_cast<double>(expected.val());
-    if (!isCloseAbs(gotValue, expectedValue, tol)) {
-        detail::failAdPart(label, "value", gotValue, expectedValue, tol);
-    }
-    const double gotAdjoint = static_cast<double>(got.adj());
-    const double expectedAdjoint = static_cast<double>(expected.adj());
-    if (!isCloseAbs(gotAdjoint, expectedAdjoint, tol)) {
-        detail::failAdPart(label, "adjoint", gotAdjoint, expectedAdjoint, tol);
-    }
-}
-
 } // namespace quantape::util
-
-#define CHECK(cond) ::quantape::util::check(static_cast<bool>(cond), __FILE__, __LINE__, #cond)
 
 #endif // QUANTAPE_UTIL_CHECK_H

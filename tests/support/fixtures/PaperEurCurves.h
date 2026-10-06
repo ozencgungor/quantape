@@ -10,7 +10,6 @@
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/TurnOverlay.h"
-#include "quantape/util/Check.h"
 
 #include <algorithm>
 #include <cmath>
@@ -608,7 +607,7 @@ inline double minimumMonthlyForward(const mk::DiscountCurve<double>& curve, doub
 }
 
 /// Worst absolute reprice error over all pillars; the caller owns the
-/// assertion so the helper never calls the fatal legacy checkClose harness.
+/// assertion so the helper never invokes the retired fatal test harness.
 inline double worstRepriceError(const std::vector<mk::CurvePillar>& pillars,
                                 const mk::DiscountCurve<double>& curve) {
     double worst = 0.0;
