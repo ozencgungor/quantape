@@ -42,6 +42,9 @@ if command -v pre-commit >/dev/null 2>&1; then
 fi
 
 # ── pinned third-party sources (Eigen, Stan Math) ───────────────────────────
+# GoogleTest v1.18.0 is fetched by CMake on the first configure (FetchContent,
+# standalone: GTEST_HAS_ABSL=OFF, BUILD_GMOCK=OFF) into build/*/_deps; no
+# extra setup step is needed.
 "$script_dir/fetch_third_party.sh"
 
 # ── build trees: debug (no benches), release (benches on) ───────────────────
@@ -60,6 +63,7 @@ echo
 echo "next steps:"
 echo "  cmake --build build/debug -j"
 echo "  ctest --test-dir build/debug -j"
+echo "  ctest --test-dir build/debug -L fast   # pre-push fast tier"
 echo "  # or presets: cmake --preset debug && cmake --build --preset debug"
 echo "  repo_tools/format_code.sh --check"
 echo "  repo_tools/check_policy.sh"
