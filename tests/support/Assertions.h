@@ -34,7 +34,7 @@ inline ::testing::AssertionResult closeAbsResult(const char* gotExpr, const char
 /// Scalar relative-tolerance result; the predicate is util::isClose.
 inline ::testing::AssertionResult closeRelResult(const char* gotExpr, const char* expExpr,
                                                  double got, double expected, double rtol,
-                                                 double atol) {
+                                                 double atol = 0.0) {
     if (quantape::util::isClose(got, expected, rtol, atol)) {
         return ::testing::AssertionSuccess();
     }
