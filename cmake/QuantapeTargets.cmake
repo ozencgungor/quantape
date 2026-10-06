@@ -4,6 +4,9 @@
 
 include_guard(GLOBAL)
 
+# gtest_discover_tests() registers one CTest case per gtest test.
+include(GoogleTest)
+
 # Standard warning set (used by targets that had warnings before the split).
 function(quantape_set_warnings target)
     if(MSVC)
@@ -75,6 +78,74 @@ function(quantape_register_test target)
         target_compile_options(${target} PRIVATE -ffp-contract=off)
     endif()
     add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+# Register a GoogleTest executable with per-case CTest discovery.
+#
+# quantape_add_gtest(<target> SOURCES <files...> [STAN] [STAN_DEFS]
+#                    [LIBS <targets...>] [DEFS <defs...>] [FLAGS <flags...>]
+#                    [LABELS <labels...>] [TIMEOUT <sec>])
+#
+# STAN / STAN_DEFS select the Stan link profile and define QTA_TEST_STAN, which
+# gates the Stan PrintTo overloads in tests/support/Printers.h. tests/ is on
+# the include path so every area can `#include "support/GtestSupport.h"`.
+# Each per-area CMakeLists.txt must end with quantape_collect_executables() so
+# `build_all` sees its targets (the function collects the current directory
+# only).
+function(quantape_add_gtest name)
+    cmake_parse_arguments(A "STAN;STAN_DEFS" "TIMEOUT"
+        "SOURCES;LIBS;DEFS;FLAGS;LABELS" ${ARGN})
+    if(NOT A_SOURCES)
+        message(FATAL_ERROR "quantape_add_gtest(${name}): SOURCES required")
+    endif()
+
+    add_executable(${name} ${A_SOURCES})
+    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+    target_link_libraries(${name} PRIVATE quantape GTest::gtest_main ${A_LIBS})
+
+    if(A_STAN)
+        quantape_enable_stan(${name})
+    elseif(A_STAN_DEFS)
+        quantape_enable_stan_defs(${name})
+        target_link_libraries(${name} PRIVATE TBB::tbb)
+    endif()
+    if(A_STAN OR A_STAN_DEFS)
+        target_compile_definitions(${name} PRIVATE QTA_TEST_STAN=1)
+    endif()
+
+    target_compile_definitions(${name} PRIVATE
+        QTA_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data" ${A_DEFS})
+    if(NOT MSVC)
+        target_compile_options(${name} PRIVATE -ffp-contract=off)
+    endif()
+    target_compile_options(${name} PRIVATE ${A_FLAGS})
+
+    if(QUANTAPE_TEST_OPTIMIZATION)
+        if(MSVC)
+            target_compile_options(${name} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O2>)
+        else()
+            target_compile_options(${name} PRIVATE $<$<NOT:$<CONFIG:Debug>>:-O2>)
+        endif()
+    endif()
+    quantape_set_warnings(${name})
+
+    if(NOT A_LABELS)
+        set(A_LABELS unit fast)
+    endif()
+    if(NOT A_TIMEOUT)
+        set(A_TIMEOUT 600)
+    endif()
+    set(QUANTAPE_GTEST_EXTRA_ARGS "" CACHE STRING
+        "Extra gtest arguments for discovery (nightly: --gtest_shuffle;--gtest_repeat=3)")
+
+    gtest_discover_tests(${name}
+        TEST_PREFIX "${name}."
+        PROPERTIES
+            LABELS "${A_LABELS}"
+            TIMEOUT ${A_TIMEOUT}
+        DISCOVERY_MODE POST_BUILD
+        DISCOVERY_TIMEOUT 60
+        EXTRA_ARGS ${QUANTAPE_GTEST_EXTRA_ARGS})
 endfunction()
 
 # Collect all executable targets of the current directory into a global list,
