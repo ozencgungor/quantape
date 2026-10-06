@@ -1,5 +1,5 @@
-#ifndef QUANTAPE_TESTS_PAPER_EUR_CURVES_FIXTURE_H
-#define QUANTAPE_TESTS_PAPER_EUR_CURVES_FIXTURE_H
+#ifndef QUANTAPE_TESTS_SUPPORT_FIXTURES_PAPER_EUR_CURVES_H
+#define QUANTAPE_TESTS_SUPPORT_FIXTURES_PAPER_EUR_CURVES_H
 
 /// Shared EUR curve fixture for the curve replication suite: reference data,
 /// bootstrap instrument sets, curve builders, portfolio helpers and the CSV

@@ -2,6 +2,10 @@
 # Test executables (registered with CTest, runnable directly as well).
 # ============================================================================
 
+# tests/ is on every test target's include path so support/... resolves from
+# this directory and all area subdirectories (directory properties inherit).
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 # --- Converted GoogleTest areas ----------------------------------------------
 # Each area owns one directory with its own CMakeLists.txt; the per-file
 # legacy target below is removed in the same commit as its conversion.
