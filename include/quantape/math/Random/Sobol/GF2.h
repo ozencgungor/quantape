@@ -13,6 +13,13 @@
 #include <cstdint>
 #include <vector>
 
+// Hardware carry-less multiply needs the intrinsic headers; include them at
+// global scope (a nested include inside the namespace would drag libc's
+// declarations into it and break <cstdlib> on GCC).
+#if defined(__PCLMUL__) && defined(__SSE2__)
+#include <immintrin.h>
+#endif
+
 namespace quantape::math::mc {
 namespace gf2 {
 
@@ -39,7 +46,6 @@ inline uint64_t mul(uint64_t a, uint64_t b) {
 }
 
 #if defined(__PCLMUL__) && defined(__SSE2__)
-#include <immintrin.h>
 inline uint64_t mul_hw(uint64_t a, uint64_t b) {
     __m128i va = _mm_set_epi64x(0, a);
     __m128i vb = _mm_set_epi64x(0, b);
