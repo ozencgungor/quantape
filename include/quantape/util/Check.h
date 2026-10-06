@@ -138,6 +138,20 @@ inline void checkClose(const char* label, double got, double expected, double to
     }
 }
 
+/// Relative (NumPy-style) tolerance gate: `|a - b| <= atol + rtol * |b|`.
+/// Use when the magnitudes are large enough that an absolute tolerance sits
+/// below one ULP (e.g. notional-scaled values around 1e5 with a 1e-12 tol).
+inline void checkCloseRel(const char* label, double got, double expected, double rtol,
+                          double atol = 0.0) {
+    if (!isClose(got, expected, rtol, atol)) {
+        std::fprintf(stderr, "FAIL: %s got=%s expected=%s rtol=%s atol=%s\n", label,
+                     num(got, 12).c_str(), num(expected, 12).c_str(), num(rtol, 3).c_str(),
+                     num(atol, 3).c_str());
+        std::fflush(nullptr);
+        std::_Exit(1);
+    }
+}
+
 /**
  * @brief Element-wise tolerance gate for any sized sequence of scalars.
  *

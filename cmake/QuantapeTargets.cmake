@@ -66,6 +66,14 @@ function(quantape_register_test target)
             target_compile_options(${target} PRIVATE $<$<NOT:$<CONFIG:Debug>>:-O2>)
         endif()
     endif()
+    # Test translation units instantiate the engine templates; without FP
+    # contraction the same-expression paths stay bitwise identical across
+    # compilers (GCC fuses multiplies by default, AppleClang does not), which
+    # gates like Euler == Milstein for constant diffusion rely on. Library
+    # targets keep the default (fused) code for speed.
+    if(NOT MSVC)
+        target_compile_options(${target} PRIVATE -ffp-contract=off)
+    endif()
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
 

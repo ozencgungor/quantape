@@ -966,19 +966,26 @@ void testTNewton() {
     // steepest descent (PNET iterd = 0) and converge to a quartic minimum
     // (NLopt parity: plain TNEWTON and TNEWTON_RESTART both succeed here)
     {
+        // Flat quartic minimum: on x86 the line search can hit roundoff before
+        // the 1e-10 gradient tolerance is distinguishable from zero there, so
+        // both successful stop codes are accepted; the solution assertions
+        // below are the real gate (NLopt parity: both modes succeed).
+        const auto convergedQuartic = [](quantape::math::OptimizeResult r) {
+            return r == quantape::math::OptimizeResult::GradientTolReached ||
+                   r == quantape::math::OptimizeResult::RoundoffLimited;
+        };
+
         stan::math::recover_memory();
         quantape::math::TNewton<var> plain(criteria, /*restart=*/false);
         std::vector<double> x0{0.2, 0.0};
-        CHECK(plain.minimize(QuarticNonconvex{}, x0) ==
-              quantape::math::OptimizeResult::GradientTolReached);
+        CHECK(convergedQuartic(plain.minimize(QuarticNonconvex{}, x0)));
         checkClose("tnewton quartic x0", std::fabs(x0[0]), 0.70710678, 1e-6);
         checkClose("tnewton quartic x1", x0[1], 0.0, 1e-6);
 
         stan::math::recover_memory();
         quantape::math::TNewton<var> restarting(criteria, /*restart=*/true);
         std::vector<double> x1{0.2, 0.0};
-        CHECK(restarting.minimize(QuarticNonconvex{}, x1) ==
-              quantape::math::OptimizeResult::GradientTolReached);
+        CHECK(convergedQuartic(restarting.minimize(QuarticNonconvex{}, x1)));
         checkClose("tnewton quartic restart x0", std::fabs(x1[0]), 0.70710678, 1e-6);
         QTA_LOG_INFO("test", "  tnewton quartic(0.2,0): plain and restart both converge");
     }
