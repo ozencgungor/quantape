@@ -2,8 +2,8 @@
 
 // Calendar: value type holding an immutable rule set (weekend mask + holiday
 // rules + ad-hoc closures) and per-instance extra holidays. Holidays are
-// generated per year and cached in a process-wide registry keyed by
-// (rule set, year), so schedule generation hits a small sorted vector.
+// generated per year and cached in the rule set itself, so schedule generation
+// hits a small sorted vector and cache entries die with the rule set.
 //
 // Calendars: SIFMA, Federal Reserve, TARGET, United Kingdom, Japan, plus
 // weekendsOnly()/noHolidays() and joint(). Japan uses the standard equinox
@@ -32,6 +32,19 @@ struct CalendarRuleSet {
     std::vector<Date> closures;   // sorted ad-hoc closures
     std::vector<std::shared_ptr<const CalendarRuleSet>> parents; // joint calendars
     std::function<std::vector<Date>(int)> rule;                  // named calendars
+
+    CalendarRuleSet() = default;
+    // A copy is a new rule set and therefore starts with an empty cache; the
+    // cache is deliberately not copied (it is keyed to this instance).
+    CalendarRuleSet(const CalendarRuleSet& other)
+        : name(other.name), weekendMask(other.weekendMask), closures(other.closures),
+          parents(other.parents), rule(other.rule) {}
+
+    // Lazy per-year holiday cache owned by the rule set itself: entries live
+    // exactly as long as any Calendar referencing this rule set, so a freed
+    // rule set's heap address can never alias another rule set's holidays.
+    mutable std::mutex cacheMutex;
+    mutable std::unordered_map<int, std::shared_ptr<const std::vector<Date>>> yearCache;
 };
 
 inline Date nthWeekdayOfMonth(int year, unsigned month, Weekday weekday, int n) {
@@ -223,21 +236,16 @@ inline std::vector<Date> computeYearHolidays(const CalendarRuleSet& rules, int y
     return dates;
 }
 
-/// Process-wide lazy cache of one year's holidays per rule set.
+/// Lazy per-year holidays for a rule set, cached in the rule set's own map.
 inline std::shared_ptr<const std::vector<Date>>
 yearHolidaysFor(const std::shared_ptr<const CalendarRuleSet>& rules, int year) {
-    static std::mutex mutex;
-    static std::unordered_map<std::uint64_t, std::shared_ptr<const std::vector<Date>>> cache;
-    const auto pointer = reinterpret_cast<std::uintptr_t>(rules.get()) >> 4;
-    const std::uint64_t key = (static_cast<std::uint64_t>(pointer) * 0x9E3779B97F4A7C15ULL) ^
-                              static_cast<std::uint64_t>(static_cast<std::uint32_t>(year));
-    std::lock_guard lock(mutex);
-    const auto it = cache.find(key);
-    if (it != cache.end()) {
+    std::lock_guard lock(rules->cacheMutex);
+    const auto it = rules->yearCache.find(year);
+    if (it != rules->yearCache.end()) {
         return it->second;
     }
     auto holidays = std::make_shared<const std::vector<Date>>(computeYearHolidays(*rules, year));
-    cache.emplace(key, holidays);
+    rules->yearCache.emplace(year, holidays);
     return holidays;
 }
 

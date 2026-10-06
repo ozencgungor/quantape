@@ -142,3 +142,22 @@ TEST(CalendarComposition, jointExtraHolidaysAndReopenings) {
     EXPECT_TRUE(sifma.isBusinessDay(event));
     EXPECT_FALSE(sifma.withExtraHolidays({event}).withoutHoliday(event).isHoliday(event));
 }
+
+TEST(CalendarComposition, recycledRuleSetsKeepTheirOwnHolidayCache) {
+    // Regression: the year cache was process-wide and keyed by the raw rule-set
+    // address, so a freed temporary joint calendar's holidays leaked into the
+    // next rule set that reused its heap block. Thanksgiving 2024 is a SIFMA
+    // holiday but a TARGET business day.
+    const Date thanksgiving(2024, 11, 28);
+    for (int i = 0; i < 64; ++i) {
+        SCOPED_TRACE(i);
+        {
+            const Calendar closed = Calendar::joint(Calendar::sifma(), Calendar::japan());
+            ASSERT_FALSE(closed.isBusinessDay(thanksgiving));
+        }
+        const Calendar targetOnly = Calendar::joint(Calendar::target(), Calendar::weekendsOnly());
+        EXPECT_TRUE(targetOnly.isBusinessDay(thanksgiving));
+        EXPECT_TRUE(Calendar::target().isBusinessDay(thanksgiving));
+        EXPECT_FALSE(Calendar::sifma().isBusinessDay(thanksgiving));
+    }
+}
