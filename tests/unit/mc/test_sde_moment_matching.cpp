@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <ostream>
 #include <vector>
 
 #include "support/GtestSupport.h"
@@ -41,6 +42,18 @@ struct QeCase {
     const char* tag;
     const char* id;
 };
+
+void PrintTo(const QeCase& c, std::ostream* os) {
+    *os << c.id;
+}
+
+struct StepsParam {
+    std::size_t steps;
+};
+
+void PrintTo(const StepsParam& p, std::ostream* os) {
+    *os << "Steps" << p.steps;
+}
 
 // psi = s2 / m^2
 const QeCase kQeCases[] = {
@@ -153,10 +166,10 @@ TEST(MomentMatching, uniformStreamContract) {
     EXPECT_TRUE(allDifferent);
 }
 
-class CirMomentMatchingTest : public ::testing::TestWithParam<std::size_t> {};
+class CirMomentMatchingTest : public ::testing::TestWithParam<StepsParam> {};
 
 TEST_P(CirMomentMatchingTest, cirTerminalMomentsExact) {
-    const std::size_t nSteps = GetParam();
+    const std::size_t nSteps = GetParam().steps;
     const std::size_t nPaths = kCirPaths;
 
     // Exact CIR terminal moments (continuous):
@@ -203,9 +216,9 @@ TEST_P(CirMomentMatchingTest, cirTerminalMomentsExact) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Table, CirMomentMatchingTest,
-                         ::testing::Values(std::size_t(4), std::size_t(52)),
-                         [](const ::testing::TestParamInfo<std::size_t>& info) {
-                             return "Steps" + std::to_string(info.param);
+                         ::testing::Values(StepsParam{4}, StepsParam{52}),
+                         [](const ::testing::TestParamInfo<StepsParam>& info) {
+                             return "Steps" + std::to_string(info.param.steps);
                          });
 
 TEST(MomentMatching, cirReproducibleAcrossRuns) {

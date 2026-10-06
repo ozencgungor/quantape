@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <ostream>
 #include <random>
 #include <string>
 #include <vector>
@@ -145,6 +146,10 @@ struct TValue2DPair {
     int d;
     int j;
 };
+
+void PrintTo(const TValue2DPair& p, std::ostream* os) {
+    *os << "D" << p.d << "J" << p.j;
+}
 
 std::vector<TValue2DPair> allPairs() {
     std::vector<TValue2DPair> pairs;

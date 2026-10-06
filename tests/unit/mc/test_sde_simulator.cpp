@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 
@@ -127,6 +128,10 @@ struct OuGridCase {
     const char* name;
     bool irregular;
 };
+
+void PrintTo(const OuGridCase& c, std::ostream* os) {
+    *os << c.name;
+}
 
 } // namespace
 
