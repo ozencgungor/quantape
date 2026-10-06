@@ -11,25 +11,20 @@
 //   - Estimator: mean/variance/SE
 //
 // Stan-free: includes only mc/ headers + Eigen.
-#include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/Schemes.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
-#include "quantape/util/Check.h"
 
 #include <Eigen/Dense>
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <stdexcept>
 #include <vector>
-using quantape::util::checkClose;
-using quantape::util::isFiniteBitwise;
+
+#include "support/GtestSupport.h"
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -110,52 +105,69 @@ struct CirModel {
     }
 };
 
-// ── Tests ──
+struct TerminalCall {
+    double strike = 100.0;
+    void operator()(const PathBlock<double>& block, Eigen::VectorXd& out) const {
+        const auto& xT = block.states.back();
+        out.resize(static_cast<Eigen::Index>(block.nPaths));
+        for (Eigen::Index p = 0; p < xT.cols(); ++p) {
+            out(p) = std::max(xT(0, p) - strike, 0.0);
+        }
+    }
+};
 
-void testTimeGrid() {
+struct ConstantPayoff {
+    double value = 1.0;
+    void operator()(const PathBlock<double>& block, Eigen::VectorXd& out) const {
+        out = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(block.nPaths), value);
+    }
+};
+
+struct OuGridCase {
+    const char* name;
+    bool irregular;
+};
+
+} // namespace
+
+TEST(SdeTimeGrid, uniformIrregularAndValidation) {
     const TimeGrid uniform(1.0, 4);
-    CHECK(uniform.nSteps() == 4);
-    checkClose("uniform dt", uniform.dt(0), 0.25, 0.0);
-    checkClose("uniform tMax", uniform.tMax(), 1.0, 0.0);
+    EXPECT_EQ(uniform.nSteps(), 4u);
+    CHECK_CLOSE("uniform dt", uniform.dt(0), 0.25, 0.0);
+    CHECK_CLOSE("uniform tMax", uniform.tMax(), 1.0, 0.0);
 
     const TimeGrid irregular(std::vector<double>{0.0, 0.1, 0.4, 1.0});
-    CHECK(irregular.nSteps() == 3);
-    checkClose("irregular dt0", irregular.dt(0), 0.1, 1e-15);
-    checkClose("irregular dt2", irregular.dt(2), 0.6, 1e-15);
+    EXPECT_EQ(irregular.nSteps(), 3u);
+    CHECK_CLOSE("irregular dt0", irregular.dt(0), 0.1, 1e-15);
+    CHECK_CLOSE("irregular dt2", irregular.dt(2), 0.6, 1e-15);
 
-    bool threw = false;
-    try {
-        TimeGrid bad(std::vector<double>{0.0, 0.5, 0.5});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-    QTA_LOG_INFO("test", "  [ok] TimeGrid: uniform/irregular/validation");
+    EXPECT_THROW(TimeGrid(std::vector<double>{0.0, 0.5, 0.5}), std::invalid_argument);
 }
 
-void testSourceContract() {
+TEST(SdeSource, blockContractIndependenceAndMoments) {
     IidGaussianSource<> source(3, 42);
-    CHECK(source.factorCount() == 3);
+    EXPECT_EQ(source.factorCount(), 3u);
 
     Eigen::MatrixXd block;
     source.fill(5, 10, 4, block);
-    CHECK(block.rows() == 3 && block.cols() == 4);
+    EXPECT_EQ(block.rows(), 3);
+    EXPECT_EQ(block.cols(), 4);
 
     // block fill == per-path fills for the same (path, step)
     for (std::size_t j = 0; j < 4; ++j) {
         Eigen::MatrixXd single;
         source.fill(5, 10 + j, 1, single);
         for (Eigen::Index i = 0; i < 3; ++i) {
-            CHECK(single(i, 0) == block(i, static_cast<Eigen::Index>(j)));
+            EXPECT_EQ(single(i, 0), block(i, static_cast<Eigen::Index>(j)));
         }
     }
     // different (path, step, factor) => different draws
     Eigen::MatrixXd other;
     source.fill(6, 10, 4, other);
-    CHECK(!bitwiseEqual(block, other));
+    EXPECT_FALSE(bitwiseEqual(block, other));
     Eigen::MatrixXd otherPath;
     source.fill(5, 11, 4, otherPath);
-    CHECK(!bitwiseEqual(block, otherPath));
+    EXPECT_FALSE(bitwiseEqual(block, otherPath));
     // valid normal draws: sample mean/variance sanity over many draws
     IidGaussianSource<> many(1, 7);
     const std::size_t n = 200000;
@@ -171,25 +183,29 @@ void testSourceContract() {
     }
     const double mean = sum / static_cast<double>(n);
     const double var = sumSq / static_cast<double>(n) - mean * mean;
-    checkClose("keyed normal mean", mean, 0.0, 0.02);
-    checkClose("keyed normal var", var, 1.0, 0.05);
-    QTA_LOG_INFO("test", "  [ok] RandomSource: block contract, independence, moments");
+    CHECK_CLOSE("keyed normal mean", mean, 0.0, 0.02);
+    CHECK_CLOSE("keyed normal var", var, 1.0, 0.05);
 }
 
-void testOuMoments() {
+class SdeOuMomentTest : public ::testing::TestWithParam<OuGridCase> {};
+
+TEST_P(SdeOuMomentTest, discreteMomentsMatchRecursion) {
     const double kappa = 1.5, level = 0.8, sigma = 0.4, x0 = 2.0;
     const std::size_t nSteps = 32;
-    const TimeGrid grid(1.0, nSteps);
     const std::size_t nPaths = 200000;
 
-    std::vector<std::vector<double>> theta(nSteps, {kappa, level, sigma});
+    const TimeGrid uniform(1.0, nSteps);
+    const TimeGrid irregular(std::vector<double>{0.0, 0.1, 0.25, 0.6, 1.0});
+    const TimeGrid& grid = GetParam().irregular ? irregular : uniform;
+
+    std::vector<std::vector<double>> theta(grid.nSteps(), {kappa, level, sigma});
     const SdeSimulator<double> simulator(grid, theta);
     const IidGaussianSource<> source(1, 123);
 
     // Exact discrete Euler moments for a linear recursion:
     //   E_{k+1} = (1 - k dt) E_k + k l dt,  V_{k+1} = (1 - k dt)^2 V_k + s^2 dt
     double e = x0, v = 0.0;
-    for (std::size_t k = 0; k < nSteps; ++k) {
+    for (std::size_t k = 0; k < grid.nSteps(); ++k) {
         const double dt = grid.dt(k);
         v = (1.0 - kappa * dt) * (1.0 - kappa * dt) * v + sigma * sigma * dt;
         e = (1.0 - kappa * dt) * e + kappa * level * dt;
@@ -211,39 +227,18 @@ void testOuMoments() {
     const double var = sumSq / n - mean * mean;
     const double seMean = std::sqrt(v / n);
     const double seVar = v * std::sqrt(2.0 / n);
-    checkClose("OU mean", mean, e, 5.0 * seMean);
-    checkClose("OU var", var, v, 6.0 * seVar);
-
-    // Irregular grid: same recursion with per-step dt
-    const TimeGrid irregular(std::vector<double>{0.0, 0.1, 0.25, 0.6, 1.0});
-    std::vector<std::vector<double>> thetaIrr(irregular.nSteps(), {kappa, level, sigma});
-    const SdeSimulator<double> simulatorIrr(irregular, thetaIrr);
-    e = x0;
-    v = 0.0;
-    for (std::size_t k = 0; k < irregular.nSteps(); ++k) {
-        const double dt = irregular.dt(k);
-        v = (1.0 - kappa * dt) * (1.0 - kappa * dt) * v + sigma * sigma * dt;
-        e = (1.0 - kappa * dt) * e + kappa * level * dt;
-    }
-    const auto blocksIrr =
-        simulatorIrr.simulate(Eigen::VectorXd::Constant(1, x0), driftOf(OuModel{}),
-                              diffusionOf(OuModel{}), source, nPaths, 8192);
-    sum = sumSq = 0.0;
-    for (const auto& b : blocksIrr) {
-        const auto& x = b.states.back();
-        for (Eigen::Index p = 0; p < x.cols(); ++p) {
-            sum += x(0, p);
-            sumSq += x(0, p) * x(0, p);
-        }
-    }
-    const double meanIrr = sum / nPaths;
-    const double varIrr = sumSq / nPaths - meanIrr * meanIrr;
-    checkClose("OU irregular mean", meanIrr, e, 5.0 * std::sqrt(v / nPaths));
-    checkClose("OU irregular var", varIrr, v, 6.0 * v * std::sqrt(2.0 / nPaths));
-    QTA_LOG_INFO("test", "  [ok] OU discrete moments: uniform + irregular grids");
+    CHECK_CLOSE("OU mean", mean, e, 5.0 * seMean);
+    CHECK_CLOSE("OU var", var, v, 6.0 * seVar);
 }
 
-void testGbmPrice() {
+INSTANTIATE_TEST_SUITE_P(Table, SdeOuMomentTest,
+                         ::testing::Values(OuGridCase{"uniform", false},
+                                           OuGridCase{"irregular", true}),
+                         [](const ::testing::TestParamInfo<OuGridCase>& info) {
+                             return info.param.name;
+                         });
+
+TEST(SdeSimulatorGbm, eulerMeanAndBlackScholesCall) {
     const double mu = 0.05, sigma = 0.2, s0 = 100.0, k = 100.0, t = 1.0;
     const std::size_t nSteps = 250;
     const TimeGrid grid(t, nSteps);
@@ -268,8 +263,8 @@ void testGbmPrice() {
         }
     }
     const double mean = sum / nPaths;
-    checkClose("GBM Euler mean", mean, eulerMean,
-               5.0 * eulerMean * sigma * std::sqrt(1.0 / nPaths));
+    CHECK_CLOSE("GBM Euler mean", mean, eulerMean,
+                5.0 * eulerMean * sigma * std::sqrt(1.0 / nPaths));
 
     // Terminal call vs Black-Scholes (Euler bias allowed; 1.5% relative)
     double callSum = 0.0;
@@ -284,12 +279,10 @@ void testGbmPrice() {
     // (discounting belongs to the payoff layer): under drift mu this is
     // e^{mu T} * BS(r = mu).
     const double reference = std::exp(mu * t) * bsCall(s0, k, mu, sigma, t);
-    checkClose("GBM undiscounted call", call, reference, 0.01 * reference);
-    QTA_LOG_INFO("test", "  [ok] GBM: Euler mean exact, E[call] = {} vs analytic {}",
-                 quantape::util::num(call, 4), quantape::util::num(reference, 4));
+    CHECK_CLOSE("GBM undiscounted call", call, reference, 0.01 * reference);
 }
 
-void testCirMean() {
+TEST(SdeSimulatorCir, meanVarianceAndNegatives) {
     const double kappa = 2.0, level = 0.04, sigma = 0.2, v0 = 0.04;
     const std::size_t nSteps = 64;
     const TimeGrid grid(0.25, nSteps);
@@ -322,13 +315,12 @@ void testCirMean() {
     }
     const double mean = sum / nPaths;
     const double var = sumSq / nPaths - mean * mean;
-    checkClose("CIR mean", mean, e, 5.0 * std::sqrt(v / nPaths));
-    checkClose("CIR var (approx)", var, v, 0.1 * v);
-    CHECK(negatives * 10 < nPaths); // Euler may dip negative rarely; not the norm
-    QTA_LOG_INFO("test", "  [ok] CIR: mean exact recursion, var close, negatives={}", negatives);
+    CHECK_CLOSE("CIR mean", mean, e, 5.0 * std::sqrt(v / nPaths));
+    CHECK_CLOSE("CIR var (approx)", var, v, 0.1 * v);
+    EXPECT_LT(negatives * 10, nPaths); // Euler may dip negative rarely; not the norm
 }
 
-void testReproducibility() {
+TEST(SdeSimulatorReproducibility, pathEqualsBlockAndBlockSizeInvariant) {
     const std::size_t nSteps = 16;
     const TimeGrid grid(0.5, nSteps);
     std::vector<std::vector<double>> theta(nSteps, {1.0, 0.5, 0.3});
@@ -355,30 +347,10 @@ void testReproducibility() {
             }
         }
     }
-    CHECK(maxDiff == 0.0);
-    QTA_LOG_INFO("test",
-                 "  [ok] reproducibility: simulatePath == block path, block-size invariant");
+    EXPECT_EQ(maxDiff, 0.0);
 }
 
-struct TerminalCall {
-    double strike = 100.0;
-    void operator()(const PathBlock<double>& block, Eigen::VectorXd& out) const {
-        const auto& xT = block.states.back();
-        out.resize(static_cast<Eigen::Index>(block.nPaths));
-        for (Eigen::Index p = 0; p < xT.cols(); ++p) {
-            out(p) = std::max(xT(0, p) - strike, 0.0);
-        }
-    }
-};
-
-struct ConstantPayoff {
-    double value = 1.0;
-    void operator()(const PathBlock<double>& block, Eigen::VectorXd& out) const {
-        out = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(block.nPaths), value);
-    }
-};
-
-void testEstimator() {
+TEST(SdeEstimator, constantAndCall) {
     const double sigma = 0.2, s0 = 100.0, k = 100.0, t = 1.0;
     const std::size_t nSteps = 250;
     const TimeGrid grid(t, nSteps);
@@ -391,25 +363,20 @@ void testEstimator() {
 
     // Constant payoff: mean/SE sanity
     const auto constant = quantape::mc::estimate(blocks, ConstantPayoff{2.5});
-    checkClose("estimator constant mean", constant.mean, 2.5, 0.0);
-    checkClose("estimator constant var", constant.variance, 0.0, 0.0);
-    CHECK(constant.nPaths == nPaths);
+    CHECK_CLOSE("estimator constant mean", constant.mean, 2.5, 0.0);
+    CHECK_CLOSE("estimator constant var", constant.variance, 0.0, 0.0);
+    EXPECT_EQ(constant.nPaths, nPaths);
 
     // European call: SE consistency (|mean - BS| within ~5 SE)
     const auto call = quantape::mc::estimate(blocks, TerminalCall{k});
     const double reference = bsCall(s0, k, 0.0, sigma, t); // drift 0 => undiscounted
-    CHECK(std::fabs(call.mean - reference) <= 5.0 * call.stdError + 0.01 * reference);
-    QTA_LOG_INFO("test", "  [ok] estimator: call = {} +/- {} vs BS {}",
-                 quantape::util::num(call.mean, 4), quantape::util::num(call.stdError, 4),
-                 quantape::util::num(reference, 4));
+    EXPECT_LE(std::fabs(call.mean - reference), 5.0 * call.stdError + 0.01 * reference);
 }
-
-} // namespace
 
 // Parallel schedule must be deterministic: identical blocks bitwise, and
 // the estimator combines block partials in order (same result as sequential
 // up to floating-point summation order).
-void testParallelSchedule() {
+TEST(SdeParallelSchedule, blocksAndEstimatorBitwise) {
     const std::size_t nSteps = 64;
     const TimeGrid grid(1.0, nSteps);
     std::vector<std::vector<double>> theta(nSteps, {1.0, 0.5, 0.3});
@@ -424,7 +391,7 @@ void testParallelSchedule() {
     const auto parBlocks =
         simulator.simulate(x0, driftOf(OuModel{}), diffusionOf(OuModel{}), parSource, 20000, 1024,
                            quantape::mc::Schedule::Parallel);
-    CHECK(seqBlocks.size() == parBlocks.size());
+    EXPECT_EQ(seqBlocks.size(), parBlocks.size());
     double maxDiff = 0.0;
     for (std::size_t bi = 0; bi < seqBlocks.size(); ++bi) {
         for (std::size_t k = 0; k < seqBlocks[bi].states.size(); ++k) {
@@ -432,16 +399,16 @@ void testParallelSchedule() {
                 maxDiff, (seqBlocks[bi].states[k] - parBlocks[bi].states[k]).cwiseAbs().maxCoeff());
         }
     }
-    CHECK(maxDiff == 0.0);
+    EXPECT_EQ(maxDiff, 0.0);
 
     const auto seqEstimate =
         quantape::mc::estimate(seqBlocks, TerminalCall{100.0}, quantape::mc::Schedule::Sequential);
     const auto parEstimate =
         quantape::mc::estimate(parBlocks, TerminalCall{100.0}, quantape::mc::Schedule::Parallel);
-    checkClose("parallel estimator mean", parEstimate.mean, seqEstimate.mean,
-               1e-12 * std::fabs(seqEstimate.mean) + 1e-14);
-    checkClose("parallel estimator var", parEstimate.variance, seqEstimate.variance,
-               1e-12 * seqEstimate.variance + 1e-14);
+    CHECK_CLOSE("parallel estimator mean", parEstimate.mean, seqEstimate.mean,
+                1e-12 * std::fabs(seqEstimate.mean) + 1e-14);
+    CHECK_CLOSE("parallel estimator var", parEstimate.variance, seqEstimate.variance,
+                1e-12 * seqEstimate.variance + 1e-14);
 
     // Streaming parallel: identical block values, arbitrary call order
     const IidGaussianSource<> streamSeqSource(1, 4242);
@@ -460,21 +427,5 @@ void testParallelSchedule() {
             parLast[blockIndex] = block.states.back()(0, 0);
         },
         quantape::mc::Schedule::Parallel);
-    CHECK(seqLast == parLast);
-
-    QTA_LOG_INFO("test",
-                 "  [ok] parallel schedule: bitwise block equality, estimator order-stable");
-}
-
-int main() {
-    testTimeGrid();
-    testSourceContract();
-    testOuMoments();
-    testGbmPrice();
-    testCirMean();
-    testReproducibility();
-    testEstimator();
-    testParallelSchedule();
-    QTA_LOG_INFO("test", "ALL SDE SIMULATOR TESTS PASSED");
-    return 0;
+    EXPECT_TRUE(seqLast == parLast);
 }

@@ -8,17 +8,16 @@
 //     pick is at least as good as every candidate (small exhaustive check)
 //
 // Stan/Eigen-free: standard library + the Sobol headers only.
-#include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/CBCSearch.h"
-#include "quantape/util/Check.h"
 
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <random>
+#include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape::math::mc;
 using namespace quantape::math::mc::sobol;
@@ -120,60 +119,94 @@ bool brutePropertyA(const std::vector<Entry>& entries, int d) {
     return bruteFullRank(rows.data(), d);
 }
 
-} // namespace
-
-int main() {
-    const auto entries = fixtures();
-
-    // Direction matrices: dimension 1 is the identity.
-    std::vector<DirectionMatrix> matrices(9);
+std::vector<DirectionMatrix> buildMatrices(const std::vector<Entry>& entries) {
+    std::vector<DirectionMatrix> matrices(entries.size() + 2);
     matrices[0] = identityMatrix();
     for (std::size_t i = 0; i < entries.size(); ++i) {
         matrices[i + 1] = directionMatrix(entries[i]);
     }
-    for (int r = 0; r < 32; ++r) {
-        CHECK(matrices[0].rows[static_cast<std::size_t>(r)] == (1u << r));
-    }
+    return matrices;
+}
 
-    // Fast t-value == brute force (every pair, m = 1..12), and the published
-    // Table 2.1 values at m = 12.
-    const int table21[9][9] = {
-        {},
-        {},
-        {0},
-        {1, 1},
-        {2, 2, 2},
-        {2, 1, 2, 2},
-        {2, 1, 2, 2, 2},
-        {3, 2, 1, 2, 2, 1},
-        {2, 3, 3, 2, 3, 2, 3},
-    };
-    int checked = 0;
+// Published Table 2.1 values at m = 12; table21[d][j-1].
+constexpr int kTable21[9][9] = {
+    {},
+    {},
+    {0},
+    {1, 1},
+    {2, 2, 2},
+    {2, 1, 2, 2},
+    {2, 1, 2, 2, 2},
+    {3, 2, 1, 2, 2, 1},
+    {2, 3, 3, 2, 3, 2, 3},
+};
+
+struct TValue2DPair {
+    int d;
+    int j;
+};
+
+std::vector<TValue2DPair> allPairs() {
+    std::vector<TValue2DPair> pairs;
     for (int d = 2; d <= 8; ++d) {
         for (int j = 1; j < d; ++j) {
-            for (int m = 1; m <= 12; ++m) {
-                const int fast = tValue2D(matrices[j - 1], matrices[d - 1], m);
-                const int brute = bruteTValue2D(matrices[j - 1], matrices[d - 1], m);
-                CHECK(fast == brute);
-                ++checked;
-            }
-            CHECK(tValue2D(matrices[j - 1], matrices[d - 1], 12) == table21[d][j - 1]);
+            pairs.push_back({d, j});
         }
     }
-    QTA_LOG_INFO("test", "  [ok] tValue2D == brute force ({} checks), Table 2.1 values match",
-                 checked);
+    return pairs;
+}
 
-    // Property A: incremental checker agrees with an independent determinant.
+} // namespace
+
+class TValue2DTest : public ::testing::TestWithParam<TValue2DPair> {
+protected:
+    std::vector<Entry> entries = fixtures();
+    std::vector<DirectionMatrix> matrices = buildMatrices(entries);
+};
+
+TEST(SobolQuality, identityDirectionMatrix) {
+    const std::vector<DirectionMatrix> matrices = buildMatrices(fixtures());
+    for (int r = 0; r < 32; ++r) {
+        EXPECT_EQ(matrices[0].rows[static_cast<std::size_t>(r)], (1u << r));
+    }
+}
+
+TEST_P(TValue2DTest, fastEqualsBruteAndPublishedTable21) {
+    const int d = GetParam().d;
+    const int j = GetParam().j;
+    int checked = 0;
+    for (int m = 1; m <= 12; ++m) {
+        const int fast = tValue2D(matrices[j - 1], matrices[d - 1], m);
+        const int brute = bruteTValue2D(matrices[j - 1], matrices[d - 1], m);
+        EXPECT_EQ(fast, brute);
+        ++checked;
+    }
+    EXPECT_EQ(tValue2D(matrices[j - 1], matrices[d - 1], 12), kTable21[d][j - 1]);
+    RecordProperty("checks", checked);
+}
+
+INSTANTIATE_TEST_SUITE_P(All, TValue2DTest, ::testing::ValuesIn(allPairs()),
+                         [](const ::testing::TestParamInfo<TValue2DPair>& info) {
+                             return "D" + std::to_string(info.param.d) + "J" +
+                                    std::to_string(info.param.j);
+                         });
+
+TEST(SobolQuality, propertyACheckerMatchesIndependentDeterminant) {
+    const std::vector<Entry> entries = fixtures();
     PropertyAChecker checker(64);
-    CHECK(checker.add(entries[0])); // dimension 2
+    EXPECT_TRUE(checker.add(entries[0])); // dimension 2
     for (std::size_t i = 1; i < entries.size(); ++i) {
-        CHECK(checker.accepts(entries[i]));
-        CHECK(checker.add(entries[i]));
+        EXPECT_TRUE(checker.accepts(entries[i]));
+        EXPECT_TRUE(checker.add(entries[i]));
     }
     for (int d = 1; d <= static_cast<int>(entries.size()) + 1; ++d) {
-        CHECK(brutePropertyA(entries, d));
+        EXPECT_TRUE(brutePropertyA(entries, d));
     }
-    QTA_LOG_INFO("test", "  [ok] Property A checker matches independent determinant");
+}
+
+TEST(SobolQuality, searchDeterministicFiniteAndOptimal) {
+    const std::vector<Entry> entries = fixtures();
+    const std::vector<DirectionMatrix> matrices = buildMatrices(entries);
 
     // Search: finite deterministic score; the pick is optimal among the
     // evaluated candidates (seed pass plus pruned pass with a tiny budget).
@@ -190,7 +223,7 @@ int main() {
     context.candidates = 16;
 
     const auto polys = gf2::enumerate_primitive(5);
-    CHECK(!polys.empty());
+    EXPECT_FALSE(polys.empty());
     const std::uint64_t poly = polys[0];
     std::vector<WorkItem> items{{9, poly, 5, SearchLevel::WINDOWED, 0xabcULL}};
 
@@ -198,67 +231,59 @@ int main() {
     auto resA = process_batch(items, ctxA, 1);
     auto ctxB = context;
     auto resB = process_batch(items, ctxB, 1);
-    CHECK(resA.size() == 1 && resB.size() == 1);
-    CHECK(resA[0].score >= 0.0 && resA[0].score < kNoScore);
-    CHECK(resA[0].m == resB[0].m);
-    CHECK(resA[0].score == resB[0].score);
+    EXPECT_TRUE(resA.size() == 1 && resB.size() == 1);
+    EXPECT_TRUE(resA[0].score >= 0.0 && resA[0].score < kNoScore);
+    EXPECT_EQ(resA[0].m, resB[0].m);
+    EXPECT_EQ(resA[0].score, resB[0].score);
 
     // The chosen candidate must be at least as good as every candidate
     // regenerated from the same deterministic stream.
-    {
-        std::uint64_t state = 0xabcULL;
-        const DirectionMatrix chosen = directionMatrixFor(poly, 5, resA[0].m);
-        CHECK(criterionD(chosen, context.previous, context.weights, context.criterion) ==
+    std::uint64_t state = 0xabcULL;
+    const DirectionMatrix chosen = directionMatrixFor(poly, 5, resA[0].m);
+    EXPECT_EQ(criterionD(chosen, context.previous, context.weights, context.criterion),
               resA[0].score);
-        for (int i = 0; i < 16; ++i) {
-            const auto m = detail::randomDirectionSet(state, 5);
-            const DirectionMatrix dm = directionMatrixFor(poly, 5, m);
-            const double score =
-                criterionD(dm, context.previous, context.weights, context.criterion);
-            CHECK(resA[0].score <= score);
-        }
+    for (int i = 0; i < 16; ++i) {
+        const auto m = detail::randomDirectionSet(state, 5);
+        const DirectionMatrix dm = directionMatrixFor(poly, 5, m);
+        const double score = criterionD(dm, context.previous, context.weights, context.criterion);
+        EXPECT_LE(resA[0].score, score);
     }
-    QTA_LOG_INFO("test", "  [ok] search: deterministic, finite score, optimal among candidates");
+}
 
+TEST(SobolQuality, fuzzFastEqualsBruteAndSymmetric) {
     // Fuzz: fast t-value == brute force and symmetric for random valid direction
     // sets (degrees 1..12) and the high-degree fixtures, all m = 1..31.
-    {
-        std::mt19937_64 rng(0xC0FFEEULL);
-        std::vector<DirectionMatrix> pool;
-        for (int deg = 1; deg <= 12; ++deg) {
-            const auto polys = gf2::enumerate_primitive(deg);
-            CHECK(!polys.empty());
-            for (int t = 0; t < 8; ++t) {
-                Entry e;
-                e.dim = 0;
-                e.s = static_cast<uint32_t>(deg);
-                e.a = gf2::encode_a(polys[rng() % polys.size()], deg);
-                e.m.resize(static_cast<size_t>(deg));
-                for (int k = 1; k <= deg; ++k) {
-                    e.m[static_cast<size_t>(k - 1)] = ((rng() % (1ULL << (k - 1))) << 1) | 1;
-                }
-                pool.push_back(directionMatrix(e));
+    std::mt19937_64 rng(0xC0FFEEULL);
+    std::vector<DirectionMatrix> pool;
+    for (int deg = 1; deg <= 12; ++deg) {
+        const auto polys = gf2::enumerate_primitive(deg);
+        EXPECT_FALSE(polys.empty());
+        for (int t = 0; t < 8; ++t) {
+            Entry e;
+            e.dim = 0;
+            e.s = static_cast<uint32_t>(deg);
+            e.a = gf2::encode_a(polys[rng() % polys.size()], deg);
+            e.m.resize(static_cast<size_t>(deg));
+            for (int k = 1; k <= deg; ++k) {
+                e.m[static_cast<size_t>(k - 1)] = ((rng() % (1ULL << (k - 1))) << 1) | 1;
             }
+            pool.push_back(directionMatrix(e));
         }
-        const auto high = highDegreeFixtures();
-        for (const auto& h : high) {
-            pool.push_back(directionMatrix(h));
-        }
-        long checks = 0;
-        for (int p = 0; p < 400; ++p) {
-            const DirectionMatrix& a = pool[rng() % pool.size()];
-            const DirectionMatrix& b = pool[rng() % pool.size()];
-            for (int m = 1; m <= 31; ++m) {
-                const int ab = tValue2D(a, b, m);
-                CHECK(ab == tValue2D(b, a, m));
-                CHECK(ab == bruteTValue2D(a, b, m));
-                ++checks;
-            }
-        }
-        QTA_LOG_INFO("test", "  [ok] fuzz: {} checks fast==brute and symmetric (degrees 1-18)",
-                     checks);
     }
-
-    QTA_LOG_INFO("test", "ALL SOBOL QUALITY TESTS PASSED");
-    return 0;
+    const auto high = highDegreeFixtures();
+    for (const auto& h : high) {
+        pool.push_back(directionMatrix(h));
+    }
+    long checks = 0;
+    for (int p = 0; p < 400; ++p) {
+        const DirectionMatrix& a = pool[rng() % pool.size()];
+        const DirectionMatrix& b = pool[rng() % pool.size()];
+        for (int m = 1; m <= 31; ++m) {
+            const int ab = tValue2D(a, b, m);
+            EXPECT_EQ(ab, tValue2D(b, a, m));
+            EXPECT_EQ(ab, bruteTValue2D(a, b, m));
+            ++checks;
+        }
+    }
+    RecordProperty("checks", checks);
 }
