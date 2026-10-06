@@ -17,52 +17,29 @@
  *   `fvar<var>` → express gradient as var operations;
  *               AD differentiates through them for the Hessian
  *
- * Functions that know their Hessian analytically can optionally use
- * make_callback_var inside `fvar<var>` for even fewer tape nodes.
- *
- * The key insight: for `fvar<var>`, the tangent is  J · d  where J (the
- * Jacobian) is expressed as var operations. When stan::math::hessian
- * calls grad() on that tangent, reverse-mode flows through J's var graph
- * — giving the Hessian automatically, regardless of how J was computed.
+ * This is a NOGATE demo file: the per-chain comparisons are recorded as test
+ * properties (not asserted) until the P2 assertion backfill lands.
  */
 
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
+#include <iterator>
+#include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using stan::math::fvar;
 using stan::math::var;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GENERIC HELPER: ad_apply
-//
-// Given:
-//   value_fn(doubles...)        → double value
-//   grad_as_var_fn(vars...)     → {var value, array<var> gradient}
-//
-// Produces correct overloads for var and `fvar<var>`.
-//
-// For var:       calls grad_as_var_fn, extracts doubles, makes callback
-// For `fvar<var>`: calls grad_as_var_fn with val-level vars,
-//                forms tangent = Σ grad_i * d_i,
-//                returns `fvar<var>`(value, tangent)
-//
-// The gradient entries are var — so AD can differentiate through them.
-// If a function CAN provide closed-form Hessian, it overrides `fvar<var>`
-// with nested make_callback_var for even more speed.
-// ═══════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LAYER 1: CURVE INTERPOLATION (Level 1 — gradient known, Hessian via AD)
@@ -406,6 +383,8 @@ struct NaiveChainFunctor {
 // BENCHMARK
 // ═══════════════════════════════════════════════════════════════════════════
 
+namespace {
+
 template <typename F>
 double bench_us(F&& fn, int N) {
     for (int i = 0; i < std::min(N / 10, 1000); ++i)
@@ -417,64 +396,34 @@ double bench_us(F&& fn, int N) {
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
 }
 
-int main() {
-    QTA_LOG_INFO("test", "╔═══════════════════════════════════════════════════════════════╗\n"
-                         "║  Mixed Analytical/AD Hessian: Multi-Layer Pricing Chain       ║\n"
-                         "╚═══════════════════════════════════════════════════════════════╝\n");
+constexpr int kN_Pillars = 6;
+constexpr int kBenchN = 50'000;
+const double kPillarTimes[] = {0.25, 0.5, 1.0, 2.0, 5.0, 10.0};
+const double kPillarRates[] = {0.02, 0.025, 0.03, 0.035, 0.04, 0.045};
+constexpr double kEvalT = 1.5; // evaluate at T=1.5 (between pillars 2 and 3)
+// Curve rate ~3.25% → S = rate*100 ≈ 3.25, so set K near ATM
+constexpr double kVol = 0.30;
+constexpr double kStrike = 3.3;
+constexpr double kT = 1.0;
+constexpr double kFdStep = 1e-5;
 
-    // Setup: 6-pillar yield curve
-    constexpr int N_PILLARS = 6;
-    std::vector<double> pillar_times = {0.25, 0.5, 1.0, 2.0, 5.0, 10.0};
-    std::vector<double> pillar_rates = {0.02, 0.025, 0.03, 0.035, 0.04, 0.045};
+std::vector<double> pillarTimes() {
+    return std::vector<double>(std::begin(kPillarTimes), std::end(kPillarTimes));
+}
 
-    double eval_T = 1.5; // evaluate at T=1.5 (between pillars 2 and 3)
-    // Curve rate ~3.25% → S = rate*100 ≈ 3.25, so set K near ATM
-    double vol = 0.30, K = 3.3, T_opt = 1.0;
+Eigen::VectorXd pillarVector() {
+    Eigen::VectorXd x(kN_Pillars);
+    for (int i = 0; i < kN_Pillars; ++i)
+        x(i) = kPillarRates[i];
+    return x;
+}
 
-    // ── 1. Linear interpolation chain ──
-    QTA_LOG_INFO("test", "── Chain: Linear Interp → BS ──\n");
-
-    CurveInterp linear_curve{pillar_times, N_PILLARS};
-
-    PricingChainFunctor<CurveInterp> linear_functor{linear_curve, eval_T, vol, K, T_opt};
-
-    Eigen::VectorXd x(N_PILLARS);
-    for (int i = 0; i < N_PILLARS; ++i)
-        x(i) = pillar_rates[i];
-
-    double fx;
-    Eigen::VectorXd grad(N_PILLARS);
-    Eigen::MatrixXd H(N_PILLARS, N_PILLARS);
-
-    stan::math::hessian(linear_functor, x, fx, grad, H);
-
-    QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fx, 6));
-
-    std::ostringstream grad_row;
-    for (int i = 0; i < N_PILLARS; ++i)
-        grad_row << quantape::util::num(grad(i), 4) << ' ';
-    QTA_LOG_INFO("test", "  Gradient (∂PV/∂r_i):\n    {}", grad_row.str());
-
-    // Show Hessian (only the non-zero block)
-    QTA_LOG_INFO("test", "  Hessian (∂²PV/∂r_i∂r_j) — non-zero block:");
-    for (int i = 0; i < N_PILLARS; ++i) {
-        std::string row = "    [";
-        for (int j = 0; j < N_PILLARS; ++j) {
-            row += ' ';
-            if (std::abs(H(i, j)) > 1e-10)
-                row += quantape::util::num(H(i, j), 2);
-            else
-                row += '.';
-        }
-        row += " ]";
-        QTA_LOG_INFO("test", "{}", row);
-    }
-
-    // Finite difference verification
-    double eps = 1e-5;
-    Eigen::MatrixXd H_fd(N_PILLARS, N_PILLARS);
-    for (int i = 0; i < N_PILLARS; ++i) {
-        for (int j = i; j < N_PILLARS; ++j) {
+template <typename Curve>
+Eigen::MatrixXd finiteDifferenceHessian(const Curve& curve, const Eigen::VectorXd& x) {
+    const double eps = kFdStep;
+    Eigen::MatrixXd H_fd(kN_Pillars, kN_Pillars);
+    for (int i = 0; i < kN_Pillars; ++i) {
+        for (int j = i; j < kN_Pillars; ++j) {
             Eigen::VectorXd xpp = x, xpm = x, xmp = x, xmm = x;
             xpp(i) += eps;
             xpp(j) += eps;
@@ -485,144 +434,106 @@ int main() {
             xmm(i) -= eps;
             xmm(j) -= eps;
             auto f = [&](const Eigen::VectorXd& v) {
-                std::vector<double> r(N_PILLARS);
-                for (int k = 0; k < N_PILLARS; ++k)
+                std::vector<double> r(kN_Pillars);
+                for (int k = 0; k < kN_Pillars; ++k)
                     r[k] = v(k);
-                double fwd = linear_curve.eval(eval_T, r);
-                return bs_layer::price(fwd * 100, vol, fwd, K, T_opt);
+                double fwd = curve.eval(kEvalT, r);
+                return bs_layer::price(fwd * 100, kVol, fwd, kStrike, kT);
             };
             H_fd(i, j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * eps * eps);
             H_fd(j, i) = H_fd(i, j);
         }
     }
-    QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
-                 quantape::util::num((H - H_fd).cwiseAbs().maxCoeff(), 2));
+    return H_fd;
+}
 
-    // ── 2. Cubic spline chain ──
-    QTA_LOG_INFO("test", "\n── Chain: Cubic Spline → BS ──\n");
+} // namespace
 
-    CubicSplineInterp spline_curve{pillar_times, N_PILLARS};
+class MixedHessianTest : public StanTapeTest {};
 
-    PricingChainFunctor<CubicSplineInterp> spline_functor{spline_curve, eval_T, vol, K, T_opt};
+TEST_F(MixedHessianTest, linearChainMatchesFiniteDifference) {
+    const CurveInterp linear_curve{pillarTimes(), kN_Pillars};
+    const PricingChainFunctor<CurveInterp> linear_functor{linear_curve, kEvalT, kVol, kStrike, kT};
+
+    const Eigen::VectorXd x = pillarVector();
+
+    double fx;
+    Eigen::VectorXd grad(kN_Pillars);
+    Eigen::MatrixXd H(kN_Pillars, kN_Pillars);
+    stan::math::hessian(linear_functor, x, fx, grad, H);
+
+    const Eigen::MatrixXd H_fd = finiteDifferenceHessian(linear_curve, x);
+    ::testing::Test::RecordProperty("linear_max_ad_fd_diff",
+                                    quantape::util::num((H - H_fd).cwiseAbs().maxCoeff(), 2));
+}
+
+TEST_F(MixedHessianTest, cubicSplineChainMatchesFiniteDifference) {
+    const CubicSplineInterp spline_curve{pillarTimes(), kN_Pillars};
+    const PricingChainFunctor<CubicSplineInterp> spline_functor{spline_curve, kEvalT, kVol, kStrike,
+                                                                kT};
+
+    const Eigen::VectorXd x = pillarVector();
 
     double fx2;
-    Eigen::VectorXd grad2(N_PILLARS);
-    Eigen::MatrixXd H2(N_PILLARS, N_PILLARS);
-
+    Eigen::VectorXd grad2(kN_Pillars);
+    Eigen::MatrixXd H2(kN_Pillars, kN_Pillars);
     stan::math::hessian(spline_functor, x, fx2, grad2, H2);
 
-    QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fx2, 6));
+    const Eigen::MatrixXd H2_fd = finiteDifferenceHessian(spline_curve, x);
+    ::testing::Test::RecordProperty("spline_max_ad_fd_diff",
+                                    quantape::util::num((H2 - H2_fd).cwiseAbs().maxCoeff(), 2));
+}
 
-    std::ostringstream grad2_row;
-    for (int i = 0; i < N_PILLARS; ++i)
-        grad2_row << quantape::util::num(grad2(i), 4) << ' ';
-    QTA_LOG_INFO("test", "  Gradient:\n    {}", grad2_row.str());
+TEST_F(MixedHessianTest, naiveChainEqualsMixed) {
+    const CurveInterp linear_curve{pillarTimes(), kN_Pillars};
+    const CubicSplineInterp spline_curve{pillarTimes(), kN_Pillars};
+    const PricingChainFunctor<CurveInterp> linear_functor{linear_curve, kEvalT, kVol, kStrike, kT};
+    const PricingChainFunctor<CubicSplineInterp> spline_functor{spline_curve, kEvalT, kVol, kStrike,
+                                                                kT};
+    const NaiveChainFunctor naive_functor{linear_curve, kEvalT, kVol, kStrike, kT};
 
-    QTA_LOG_INFO("test", "  Hessian (∂²PV/∂r_i∂r_j):");
-    for (int i = 0; i < N_PILLARS; ++i) {
-        std::string row = "    [";
-        for (int j = 0; j < N_PILLARS; ++j)
-            row += ' ' + quantape::util::num(H2(i, j), 2);
-        row += " ]";
-        QTA_LOG_INFO("test", "{}", row);
-    }
+    const Eigen::VectorXd x = pillarVector();
 
-    // FD check
-    Eigen::MatrixXd H2_fd(N_PILLARS, N_PILLARS);
-    for (int i = 0; i < N_PILLARS; ++i) {
-        for (int j = i; j < N_PILLARS; ++j) {
-            Eigen::VectorXd xpp = x, xpm = x, xmp = x, xmm = x;
-            xpp(i) += eps;
-            xpp(j) += eps;
-            xpm(i) += eps;
-            xpm(j) -= eps;
-            xmp(i) -= eps;
-            xmp(j) += eps;
-            xmm(i) -= eps;
-            xmm(j) -= eps;
-            auto f = [&](const Eigen::VectorXd& v) {
-                std::vector<double> r(N_PILLARS);
-                for (int k = 0; k < N_PILLARS; ++k)
-                    r[k] = v(k);
-                double fwd = spline_curve.eval(eval_T, r);
-                return bs_layer::price(fwd * 100, vol, fwd, K, T_opt);
-            };
-            H2_fd(i, j) = (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * eps * eps);
-            H2_fd(j, i) = H2_fd(i, j);
-        }
-    }
-    QTA_LOG_INFO("test", "\n  Max |H_AD - H_fd|: {}",
-                 quantape::util::num((H2 - H2_fd).cwiseAbs().maxCoeff(), 2));
+    double fx;
+    Eigen::VectorXd grad(kN_Pillars);
+    Eigen::MatrixXd H(kN_Pillars, kN_Pillars);
+    stan::math::hessian(linear_functor, x, fx, grad, H);
 
-    // ── 3. Timing comparison ──
-    QTA_LOG_INFO("test", "\n── Performance ──\n");
-    constexpr int BENCH_N = 50'000;
+    double fx_naive;
+    Eigen::VectorXd g_naive(kN_Pillars);
+    Eigen::MatrixXd H_naive(kN_Pillars, kN_Pillars);
+    stan::math::hessian(naive_functor, x, fx_naive, g_naive, H_naive);
 
-    auto t_linear = bench_us(
+    const double t_linear = bench_us(
         [&]() {
             double f_;
-            Eigen::VectorXd g_(N_PILLARS);
-            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            Eigen::VectorXd g_(kN_Pillars);
+            Eigen::MatrixXd H_(kN_Pillars, kN_Pillars);
             stan::math::hessian(linear_functor, x, f_, g_, H_);
         },
-        BENCH_N);
+        kBenchN);
 
-    auto t_spline = bench_us(
+    const double t_spline = bench_us(
         [&]() {
             double f_;
-            Eigen::VectorXd g_(N_PILLARS);
-            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            Eigen::VectorXd g_(kN_Pillars);
+            Eigen::MatrixXd H_(kN_Pillars, kN_Pillars);
             stan::math::hessian(spline_functor, x, f_, g_, H_);
         },
-        BENCH_N);
+        kBenchN);
 
-    // Compare: fully naive BS (no analytical derivatives at all)
-    NaiveChainFunctor naive_functor{linear_curve, eval_T, vol, K, T_opt};
-    auto t_naive = bench_us(
+    const double t_naive = bench_us(
         [&]() {
             double f_;
-            Eigen::VectorXd g_(N_PILLARS);
-            Eigen::MatrixXd H_(N_PILLARS, N_PILLARS);
+            Eigen::VectorXd g_(kN_Pillars);
+            Eigen::MatrixXd H_(kN_Pillars, kN_Pillars);
             stan::math::hessian(naive_functor, x, f_, g_, H_);
         },
-        BENCH_N);
+        kBenchN);
 
-    // Verify naive gives same answer
-    double fx_naive;
-    Eigen::VectorXd g_naive(N_PILLARS);
-    Eigen::MatrixXd H_naive(N_PILLARS, N_PILLARS);
-    stan::math::hessian(naive_functor, x, fx_naive, g_naive, H_naive);
-    QTA_LOG_INFO("test", "  Max |H_naive - H_mixed|: {}\n",
-                 quantape::util::num((H_naive - H).cwiseAbs().maxCoeff(), 2));
-
-    QTA_LOG_INFO("test", "  {:<35}{:>10}{:>12}", "Approach", "us/call", "vs Naive");
-    QTA_LOG_INFO("test", "  {}", std::string(57, '-'));
-
-    auto row = [&](const char* name, double t) {
-        QTA_LOG_INFO("test", "  {:<35}{:>10}{:>10}x", name, quantape::util::num(t, 3),
-                     quantape::util::num(t_naive / t, 2));
-    };
-
-    row("Naive (all fvar<var>)", t_naive);
-    row("Mixed: linear interp + BS L2", t_linear);
-    row("Mixed: cubic spline + BS L2", t_spline);
-
-    // ── 4. Architecture summary ──
-    QTA_LOG_INFO("test", "\n── Architecture ──\n");
-    QTA_LOG_INFO("test", "  Each function provides overloads for {{double, var, fvar<var>}}.");
-    QTA_LOG_INFO("test", "  Composition via fvar<var> chains automatically.\n");
-    QTA_LOG_INFO("test", "  Level 0 (black box):   fvar<var> tapes everything");
-    QTA_LOG_INFO("test", "  Level 1 (grad as var): make_callback_var for 1st order,");
-    QTA_LOG_INFO("test", "                         gradient-as-var for 2nd order");
-    QTA_LOG_INFO("test", "  Level 2 (full analyt): make_callback_var at both levels\n");
-    QTA_LOG_INFO("test", "  ┌─────────────┐   ┌──────────────┐   ┌─────────┐");
-    QTA_LOG_INFO("test", "  │ Rate Pillars│──▶│ Curve Interp │──▶│   BS    │──▶ PV");
-    QTA_LOG_INFO("test", "  │   (input)   │   │ Level 0/1    │   │ Level 2 │");
-    QTA_LOG_INFO("test", "  └─────────────┘   └──────────────┘   └─────────┘");
-    QTA_LOG_INFO("test", "       θ               g(θ)              f(g(θ))\n");
-    QTA_LOG_INFO("test", "  H_total = J_g^T · H_f · J_g  +  Σ_a (∂f/∂g_a) · H_g_a");
-    QTA_LOG_INFO("test", "  (AD computes this automatically via fvar<var> composition)");
-
-    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════════");
-    return 0;
+    ::testing::Test::RecordProperty("naive_vs_mixed_max_diff",
+                                    quantape::util::num((H_naive - H).cwiseAbs().maxCoeff(), 2));
+    ::testing::Test::RecordProperty("us_naive", quantape::util::num(t_naive, 3));
+    ::testing::Test::RecordProperty("us_linear", quantape::util::num(t_linear, 3));
+    ::testing::Test::RecordProperty("us_spline", quantape::util::num(t_spline, 3));
 }

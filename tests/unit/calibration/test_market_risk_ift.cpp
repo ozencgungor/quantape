@@ -1,24 +1,26 @@
-// test_market_risk_ift.cpp — market-risk propagation through calibrations (S5d)
-//
-// Gates:
-//   11. KKT route (optimizer + ImplicitFunction.h) == instrument-Jacobian
-//       route (weighted SVD pseudo-inverse) on exact-fit full-rank LS
-//   12. synthetic quotes: bump quote -> recalibrate -> reprice vs
-//       IFT-propagated greeks (single/two/three-quote chains)
-//   13. calibration-instrument exactness: pricing the instrument through
-//       the chain reproduces its market greeks exactly
-//   14. route benchmark: instrument vs KKT timing (reported)
-//   plus: end-to-end SDE gradient (mc/Gradients.h) -> IFT market risk
+/**
+ * @file test_market_risk_ift.cpp
+ * @brief Market-risk propagation through calibrations (S5d)
+ *
+ * Gates:
+ *   11. KKT route (optimizer + ImplicitFunction.h) == instrument-Jacobian
+ *       route (weighted SVD pseudo-inverse) on exact-fit full-rank LS
+ *   12. synthetic quotes: bump quote -> recalibrate -> reprice vs
+ *       IFT-propagated greeks (single/two/three-quote chains)
+ *   13. calibration-instrument exactness: pricing the instrument through
+ *       the chain reproduces its market greeks exactly
+ *   14. route benchmark: instrument vs KKT timing (recorded, not asserted)
+ *   plus: end-to-end SDE gradient (mc/Gradients.h) -> IFT market risk
+ */
+
 #include "quantape/math/StanMath.h"
 
 #include "quantape/calibration/CalibrationChainKkt.h"
-#include "quantape/log/Log.h"
 #include "quantape/mc/Gradients.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SchemesStan.h"
 #include "quantape/mc/SdeSimulator.h"
 #include "quantape/mc/TimeGrid.h"
-#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 using ::quantape::util::kPi;
 
@@ -27,13 +29,11 @@ using ::quantape::util::kPi;
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <stdexcept>
 #include <vector>
-using quantape::util::checkClose;
-using quantape::util::isFiniteBitwise;
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using quantape::math::Bounds;
 using quantape::math::CalibrationJacobians;
@@ -176,8 +176,8 @@ void testSingleQuoteChain() {
     // Instrument route (sigma-only chain)
     const auto jac = sigmaOnlyJacobians({k1}, s0, mu, sigma, tMax, {1.0});
     const auto inst = quantape::math::instrumentCalibrationJacobian(jac);
-    CHECK(inst.rank == 1);
-    checkClose("inst db/da", inst.dbda(0, 0), 1.0 / vega1, 1e-10);
+    EXPECT_TRUE(inst.rank == 1);
+    CHECK_CLOSE("inst db/da", inst.dbda(0, 0), 1.0 / vega1, 1e-10);
 
     // KKT route
     std::vector<double> quotes = {a1};
@@ -186,18 +186,18 @@ void testSingleQuoteChain() {
     IftResult info;
     const Eigen::MatrixXd kkt = quantape::math::kktCalibrationJacobian(
         SingleQuoteObjective{k1, mu, tMax}, quotes, b, state, info);
-    checkClose("kkt calibrated sigma", b[0], sigma, 1e-10);
-    checkClose("kkt db/da", kkt(0, 0), 1.0 / vega1, 1e-8);
+    CHECK_CLOSE("kkt calibrated sigma", b[0], sigma, 1e-10);
+    CHECK_CLOSE("kkt db/da", kkt(0, 0), 1.0 / vega1, 1e-8);
 
     // Gate 11: routes agree
-    checkClose("routes agree", kkt(0, 0), inst.dbda(0, 0), 1e-8);
+    CHECK_CLOSE("routes agree", kkt(0, 0), inst.dbda(0, 0), 1e-8);
 
     // Gate 13: instrument exactness (V = the calibration instrument)
     Eigen::VectorXd dVdb(1);
     dVdb(0) = vega1;
     const Eigen::VectorXd selfRisk =
         quantape::math::propagateMarketRisks(dVdb, Eigen::VectorXd{}, inst.dbda, Eigen::MatrixXd{});
-    checkClose("instrument exactness", selfRisk(0), 1.0, 1e-12);
+    CHECK_CLOSE("instrument exactness", selfRisk(0), 1.0, 1e-12);
 
     // Gate 12: downstream product (K2), IFT vs bump-recalibrate
     Eigen::VectorXd dVdb2(1);
@@ -214,9 +214,7 @@ void testSingleQuoteChain() {
     quantape::math::kktCalibrationJacobian(SingleQuoteObjective{k1, mu, tMax}, am, bm, sm, im);
     const double fd =
         (bsCallPrice(s0, k2, mu, bp[0], tMax) - bsCallPrice(s0, k2, mu, bm[0], tMax)) / (2.0 * h);
-    checkClose("single-quote IFT vs bump-recalibrate", risk(0), fd, 1e-6);
-    QTA_LOG_INFO("test", "  [ok] single quote: KKT/inst agree, instrument exact, vs FD ({} vs {})",
-                 quantape::util::num(risk(0), 9), quantape::util::num(fd, 9));
+    CHECK_CLOSE("single-quote IFT vs bump-recalibrate", risk(0), fd, 1e-6);
 }
 
 // ── Gate 12: two-quote chain (S0 and sigma) ──
@@ -233,8 +231,8 @@ void testTwoQuoteChain() {
     IftResult info;
     const Eigen::MatrixXd kkt = quantape::math::kktCalibrationJacobian(
         TwoQuoteObjective{k1, k2, mu, tMax}, quotes, b, state, info);
-    checkClose("two-quote S0", b[0], s0, 1e-9);
-    checkClose("two-quote sigma", b[1], sigma, 1e-9);
+    CHECK_CLOSE("two-quote S0", b[0], s0, 1e-9);
+    CHECK_CLOSE("two-quote sigma", b[1], sigma, 1e-9);
 
     // Instrument route and analytic Jacobian inverse
     const auto jac = singleAssetJacobians({k1, k2}, s0, mu, sigma, tMax, {1.0, 1.0});
@@ -242,8 +240,8 @@ void testTwoQuoteChain() {
     const Eigen::MatrixXd jinv = jac.dIdb.inverse();
     for (Eigen::Index i = 0; i < 2; ++i) {
         for (Eigen::Index j = 0; j < 2; ++j) {
-            checkClose("two-quote inst == J^-1", inst.dbda(i, j), jinv(i, j), 1e-10);
-            checkClose("two-quote kkt == J^-1", kkt(i, j), jinv(i, j), 1e-8);
+            CHECK_CLOSE("two-quote inst == J^-1", inst.dbda(i, j), jinv(i, j), 1e-10);
+            CHECK_CLOSE("two-quote kkt == J^-1", kkt(i, j), jinv(i, j), 1e-8);
         }
     }
 
@@ -266,9 +264,8 @@ void testTwoQuoteChain() {
         const double vp = bsCallS<double>(bp[0], k3, mu, bp[1], tMax);
         const double vm = bsCallS<double>(bm[0], k3, mu, bm[1], tMax);
         const double fd = (vp - vm) / (2.0 * h);
-        checkClose("two-quote IFT vs bump-recalibrate", risk(j), fd, 1e-5);
+        CHECK_CLOSE("two-quote IFT vs bump-recalibrate", risk(j), fd, 1e-5);
     }
-    QTA_LOG_INFO("test", "  [ok] two quotes: routes == J^-1, both components vs FD");
 }
 
 // ── Gates 12/14: weighted best fit (3 quotes, 2 params) ──
@@ -299,7 +296,7 @@ void testBestFitWeighted() {
     const auto t0 = std::chrono::steady_clock::now();
     const auto inst = quantape::math::instrumentCalibrationJacobian(jac);
     const auto t1 = std::chrono::steady_clock::now();
-    CHECK(inst.rank == 2);
+    EXPECT_TRUE(inst.rank == 2);
 
     // Downstream product K=105: both routes vs bump-recalibrate
     const double k3 = 105.0;
@@ -328,16 +325,15 @@ void testBestFitWeighted() {
         const double fd = (vp - vm) / (2.0 * h);
         maxKktErr = std::max(maxKktErr, std::fabs(riskKkt(j) - fd));
         maxInstErr = std::max(maxInstErr, std::fabs(riskInst(j) - fd));
-        checkClose("best-fit KKT vs FD", riskKkt(j), fd, 1e-5);
-        checkClose("best-fit inst vs FD", riskInst(j), fd, 1e-3);
+        CHECK_CLOSE("best-fit KKT vs FD", riskKkt(j), fd, 1e-5);
+        CHECK_CLOSE("best-fit inst vs FD", riskInst(j), fd, 1e-3);
     }
     const double kktUs = std::chrono::duration<double, std::micro>(kal2 - kal).count();
     const double instUs = std::chrono::duration<double, std::micro>(t1 - t0).count();
-    QTA_LOG_INFO("test",
-                 "  [ok] best fit (3 quotes, weights): max |KKT-FD|={}, |inst-FD|={}; "
-                 "timing warm KKT {} us vs instrument {} us (m=2, nI=3)",
-                 quantape::util::num(maxKktErr, 3), quantape::util::num(maxInstErr, 3),
-                 quantape::util::num(kktUs), quantape::util::num(instUs));
+    ::testing::Test::RecordProperty("best_fit_max_kkt_err", quantape::util::num(maxKktErr, 3));
+    ::testing::Test::RecordProperty("best_fit_max_inst_err", quantape::util::num(maxInstErr, 3));
+    ::testing::Test::RecordProperty("best_fit_kkt_us", quantape::util::num(kktUs));
+    ::testing::Test::RecordProperty("best_fit_inst_us", quantape::util::num(instUs));
 }
 
 // ── End-to-end: SDE gradient (S5) -> IFT chain (S5d) ──
@@ -400,20 +396,22 @@ void testSdeChain() {
     const double vega1 = bsCallVega(s0, k1, mu, sigma, tMax);
     const double analytic = bsCallVega(s0, k2, mu, sigma, tMax) / vega1;
     const double tol = 0.02 * std::fabs(analytic) + 5.0 * estimate.stdErrors(2) / vega1;
-    checkClose("SDE -> IFT chain", risk(0), analytic, tol);
-    QTA_LOG_INFO("test", "  [ok] SDE gradient -> IFT: dV/da={} (analytic {}, se {})",
-                 quantape::util::num(risk(0), 6), quantape::util::num(analytic, 6),
-                 quantape::util::num(estimate.stdErrors(2) / vega1, 2));
+    CHECK_CLOSE("SDE -> IFT chain", risk(0), analytic, tol);
 }
 
 } // namespace
 
-int main() {
-    QTA_LOG_INFO("test", "Market-risk IFT tests (S5d)");
+class MarketRiskIftTest : public StanTapeTest {};
+
+TEST_F(MarketRiskIftTest, singleQuoteChain) {
     testSingleQuoteChain();
+}
+TEST_F(MarketRiskIftTest, twoQuoteChain) {
     testTwoQuoteChain();
+}
+TEST_F(MarketRiskIftTest, bestFitWeighted) {
     testBestFitWeighted();
+}
+TEST_F(MarketRiskIftTest, sdeChain) {
     testSdeChain();
-    QTA_LOG_INFO("test", "ALL MARKET-RISK IFT TESTS PASSED");
-    return 0;
 }
