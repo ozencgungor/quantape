@@ -38,35 +38,12 @@ bool throwsInvalidArgument(Callable&& callable) {
     return false;
 }
 
-// Process-lifetime joint calendar for the EUR/USD spot gates: the joined rule
-// set must not be recycled, because the library's year-holiday cache is keyed
-// on the rules pointer and a reused address would replay another calendar's
-// holidays under --gtest_repeat.
+// Shared joint calendar for the EUR/USD spot gates, kept process-lifetime for
+// reuse across the cases that need it.
 const Calendar& targetSifmaJoint() {
     static const Calendar joint = Calendar::joint(Calendar::target(), Calendar::sifma());
     return joint;
 }
-
-// The same pointer-keyed cache means a lazily created named-calendar rule set
-// can land on the address of an already-freed joint rule set and inherit its
-// cached year; constructing every named calendar before any test runs pins the
-// static rule sets to addresses no joint can later shadow.
-struct NamedCalendarWarmup {
-    NamedCalendarWarmup() {
-        const Date probe(2026, 1, 1);
-        (void)targetSifmaJoint();
-        (void)Calendar::target().isBusinessDay(probe);
-        (void)Calendar::sifma().isBusinessDay(probe);
-        (void)Calendar::federalReserve().isBusinessDay(probe);
-        (void)Calendar::unitedKingdom().isBusinessDay(probe);
-        (void)Calendar::japan().isBusinessDay(probe);
-        (void)Calendar::noHolidays().isBusinessDay(probe);
-        (void)Calendar::weekendsOnly().isBusinessDay(probe);
-        (void)Calendar{}.isBusinessDay(probe);
-    }
-};
-
-const NamedCalendarWarmup kNamedCalendarWarmup;
 
 } // namespace
 
