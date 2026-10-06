@@ -2,6 +2,7 @@ name: docs
 
 on:
   push:
+    branches: [main]
     paths: ["docs/**", "include/**", "README.md"]
   pull_request:
     paths: ["docs/**", "include/**", "README.md"]

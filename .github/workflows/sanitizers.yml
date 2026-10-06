@@ -1,8 +1,10 @@
 name: sanitizers
 
+# Sanitizers are PR-only: they are a required check on pull requests, and main
+# pushes get the cheap fast-tier smoke from ci.yml instead.
 on:
-  push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: sanitizers-${{ github.ref }}

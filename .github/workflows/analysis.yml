@@ -1,8 +1,9 @@
 name: analysis
 
+# clang-tidy is a PR-only gate (required check); manual dispatch for reruns.
 on:
-  push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: analysis-${{ github.ref }}
