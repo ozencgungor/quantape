@@ -10,6 +10,12 @@ function(quantape_set_warnings target)
         target_compile_options(${target} PRIVATE /W4)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        # GCC disables column tracking on huge headers (Stan) and prints a note
+        # per TU even when those headers are system includes; turning the check
+        # off removes the note. Clang has no misleading-indentation diagnostic.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(${target} PRIVATE -Wno-misleading-indentation)
+        endif()
     endif()
 endfunction()
 
