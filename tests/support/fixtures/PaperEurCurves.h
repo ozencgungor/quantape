@@ -607,22 +607,28 @@ inline double minimumMonthlyForward(const mk::DiscountCurve<double>& curve, doub
     return minimum;
 }
 
-inline void reprice(const std::vector<mk::CurvePillar>& pillars,
-                    const mk::DiscountCurve<double>& curve, const char* label) {
+/// Worst absolute reprice error over all pillars; the caller owns the
+/// assertion so the helper never calls the fatal legacy checkClose harness.
+inline double worstRepriceError(const std::vector<mk::CurvePillar>& pillars,
+                                const mk::DiscountCurve<double>& curve) {
+    double worst = 0.0;
     for (const mk::CurvePillar& pillar : pillars) {
-        quantape::util::checkClose(label, mk::impliedQuote(pillar, kReference, curve), pillar.quote,
-                                   1e-10);
+        worst =
+            std::max(worst, std::abs(mk::impliedQuote(pillar, kReference, curve) - pillar.quote));
     }
+    return worst;
 }
 
-inline void reprice(const std::vector<mk::ForecastPillar>& pillars,
-                    const mk::SpreadCurve<double>& curve, const mk::DiscountCurve<double>& discount,
-                    const char* label) {
+inline double worstRepriceError(const std::vector<mk::ForecastPillar>& pillars,
+                                const mk::SpreadCurve<double>& curve,
+                                const mk::DiscountCurve<double>& discount) {
+    double worst = 0.0;
     for (const mk::ForecastPillar& pillar : pillars) {
-        quantape::util::checkClose(
-            label, mk::impliedForecastQuote(curve, discount, pillar, kReference, kZeroDc),
-            forecastPillarTarget(pillar), 1e-10);
+        worst = std::max(
+            worst, std::abs(mk::impliedForecastQuote(curve, discount, pillar, kReference, kZeroDc) -
+                            forecastPillarTarget(pillar)));
     }
+    return worst;
 }
 
 template <typename CurveT>
