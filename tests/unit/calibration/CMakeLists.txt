@@ -1,0 +1,34 @@
+# calibration/: AD optimizers, IFT and stress gates (legacy full-Stan link
+# profiles).
+
+add_executable(test_levenberg_marquardt_ad ${CMAKE_SOURCE_DIR}/tests/test_levenberg_marquardt_ad.cpp)
+target_link_libraries(test_levenberg_marquardt_ad PRIVATE quantape)
+quantape_enable_stan(test_levenberg_marquardt_ad)
+quantape_set_warnings(test_levenberg_marquardt_ad)
+quantape_register_test(test_levenberg_marquardt_ad)
+
+add_executable(test_optimization ${CMAKE_SOURCE_DIR}/tests/test_optimization.cpp)
+target_link_libraries(test_optimization PRIVATE quantape_log quantape_format)
+quantape_enable_stan(test_optimization)
+quantape_set_warnings(test_optimization)
+quantape_register_test(test_optimization)
+
+add_executable(test_ift ${CMAKE_SOURCE_DIR}/tests/test_ift.cpp)
+target_link_libraries(test_ift PRIVATE quantape_log quantape_format)
+quantape_enable_stan(test_ift)
+quantape_set_warnings(test_ift)
+quantape_register_test(test_ift)
+
+add_executable(test_market_risk_ift ${CMAKE_SOURCE_DIR}/tests/test_market_risk_ift.cpp)
+target_link_libraries(test_market_risk_ift PRIVATE quantape_log quantape_format)
+quantape_enable_stan(test_market_risk_ift)
+quantape_set_warnings(test_market_risk_ift)
+quantape_register_test(test_market_risk_ift)
+
+add_executable(test_optimizers_stress ${CMAKE_SOURCE_DIR}/tests/test_optimizers_stress.cpp)
+target_link_libraries(test_optimizers_stress PRIVATE quantape_log quantape_format)
+quantape_enable_stan(test_optimizers_stress)
+quantape_set_warnings(test_optimizers_stress)
+quantape_register_test(test_optimizers_stress)
+
+quantape_collect_executables()
