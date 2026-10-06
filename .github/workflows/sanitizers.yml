@@ -23,7 +23,7 @@ jobs:
       # executes each test binary with --gtest_list_tests) sees it too.
       ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:detect_stack_use_after_return=0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
