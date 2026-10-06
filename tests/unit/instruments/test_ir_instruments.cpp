@@ -15,18 +15,19 @@
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/DayCounter.h"
 #include "quantape/instruments/IrInstruments.h"
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/pricing/Ir.h"
 #include "quantape/pricing/IrMath.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using namespace quantape;
 
@@ -65,28 +66,23 @@ void checkVarAdjoints(const InstrumentT& instrument, const char* tag) {
     const double expected = instrument.template impliedQuote<double>(
         mk::DiscountSet<mk::DiscountCurve<double>>{primalCurve});
 
-    stan::math::recover_memory();
-    {
-        std::vector<var> zeros(baseZeros.begin(), baseZeros.end());
-        const mk::DiscountCurve<var> curve(kTimes, zeros, mk::InterpolationSpace::LogDiscount,
-                                           mk::InterpolationScheme::Linear);
-        var value =
-            instrument.template impliedQuote<var>(mk::DiscountSet<mk::DiscountCurve<var>>{curve});
-        value.grad();
-        util::checkClose((std::string(tag) + " var value").c_str(), value.val(), expected, 1e-15);
-        const double step = 1e-6;
-        for (std::size_t j = 1; j < baseZeros.size(); ++j) {
-            const double fd = (instrument.template impliedQuote<double>(
-                                   mk::DiscountSet<mk::DiscountCurve<double>>{
-                                       makeShiftedCurve(baseZeros, j, step)}) -
-                               instrument.template impliedQuote<double>(
-                                   mk::DiscountSet<mk::DiscountCurve<double>>{
-                                       makeShiftedCurve(baseZeros, j, -step)})) /
-                              (2.0 * step);
-            util::checkClose((std::string(tag) + " var adjoint").c_str(), zeros[j].adj(), fd, 1e-6);
-        }
+    std::vector<var> zeros(baseZeros.begin(), baseZeros.end());
+    const mk::DiscountCurve<var> curve(kTimes, zeros, mk::InterpolationSpace::LogDiscount,
+                                       mk::InterpolationScheme::Linear);
+    var value =
+        instrument.template impliedQuote<var>(mk::DiscountSet<mk::DiscountCurve<var>>{curve});
+    value.grad();
+    CHECK_CLOSE(std::string(tag) + " var value", value.val(), expected, 1e-15);
+    const double step = 1e-6;
+    for (std::size_t j = 1; j < baseZeros.size(); ++j) {
+        const double fd =
+            (instrument.template impliedQuote<double>(
+                 mk::DiscountSet<mk::DiscountCurve<double>>{makeShiftedCurve(baseZeros, j, step)}) -
+             instrument.template impliedQuote<double>(mk::DiscountSet<mk::DiscountCurve<double>>{
+                 makeShiftedCurve(baseZeros, j, -step)})) /
+            (2.0 * step);
+        CHECK_CLOSE(std::string(tag) + " var adjoint", zeros[j].adj(), fd, 1e-6);
     }
-    stan::math::recover_memory();
 }
 
 /// `fvar<var>` value and directional derivative on a single solved node.
@@ -112,18 +108,36 @@ void checkFvarDirection(const InstrumentT& instrument, const char* tag) {
                                        mk::InterpolationScheme::Linear)})) /
         (2.0 * step);
 
-    stan::math::recover_memory();
     std::vector<fvar<var>> nestedZeros{fvar<var>(var(0.0), 0.0), fvar<var>(var(0.02), 1.0)};
     const mk::DiscountCurve<fvar<var>> nestedCurve(
         times, nestedZeros, mk::InterpolationSpace::LogDiscount, mk::InterpolationScheme::Linear);
     const fvar<var> value = instrument.template impliedQuote<fvar<var>>(
         mk::DiscountSet<mk::DiscountCurve<fvar<var>>>{nestedCurve});
-    util::checkClose((std::string(tag) + " fvar value").c_str(), value.val_.val(), expected, 1e-15);
-    util::checkClose((std::string(tag) + " fvar derivative").c_str(), value.d_.val(), fd, 1e-6);
-    stan::math::recover_memory();
+    CHECK_CLOSE(std::string(tag) + " fvar value", value.val_.val(), expected, 1e-15);
+    CHECK_CLOSE(std::string(tag) + " fvar derivative", value.d_.val(), fd, 1e-6);
 }
 
-void testFactoryValidation() {
+/// Nested reverse-over-forward Hessian of the deposit quote over the solved
+/// node, through the instrument member `impliedQuote`.
+struct DepositQuoteHessian {
+    inst::Deposit deposit;
+
+    template <typename ScalarT>
+    ScalarT operator()(const Eigen::Matrix<ScalarT, Eigen::Dynamic, 1>& x) const {
+        const std::vector<double> times{0.0, 1.0};
+        const std::vector<ScalarT> zeros{ScalarT(0.0), x[0]};
+        const mk::DiscountCurve<ScalarT> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
+                                               mk::InterpolationScheme::Linear);
+        return deposit.template impliedQuote<ScalarT>(
+            mk::DiscountSet<mk::DiscountCurve<ScalarT>>{curve});
+    }
+};
+
+} // namespace
+
+class IrInstrumentsTest : public StanTapeTest {};
+
+TEST_F(IrInstrumentsTest, depositRepoFraFutureValidation) {
     // Deposit/repo: the quoted maturity is mandatory, and a maturity on or
     // before the reference date fails the accrual check.
     for (const bool repo : {false, true}) {
@@ -141,10 +155,12 @@ void testFactoryValidation() {
         } catch (const std::invalid_argument& error) {
             threw = true;
             const std::string message = error.what();
-            CHECK(message.find(repo ? "makeRepo: maturity is required"
-                                    : "makeDeposit: maturity is required") != std::string::npos);
+            EXPECT_TRUE(message.find(repo ? "makeRepo: maturity is required"
+                                          : "makeDeposit: maturity is required") !=
+                        std::string::npos)
+                << message;
         }
-        CHECK(threw);
+        EXPECT_TRUE(threw);
     }
 
     bool threwAccrual = false;
@@ -154,10 +170,11 @@ void testFactoryValidation() {
                                 kZeroDc);
     } catch (const std::invalid_argument& error) {
         threwAccrual = true;
-        CHECK(std::string(error.what()).find("impliedQuote: non-positive deposit accrual") !=
-              std::string::npos);
+        EXPECT_TRUE(std::string(error.what()).find("impliedQuote: non-positive deposit accrual") !=
+                    std::string::npos)
+            << error.what();
     }
-    CHECK(threwAccrual);
+    EXPECT_TRUE(threwAccrual);
 
     // FRA: both accrual ends are mandatory and the start must not precede the
     // reference date.
@@ -168,10 +185,11 @@ void testFactoryValidation() {
                             kZeroDc);
     } catch (const std::invalid_argument& error) {
         threwFra = true;
-        CHECK(std::string(error.what()).find("makeFra: start and maturity are required") !=
-              std::string::npos);
+        EXPECT_TRUE(std::string(error.what()).find("makeFra: start and maturity are required") !=
+                    std::string::npos)
+            << error.what();
     }
-    CHECK(threwFra);
+    EXPECT_TRUE(threwFra);
 
     bool threwFraStart = false;
     try {
@@ -180,10 +198,12 @@ void testFactoryValidation() {
                             kReference.plusMonths(2), kZeroDc);
     } catch (const std::invalid_argument& error) {
         threwFraStart = true;
-        CHECK(std::string(error.what()).find("impliedQuote: FRA start before the reference date") !=
-              std::string::npos);
+        EXPECT_TRUE(
+            std::string(error.what()).find("impliedQuote: FRA start before the reference date") !=
+            std::string::npos)
+            << error.what();
     }
-    CHECK(threwFraStart);
+    EXPECT_TRUE(threwFraStart);
 
     // Future: the quoted reference period must be non-empty and ordered.
     bool threwFuture = false;
@@ -193,10 +213,12 @@ void testFactoryValidation() {
                                kCalendar, kIndexDc, kReference, kZeroDc);
     } catch (const std::invalid_argument& error) {
         threwFuture = true;
-        CHECK(std::string(error.what()).find("makeFuture: maturity must be after the start") !=
-              std::string::npos);
+        EXPECT_TRUE(
+            std::string(error.what()).find("makeFuture: maturity must be after the start") !=
+            std::string::npos)
+            << error.what();
     }
-    CHECK(threwFuture);
+    EXPECT_TRUE(threwFuture);
 
     bool threwMissing = false;
     try {
@@ -205,16 +227,17 @@ void testFactoryValidation() {
                                kZeroDc);
     } catch (const std::invalid_argument& error) {
         threwMissing = true;
-        CHECK(std::string(error.what()).find("makeFuture: start and maturity are required") !=
-              std::string::npos);
+        EXPECT_TRUE(std::string(error.what()).find("makeFuture: start and maturity are required") !=
+                    std::string::npos)
+            << error.what();
     }
-    CHECK(threwMissing);
+    EXPECT_TRUE(threwMissing);
 }
 
-void testPriorityOrdering() {
-    CHECK(inst::Future::priority() < inst::Fra::priority());
-    CHECK(inst::Fra::priority() < inst::Deposit::priority());
-    CHECK(inst::Deposit::priority() < inst::Repo::priority());
+TEST_F(IrInstrumentsTest, priorityOrderingAndOverlapFilter) {
+    EXPECT_TRUE(inst::Future::priority() < inst::Fra::priority());
+    EXPECT_TRUE(inst::Fra::priority() < inst::Deposit::priority());
+    EXPECT_TRUE(inst::Deposit::priority() < inst::Repo::priority());
 
     // Overlapping clusters keep the highest-priority instrument and, on a
     // strict tie, the first-listed one.
@@ -234,10 +257,10 @@ void testPriorityOrdering() {
     pillars[3].quote = 0.021;
 
     const std::vector<mk::CurvePillar> filtered = mk::filterOverlappingPillars(pillars, 2);
-    CHECK(filtered.size() == 2);
-    CHECK(filtered[0].kind == mk::PillarKind::Future);
-    CHECK(filtered[1].kind == mk::PillarKind::Deposit);
-    CHECK(filtered[1].quote == 0.021);
+    EXPECT_EQ(filtered.size(), 2u);
+    EXPECT_TRUE(filtered[0].kind == mk::PillarKind::Future);
+    EXPECT_TRUE(filtered[1].kind == mk::PillarKind::Deposit);
+    EXPECT_EQ(filtered[1].quote, 0.021);
 
     // Same-kind ties keep the earlier-listed pillar.
     std::vector<mk::CurvePillar> tied(2);
@@ -248,42 +271,42 @@ void testPriorityOrdering() {
     tied[1].maturity = kReference.plusYears(3);
     tied[1].quote = 0.032;
     const std::vector<mk::CurvePillar> tiedFiltered = mk::filterOverlappingPillars(tied, 2);
-    CHECK(tiedFiltered.size() == 1);
-    CHECK(tiedFiltered[0].quote == 0.031);
+    EXPECT_EQ(tiedFiltered.size(), 1u);
+    EXPECT_EQ(tiedFiltered[0].quote, 0.031);
 }
 
-void testMetadata() {
-    CHECK(inst::Deposit::kindName() == "Deposit");
-    CHECK(inst::Repo::kindName() == "Repo");
-    CHECK(inst::Fra::kindName() == "Fra");
-    CHECK(inst::Future::kindName() == "Future");
+TEST_F(IrInstrumentsTest, factoriesExposeDateAndTarget) {
+    EXPECT_EQ(inst::Deposit::kindName(), "Deposit");
+    EXPECT_EQ(inst::Repo::kindName(), "Repo");
+    EXPECT_EQ(inst::Fra::kindName(), "Fra");
+    EXPECT_EQ(inst::Future::kindName(), "Future");
 
     const inst::Deposit deposit = inst::makeDeposit(kReference.plusYears(1), 0.02, kCalendar,
                                                     dt::BusinessDayConvention::ModifiedFollowing,
                                                     kIndexDc, kReference, kZeroDc);
-    CHECK(deposit.date() == kReference.plusYears(1));
-    CHECK(deposit.target() == 0.02);
+    EXPECT_TRUE(deposit.date() == kReference.plusYears(1));
+    EXPECT_EQ(deposit.target(), 0.02);
 
     const inst::Repo repo =
         inst::makeRepo(kReference.plusMonths(6), 0.021, kCalendar,
                        dt::BusinessDayConvention::ModifiedFollowing, kIndexDc, kReference, kZeroDc);
-    CHECK(repo.date() == kReference.plusMonths(6));
-    CHECK(repo.target() == 0.021);
+    EXPECT_TRUE(repo.date() == kReference.plusMonths(6));
+    EXPECT_EQ(repo.target(), 0.021);
 
     const inst::Fra fra =
         inst::makeFra(kReference.plusMonths(3), kReference.plusMonths(9), 0.022, kCalendar,
                       dt::BusinessDayConvention::ModifiedFollowing, kIndexDc, kReference, kZeroDc);
-    CHECK(fra.date() == kReference.plusMonths(9));
-    CHECK(fra.target() == 0.022);
+    EXPECT_TRUE(fra.date() == kReference.plusMonths(9));
+    EXPECT_EQ(fra.target(), 0.022);
 
     const inst::Future future = inst::makeFuture(
         kReference.plusMonths(3), kReference.plusMonths(6), 0.041, pr::FutureStyle::Averaged,
         pr::AveragingStyle::Arithmetic, 1e-4, kCalendar, kIndexDc, kReference, kZeroDc);
-    CHECK(future.date() == kReference.plusMonths(6));
-    CHECK(future.target() == 0.041);
+    EXPECT_TRUE(future.date() == kReference.plusMonths(6));
+    EXPECT_EQ(future.target(), 0.041);
 }
 
-void testDiscountAd() {
+TEST_F(IrInstrumentsTest, discountVarAdjointsAndFvarDirection) {
     const inst::Deposit deposit = inst::makeDeposit(kReference.plusYears(1), 0.02, kCalendar,
                                                     dt::BusinessDayConvention::ModifiedFollowing,
                                                     kIndexDc, kReference, kZeroDc);
@@ -319,25 +342,9 @@ void testDiscountAd() {
     checkFvarDirection(averagedCompounded, "future averaged compounded");
 }
 
-/// Nested reverse-over-forward Hessian of the deposit quote over the solved
-/// node, through the instrument member `impliedQuote`.
-struct DepositQuoteHessian {
-    inst::Deposit deposit;
-
-    template <typename ScalarT>
-    ScalarT operator()(const Eigen::Matrix<ScalarT, Eigen::Dynamic, 1>& x) const {
-        const std::vector<double> times{0.0, 1.0};
-        const std::vector<ScalarT> zeros{ScalarT(0.0), x[0]};
-        const mk::DiscountCurve<ScalarT> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
-                                               mk::InterpolationScheme::Linear);
-        return deposit.template impliedQuote<ScalarT>(
-            mk::DiscountSet<mk::DiscountCurve<ScalarT>>{curve});
-    }
-};
-
 /// The deposit quote has an analytic second derivative: for `r(z) =
 /// (exp(z t) - 1) / tau`, `d2r/dz2 = t^2 exp(z t) / tau`.
-void testNestedSecondOrder() {
+TEST_F(IrInstrumentsTest, nestedSecondOrderMatchesAnalytic) {
     const inst::Deposit deposit = inst::makeDeposit(kReference.plusYears(1), 0.02, kCalendar,
                                                     dt::BusinessDayConvention::ModifiedFollowing,
                                                     kIndexDc, kReference, kZeroDc);
@@ -350,45 +357,31 @@ void testNestedSecondOrder() {
     stan::math::hessian(DepositQuoteHessian{deposit}, point, value, gradient, hessian);
     const double t = kZeroDc.yearFraction(kReference, deposit.date());
     const double tau = kIndexDc.yearFraction(kReference, deposit.date());
-    util::checkClose("deposit hessian value", value, (std::exp(0.02 * t) - 1.0) / tau, 1e-12);
-    util::checkClose("deposit hessian gradient", gradient[0], t * std::exp(0.02 * t) / tau, 1e-10);
-    util::checkClose("deposit hessian second derivative", hessian(0, 0),
-                     t * t * std::exp(0.02 * t) / tau, 1e-8);
+    CHECK_CLOSE("deposit hessian value", value, (std::exp(0.02 * t) - 1.0) / tau, 1e-12);
+    CHECK_CLOSE("deposit hessian gradient", gradient[0], t * std::exp(0.02 * t) / tau, 1e-10);
+    CHECK_CLOSE("deposit hessian second derivative", hessian(0, 0),
+                t * t * std::exp(0.02 * t) / tau, 1e-8);
 }
 
 /// Cashflow materialization uses the instrument currency POD and the known
 /// fixed flows.
-void testCashflows() {
+TEST_F(IrInstrumentsTest, cashflowsUseCurrencyAndFixedFlows) {
     inst::Deposit deposit = inst::makeDeposit(kReference.plusYears(1), 0.02, kCalendar,
                                               dt::BusinessDayConvention::ModifiedFollowing,
                                               kIndexDc, kReference, kZeroDc);
     deposit.currency = inst::currencyFromCode("EUR");
     const std::vector<inst::Cashflow> flows = pr::irCashflows(deposit, kReference, 1.0e6);
-    CHECK(flows.size() == 1);
-    CHECK(flows[0].payDate == deposit.date());
-    CHECK(inst::currencyCode(flows[0].currency) == "EUR");
+    ASSERT_EQ(flows.size(), 1u);
+    EXPECT_TRUE(flows[0].payDate == deposit.date());
+    EXPECT_EQ(inst::currencyCode(flows[0].currency), "EUR");
     const double tau = kIndexDc.yearFraction(kReference, deposit.date());
-    util::checkClose("deposit cashflow amount", flows[0].amount, 1.0e6 * (1.0 + 0.02 * tau), 1e-9);
+    CHECK_CLOSE("deposit cashflow amount", flows[0].amount, 1.0e6 * (1.0 + 0.02 * tau), 1e-9);
 
     const inst::Future future = inst::makeFuture(
         kReference.plusMonths(3), kReference.plusMonths(6), 0.04, pr::FutureStyle::Simple,
         pr::AveragingStyle::Arithmetic, 0.0, kCalendar, kIndexDc, kReference, kZeroDc);
     const std::vector<inst::Cashflow> futureFlows = pr::irCashflows(future, kReference, 1.0e6);
-    CHECK(futureFlows.size() == 1);
+    ASSERT_EQ(futureFlows.size(), 1u);
     const double futureTau = kIndexDc.yearFraction(future.start, future.maturity);
-    util::checkClose("future cashflow amount", futureFlows[0].amount, 1.0e6 * 0.04 * futureTau,
-                     1e-9);
-}
-
-} // namespace
-
-int main() {
-    testFactoryValidation();
-    testPriorityOrdering();
-    testMetadata();
-    testDiscountAd();
-    testNestedSecondOrder();
-    testCashflows();
-    QTA_LOG_INFO("test", "test_ir_instruments: ok");
-    return 0;
+    CHECK_CLOSE("future cashflow amount", futureFlows[0].amount, 1.0e6 * 0.04 * futureTau, 1e-9);
 }

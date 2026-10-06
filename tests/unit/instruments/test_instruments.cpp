@@ -19,13 +19,11 @@
 #include "quantape/instruments/BootstrapInstrument.h"
 #include "quantape/instruments/Cashflow.h"
 #include "quantape/instruments/IrInstruments.h"
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
 #include "quantape/math/Solvers/BrentSolver.h"
 #include "quantape/pricing/Ir.h"
-#include "quantape/util/Check.h"
 
 #include <bit>
 #include <cmath>
@@ -40,6 +38,8 @@
 #include <variant>
 #include <vector>
 
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 #include "support/fixtures/PaperEurCurves.h"
 
 using namespace quantape;
@@ -517,24 +517,24 @@ bool sameBits(double left, double right) {
 void checkBootstrapSameBits(const std::vector<mk::CurvePillar>& pillars,
                             const mk::DiscountCurve<double>& legacy,
                             const mk::DiscountCurve<double>& current) {
-    CHECK(legacy.times().size() == current.times().size());
-    CHECK(legacy.zeros().size() == current.zeros().size());
+    EXPECT_EQ(legacy.times().size(), current.times().size());
+    EXPECT_EQ(legacy.zeros().size(), current.zeros().size());
     for (std::size_t i = 0; i < legacy.times().size(); ++i) {
-        CHECK(sameBits(legacy.times()[i], current.times()[i]));
+        EXPECT_TRUE(sameBits(legacy.times()[i], current.times()[i]));
     }
     for (std::size_t i = 0; i < legacy.zeros().size(); ++i) {
-        CHECK(sameBits(legacy.zeros()[i], current.zeros()[i]));
+        EXPECT_TRUE(sameBits(legacy.zeros()[i], current.zeros()[i]));
     }
     for (const mk::CurvePillar& pillar : pillars) {
-        CHECK(sameBits(mk::impliedQuote(pillar, legacy.referenceDate(), legacy),
-                       mk::impliedQuote(pillar, current.referenceDate(), current)));
-        CHECK(sameBits(legacy::evaluate(legacy::makeQuoteTimes(pillar, legacy.referenceDate(),
-                                                               legacy.zeroDayCounter()),
-                                        legacy),
-                       mk::impliedQuote(pillar, legacy.referenceDate(), legacy)));
+        EXPECT_TRUE(sameBits(mk::impliedQuote(pillar, legacy.referenceDate(), legacy),
+                             mk::impliedQuote(pillar, current.referenceDate(), current)));
+        EXPECT_TRUE(sameBits(legacy::evaluate(legacy::makeQuoteTimes(pillar, legacy.referenceDate(),
+                                                                     legacy.zeroDayCounter()),
+                                              legacy),
+                             mk::impliedQuote(pillar, legacy.referenceDate(), legacy)));
     }
     for (const double t : {1.0, 5.0, 10.0, 30.0}) {
-        CHECK(sameBits(legacy.discount(t), current.discount(t)));
+        EXPECT_TRUE(sameBits(legacy.discount(t), current.discount(t)));
     }
 }
 
@@ -554,6 +554,12 @@ const std::vector<SchemeCase>& schemeMatrix() {
         {mk::InterpolationSpace::LogDiscount, mk::InterpolationScheme::MixedLinearCubic, 0.0},
     };
     return matrix;
+}
+
+std::string schemeLabel(const SchemeCase& item) {
+    return "space=" + std::to_string(static_cast<int>(item.space)) +
+           " scheme=" + std::to_string(static_cast<int>(item.scheme)) +
+           " tension=" + std::to_string(item.tension);
 }
 
 mk::DiscountCurve<double> makeTarget(const SchemeCase& item, const std::vector<dt::Date>& dates,
@@ -595,47 +601,12 @@ std::vector<mk::CurvePillar> annualOisPillars(const mk::DiscountCurve<double>& t
 }
 
 void checkBootstrapPair(const SchemeCase& item, const std::vector<mk::CurvePillar>& pillars) {
+    SCOPED_TRACE(schemeLabel(item));
     const mk::DiscountCurve<double> legacy = legacyBootstrapDiscountCurve(
         kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
     const mk::DiscountCurve<double> current = mk::bootstrapDiscountCurve(
         kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
     checkBootstrapSameBits(pillars, legacy, current);
-}
-
-void testValidationFixtureBits() {
-    const dt::Calendar calendar = dt::Calendar::noHolidays();
-    std::vector<dt::Date> nodeDates{dt::Period(6, dt::TimeUnit::Months).advance(kReference)};
-    for (int year = 1; year <= 10; ++year) {
-        nodeDates.push_back(kReference.plusYears(year));
-    }
-    for (const SchemeCase& item : schemeMatrix()) {
-        const mk::DiscountCurve<double> target =
-            makeTarget(item, nodeDates, 0.025, 0.0015, -0.00008);
-        checkBootstrapPair(item, annualOisPillars(target, nodeDates, calendar,
-                                                  dt::Period(1, dt::TimeUnit::Years), 0));
-    }
-
-    std::vector<dt::Date> annualDates;
-    for (int year = 1; year <= 6; ++year) {
-        annualDates.push_back(kReference.plusYears(year));
-    }
-    for (const SchemeCase& item : schemeMatrix()) {
-        const mk::DiscountCurve<double> target =
-            makeTarget(item, annualDates, 0.03, -0.001, 0.0001);
-        checkBootstrapPair(item, annualOisPillars(target, annualDates, calendar,
-                                                  dt::Period(6, dt::TimeUnit::Months), 2));
-    }
-
-    std::vector<dt::Date> stubDates{dt::Period(4, dt::TimeUnit::Months).advance(kReference),
-                                    dt::Period(15, dt::TimeUnit::Months).advance(kReference)};
-    for (int year = 2; year <= 5; ++year) {
-        stubDates.push_back(kReference.plusYears(year));
-    }
-    for (const SchemeCase& item : schemeMatrix()) {
-        const mk::DiscountCurve<double> target = makeTarget(item, stubDates, -0.002, 0.0, 0.0);
-        checkBootstrapPair(item, annualOisPillars(target, stubDates, calendar,
-                                                  dt::Period(1, dt::TimeUnit::Years), 0));
-    }
 }
 
 struct FutureStrip {
@@ -692,72 +663,6 @@ mk::DiscountCurve<double> futureTarget(const FutureStrip& strip) {
                                      mk::InterpolationScheme::Linear);
 }
 
-void testFuturesFixtureBits() {
-    const FutureStrip strip = immStrip(8);
-    const mk::DiscountCurve<double> target = futureTarget(strip);
-    const double convexity = mk::hullWhiteFuturesAdjustment(0.01, 0.05, 1.0, 0.25, 1.0);
-
-    struct StyleCase {
-        mk::FutureStyle style;
-        mk::AveragingStyle averaging;
-    };
-    const std::vector<StyleCase> styles{
-        {mk::FutureStyle::Simple, mk::AveragingStyle::Arithmetic},
-        {mk::FutureStyle::Compounded, mk::AveragingStyle::Arithmetic},
-        {mk::FutureStyle::Averaged, mk::AveragingStyle::Arithmetic},
-        {mk::FutureStyle::Averaged, mk::AveragingStyle::Compounded},
-    };
-    for (const SchemeCase& item : schemeMatrix()) {
-        for (const StyleCase& style : styles) {
-            std::vector<mk::CurvePillar> pillars =
-                futurePillars(strip, convexity, style.style, style.averaging);
-            for (mk::CurvePillar& pillar : pillars) {
-                pillar.quote = mk::impliedQuote(pillar, kReference, target);
-            }
-            const mk::DiscountCurve<double> legacy = legacyBootstrapDiscountCurve(
-                kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
-            const mk::DiscountCurve<double> current = mk::bootstrapDiscountCurve(
-                kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
-            checkBootstrapSameBits(pillars, legacy, current);
-        }
-    }
-}
-
-void testEurFixtureBits() {
-    {
-        const std::vector<mk::CurvePillar> pillars = paper::oisSpotPillars();
-        for (const SchemeCase& item : schemeMatrix()) {
-            const mk::DiscountCurve<double> legacy =
-                legacyBootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space,
-                                             item.scheme, pillars, 1e-14, item.tension);
-            const mk::DiscountCurve<double> current =
-                mk::bootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space,
-                                           item.scheme, pillars, 1e-14, item.tension);
-            checkBootstrapSameBits(pillars, legacy, current);
-        }
-    }
-    for (const SchemeCase& item : schemeMatrix()) {
-        const std::vector<mk::CurvePillar> pillars = paper::oisEcbPillars();
-        const mk::DiscountCurve<double> legacy =
-            legacyBootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space, item.scheme,
-                                         pillars, 1e-14, item.tension);
-        const mk::DiscountCurve<double> current =
-            mk::bootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space, item.scheme,
-                                       pillars, 1e-14, item.tension);
-        checkBootstrapSameBits(pillars, legacy, current);
-    }
-    {
-        const std::vector<mk::CurvePillar> pillars = paper::oisEcbPillars();
-        const mk::DiscountCurve<double> legacy = legacyBootstrapDiscountCurve(
-            paper::kReference, paper::kZeroDc, mk::InterpolationSpace::LogDiscount,
-            mk::InterpolationScheme::HymanSpline, pillars);
-        const mk::DiscountCurve<double> current = mk::bootstrapDiscountCurve(
-            paper::kReference, paper::kZeroDc, mk::InterpolationSpace::LogDiscount,
-            mk::InterpolationScheme::HymanSpline, pillars);
-        checkBootstrapSameBits(pillars, legacy, current);
-    }
-}
-
 using DoubleSet = mk::DiscountSet<mk::DiscountCurve<double>>;
 using VarSet = mk::DiscountSet<mk::DiscountCurve<stan::math::var>>;
 using NestedSet = mk::DiscountSet<mk::DiscountCurve<stan::math::fvar<stan::math::var>>>;
@@ -809,104 +714,17 @@ void checkConceptScalar() {
 
     const ScalarT adapterQuote = instrument.template impliedQuote<ScalarT>(curves);
     const double expected = 1.0 / std::exp(-0.02) - 1.0;
-    util::checkClose("concept adapter quote", scalarValue(adapterQuote), expected, 1e-12);
-    CHECK(instrument.date() == kReference.plusYears(1));
-    CHECK(instrument.target() == 0.02);
+    CHECK_CLOSE("concept adapter quote", scalarValue(adapterQuote), expected, 1e-12);
+    EXPECT_TRUE(instrument.date() == kReference.plusYears(1));
+    EXPECT_EQ(instrument.target(), 0.02);
 }
 
-void testConceptQuotes() {
-    checkConceptScalar<double>();
-    checkConceptScalar<stan::math::var>();
-    checkConceptScalar<stan::math::fvar<stan::math::var>>();
-}
+} // namespace
 
-void testVariantLadder() {
-    const std::vector<double> times{0.0, 1.0};
-    const std::vector<double> zeros{0.0, 0.02};
-    const mk::DiscountCurve<double> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
-                                          mk::InterpolationScheme::Linear);
-    const DoubleSet curves{curve};
+class InstrumentsVocabularyTest : public StanTapeTest {};
+class BootstrapBitwiseTest : public StanTapeTest {};
 
-    instruments::Repo repo;
-    repo.maturity = kReference.plusYears(2);
-    repo.calendar = dt::Calendar::noHolidays();
-    repo.quoteDayCounter = kZeroDc;
-    repo.quote = 0.03;
-    repo.prepareDiscount(kReference, kZeroDc);
-    const InstrumentLadder ladder{InstrumentLadder::Instrument{repo}};
-    const double quote = ladder.template impliedQuote<double>(curves);
-    util::checkClose("variant ladder repo quote", quote,
-                     (1.0 / curve.discount(kZeroDc.yearFraction(kReference, repo.date())) - 1.0) /
-                         repo.quoteDayCounter.yearFraction(kReference, repo.date()),
-                     1e-14);
-    CHECK(ladder.date() == repo.date());
-    CHECK(ladder.target() == 0.03);
-    CHECK(std::holds_alternative<instruments::Repo>(ladder.instrument()));
-}
-
-void testToInstrumentAdapter() {
-    const std::vector<double> times{0.0, 1.0, 2.0};
-    const std::vector<double> zeros{0.0, 0.02, 0.025};
-    const mk::DiscountCurve<double> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
-                                          mk::InterpolationScheme::Linear);
-
-    const std::vector<mk::PillarKind> kinds{mk::PillarKind::Deposit, mk::PillarKind::Repo,
-                                            mk::PillarKind::Fra, mk::PillarKind::Future,
-                                            mk::PillarKind::OisSwap};
-    for (const mk::PillarKind kind : kinds) {
-        mk::CurvePillar pillar;
-        pillar.kind = kind;
-        pillar.maturity = kReference.plusYears(1);
-        pillar.start = kReference.plusMonths(3);
-        pillar.quote = 0.02;
-        pillar.quoteDayCounter = kZeroDc;
-        pillar.calendar = dt::Calendar::noHolidays();
-        pillar.fixedTenor = dt::Period(6, dt::TimeUnit::Months);
-        const mk::DiscountInstrument instrument = mk::toInstrument(pillar, kReference, kZeroDc);
-        CHECK(instrument.date() == mk::pillarRiskMaturity(pillar));
-        CHECK(instrument.target() == pillar.quote);
-        CHECK(sameBits(instrument.template impliedQuote<double>(DoubleSet{curve}),
-                       mk::impliedQuote(pillar, kReference, curve)));
-    }
-}
-
-void testCurrencyCode() {
-    const instruments::Currency eur = instruments::currencyFromCode("EUR");
-    CHECK(instruments::currencyCode(eur) == "EUR");
-    CHECK(eur.code[0] == 'E');
-    CHECK(eur.code[1] == 'U');
-    CHECK(eur.code[2] == 'R');
-
-    // Short codes pad with spaces; long codes keep the first three characters.
-    CHECK(instruments::currencyCode(instruments::currencyFromCode("US")) == "US ");
-    CHECK(instruments::currencyCode(instruments::currencyFromCode("USDX")) == "USD");
-}
-
-void testInstrumentMetadata() {
-    CHECK(instruments::Future::priority() < instruments::Fra::priority());
-    CHECK(instruments::Fra::priority() < instruments::Deposit::priority());
-    CHECK(instruments::Deposit::priority() < instruments::Repo::priority());
-    CHECK(instruments::Deposit::kindName() == "Deposit");
-    CHECK(instruments::Repo::kindName() == "Repo");
-    CHECK(instruments::Fra::kindName() == "Fra");
-    CHECK(instruments::Future::kindName() == "Future");
-
-    const instruments::Deposit deposit =
-        instruments::makeDeposit(kReference.plusYears(1), 0.02, dt::Calendar::noHolidays(),
-                                 dt::BusinessDayConvention::ModifiedFollowing,
-                                 dt::DayCounter(dt::DayCount::Actual360), kReference, kZeroDc);
-    CHECK(deposit.date() == kReference.plusYears(1));
-    CHECK(deposit.target() == 0.02);
-
-    const instruments::Future future = instruments::makeFuture(
-        kReference.plusMonths(3), kReference.plusMonths(6), 0.041, pricing::FutureStyle::Averaged,
-        pricing::AveragingStyle::Compounded, 1e-4, dt::Calendar::noHolidays(),
-        dt::DayCounter(dt::DayCount::Actual360), kReference, kZeroDc);
-    CHECK(future.date() == kReference.plusMonths(6));
-    CHECK(future.target() == 0.041);
-}
-
-void testCashflowLayout() {
+TEST_F(InstrumentsVocabularyTest, cashflowLayoutAndTrivialCopy) {
     static_assert(std::is_trivially_copyable_v<instruments::Currency>);
     static_assert(std::is_trivially_copyable_v<instruments::Cashflow>);
     static_assert(sizeof(instruments::Currency) == 3);
@@ -922,24 +740,208 @@ void testCashflowLayout() {
     cashflow.amount = 1234.5;
 
     const instruments::Cashflow copy = cashflow;
-    CHECK(copy.payDate == cashflow.payDate);
-    CHECK(copy.currency.code == cashflow.currency.code);
-    CHECK(copy.amount == cashflow.amount);
-    CHECK(instruments::currencyCode(copy.currency) == "EUR");
+    EXPECT_TRUE(copy.payDate == cashflow.payDate);
+    EXPECT_TRUE(copy.currency.code == cashflow.currency.code);
+    EXPECT_EQ(copy.amount, cashflow.amount);
+    EXPECT_EQ(instruments::currencyCode(copy.currency), "EUR");
 }
 
-} // namespace
+TEST_F(InstrumentsVocabularyTest, currencyCodeRoundTripShortLong) {
+    const instruments::Currency eur = instruments::currencyFromCode("EUR");
+    EXPECT_EQ(instruments::currencyCode(eur), "EUR");
+    EXPECT_EQ(eur.code[0], 'E');
+    EXPECT_EQ(eur.code[1], 'U');
+    EXPECT_EQ(eur.code[2], 'R');
 
-int main() {
-    testCashflowLayout();
-    testCurrencyCode();
-    testInstrumentMetadata();
-    testConceptQuotes();
-    testVariantLadder();
-    testToInstrumentAdapter();
-    testValidationFixtureBits();
-    testFuturesFixtureBits();
-    testEurFixtureBits();
-    QTA_LOG_INFO("test", "test_instruments: ok");
-    return 0;
+    // Short codes pad with spaces; long codes keep the first three characters.
+    EXPECT_EQ(instruments::currencyCode(instruments::currencyFromCode("US")), "US ");
+    EXPECT_EQ(instruments::currencyCode(instruments::currencyFromCode("USDX")), "USD");
+}
+
+TEST_F(InstrumentsVocabularyTest, prioritiesKindNamesFactories) {
+    EXPECT_TRUE(instruments::Future::priority() < instruments::Fra::priority());
+    EXPECT_TRUE(instruments::Fra::priority() < instruments::Deposit::priority());
+    EXPECT_TRUE(instruments::Deposit::priority() < instruments::Repo::priority());
+    EXPECT_EQ(instruments::Deposit::kindName(), "Deposit");
+    EXPECT_EQ(instruments::Repo::kindName(), "Repo");
+    EXPECT_EQ(instruments::Fra::kindName(), "Fra");
+    EXPECT_EQ(instruments::Future::kindName(), "Future");
+
+    const instruments::Deposit deposit =
+        instruments::makeDeposit(kReference.plusYears(1), 0.02, dt::Calendar::noHolidays(),
+                                 dt::BusinessDayConvention::ModifiedFollowing,
+                                 dt::DayCounter(dt::DayCount::Actual360), kReference, kZeroDc);
+    EXPECT_TRUE(deposit.date() == kReference.plusYears(1));
+    EXPECT_EQ(deposit.target(), 0.02);
+
+    const instruments::Future future = instruments::makeFuture(
+        kReference.plusMonths(3), kReference.plusMonths(6), 0.041, pricing::FutureStyle::Averaged,
+        pricing::AveragingStyle::Compounded, 1e-4, dt::Calendar::noHolidays(),
+        dt::DayCounter(dt::DayCount::Actual360), kReference, kZeroDc);
+    EXPECT_TRUE(future.date() == kReference.plusMonths(6));
+    EXPECT_EQ(future.target(), 0.041);
+}
+
+TEST_F(InstrumentsVocabularyTest, conceptQuotesAdapterDateTarget) {
+    SCOPED_TRACE("double");
+    checkConceptScalar<double>();
+    SCOPED_TRACE("var");
+    checkConceptScalar<stan::math::var>();
+    SCOPED_TRACE("fvar<var>");
+    checkConceptScalar<stan::math::fvar<stan::math::var>>();
+}
+
+TEST_F(InstrumentsVocabularyTest, variantLadderRepoQuote) {
+    const std::vector<double> times{0.0, 1.0};
+    const std::vector<double> zeros{0.0, 0.02};
+    const mk::DiscountCurve<double> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
+                                          mk::InterpolationScheme::Linear);
+    const DoubleSet curves{curve};
+
+    instruments::Repo repo;
+    repo.maturity = kReference.plusYears(2);
+    repo.calendar = dt::Calendar::noHolidays();
+    repo.quoteDayCounter = kZeroDc;
+    repo.quote = 0.03;
+    repo.prepareDiscount(kReference, kZeroDc);
+    const InstrumentLadder ladder{InstrumentLadder::Instrument{repo}};
+    const double quote = ladder.template impliedQuote<double>(curves);
+    CHECK_CLOSE("variant ladder repo quote", quote,
+                (1.0 / curve.discount(kZeroDc.yearFraction(kReference, repo.date())) - 1.0) /
+                    repo.quoteDayCounter.yearFraction(kReference, repo.date()),
+                1e-14);
+    EXPECT_TRUE(ladder.date() == repo.date());
+    EXPECT_EQ(ladder.target(), 0.03);
+    EXPECT_TRUE(std::holds_alternative<instruments::Repo>(ladder.instrument()));
+}
+
+TEST_F(InstrumentsVocabularyTest, toInstrumentAdapterMatchesPillar) {
+    const std::vector<double> times{0.0, 1.0, 2.0};
+    const std::vector<double> zeros{0.0, 0.02, 0.025};
+    const mk::DiscountCurve<double> curve(times, zeros, mk::InterpolationSpace::LogDiscount,
+                                          mk::InterpolationScheme::Linear);
+
+    const std::vector<mk::PillarKind> kinds{mk::PillarKind::Deposit, mk::PillarKind::Repo,
+                                            mk::PillarKind::Fra, mk::PillarKind::Future,
+                                            mk::PillarKind::OisSwap};
+    for (const mk::PillarKind kind : kinds) {
+        SCOPED_TRACE(std::string(legacy::kindName(kind)));
+        mk::CurvePillar pillar;
+        pillar.kind = kind;
+        pillar.maturity = kReference.plusYears(1);
+        pillar.start = kReference.plusMonths(3);
+        pillar.quote = 0.02;
+        pillar.quoteDayCounter = kZeroDc;
+        pillar.calendar = dt::Calendar::noHolidays();
+        pillar.fixedTenor = dt::Period(6, dt::TimeUnit::Months);
+        const mk::DiscountInstrument instrument = mk::toInstrument(pillar, kReference, kZeroDc);
+        EXPECT_TRUE(instrument.date() == mk::pillarRiskMaturity(pillar));
+        EXPECT_EQ(instrument.target(), pillar.quote);
+        EXPECT_TRUE(sameBits(instrument.template impliedQuote<double>(DoubleSet{curve}),
+                             mk::impliedQuote(pillar, kReference, curve)));
+    }
+}
+
+TEST_F(BootstrapBitwiseTest, validationFixtureStrips) {
+    const dt::Calendar calendar = dt::Calendar::noHolidays();
+    std::vector<dt::Date> nodeDates{dt::Period(6, dt::TimeUnit::Months).advance(kReference)};
+    for (int year = 1; year <= 10; ++year) {
+        nodeDates.push_back(kReference.plusYears(year));
+    }
+    for (const SchemeCase& item : schemeMatrix()) {
+        const mk::DiscountCurve<double> target =
+            makeTarget(item, nodeDates, 0.025, 0.0015, -0.00008);
+        checkBootstrapPair(item, annualOisPillars(target, nodeDates, calendar,
+                                                  dt::Period(1, dt::TimeUnit::Years), 0));
+    }
+
+    std::vector<dt::Date> annualDates;
+    for (int year = 1; year <= 6; ++year) {
+        annualDates.push_back(kReference.plusYears(year));
+    }
+    for (const SchemeCase& item : schemeMatrix()) {
+        const mk::DiscountCurve<double> target =
+            makeTarget(item, annualDates, 0.03, -0.001, 0.0001);
+        checkBootstrapPair(item, annualOisPillars(target, annualDates, calendar,
+                                                  dt::Period(6, dt::TimeUnit::Months), 2));
+    }
+
+    std::vector<dt::Date> stubDates{dt::Period(4, dt::TimeUnit::Months).advance(kReference),
+                                    dt::Period(15, dt::TimeUnit::Months).advance(kReference)};
+    for (int year = 2; year <= 5; ++year) {
+        stubDates.push_back(kReference.plusYears(year));
+    }
+    for (const SchemeCase& item : schemeMatrix()) {
+        const mk::DiscountCurve<double> target = makeTarget(item, stubDates, -0.002, 0.0, 0.0);
+        checkBootstrapPair(item, annualOisPillars(target, stubDates, calendar,
+                                                  dt::Period(1, dt::TimeUnit::Years), 0));
+    }
+}
+
+TEST_F(BootstrapBitwiseTest, futuresFixtureStrips) {
+    const FutureStrip strip = immStrip(8);
+    const mk::DiscountCurve<double> target = futureTarget(strip);
+    const double convexity = mk::hullWhiteFuturesAdjustment(0.01, 0.05, 1.0, 0.25, 1.0);
+
+    struct StyleCase {
+        mk::FutureStyle style;
+        mk::AveragingStyle averaging;
+    };
+    const std::vector<StyleCase> styles{
+        {mk::FutureStyle::Simple, mk::AveragingStyle::Arithmetic},
+        {mk::FutureStyle::Compounded, mk::AveragingStyle::Arithmetic},
+        {mk::FutureStyle::Averaged, mk::AveragingStyle::Arithmetic},
+        {mk::FutureStyle::Averaged, mk::AveragingStyle::Compounded},
+    };
+    for (const SchemeCase& item : schemeMatrix()) {
+        for (const StyleCase& style : styles) {
+            SCOPED_TRACE(std::to_string(static_cast<int>(style.style)) + "/" +
+                         std::to_string(static_cast<int>(style.averaging)));
+            std::vector<mk::CurvePillar> pillars =
+                futurePillars(strip, convexity, style.style, style.averaging);
+            for (mk::CurvePillar& pillar : pillars) {
+                pillar.quote = mk::impliedQuote(pillar, kReference, target);
+            }
+            const mk::DiscountCurve<double> legacy = legacyBootstrapDiscountCurve(
+                kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
+            const mk::DiscountCurve<double> current = mk::bootstrapDiscountCurve(
+                kReference, kZeroDc, item.space, item.scheme, pillars, 1e-14, item.tension);
+            checkBootstrapSameBits(pillars, legacy, current);
+        }
+    }
+}
+
+TEST_F(BootstrapBitwiseTest, eurSpotAndEcbFixtures) {
+    {
+        const std::vector<mk::CurvePillar> pillars = paper::oisSpotPillars();
+        for (const SchemeCase& item : schemeMatrix()) {
+            const mk::DiscountCurve<double> legacy =
+                legacyBootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space,
+                                             item.scheme, pillars, 1e-14, item.tension);
+            const mk::DiscountCurve<double> current =
+                mk::bootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space,
+                                           item.scheme, pillars, 1e-14, item.tension);
+            checkBootstrapSameBits(pillars, legacy, current);
+        }
+    }
+    for (const SchemeCase& item : schemeMatrix()) {
+        const std::vector<mk::CurvePillar> pillars = paper::oisEcbPillars();
+        const mk::DiscountCurve<double> legacy =
+            legacyBootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space, item.scheme,
+                                         pillars, 1e-14, item.tension);
+        const mk::DiscountCurve<double> current =
+            mk::bootstrapDiscountCurve(paper::kReference, paper::kZeroDc, item.space, item.scheme,
+                                       pillars, 1e-14, item.tension);
+        checkBootstrapSameBits(pillars, legacy, current);
+    }
+    {
+        const std::vector<mk::CurvePillar> pillars = paper::oisEcbPillars();
+        const mk::DiscountCurve<double> legacy = legacyBootstrapDiscountCurve(
+            paper::kReference, paper::kZeroDc, mk::InterpolationSpace::LogDiscount,
+            mk::InterpolationScheme::HymanSpline, pillars);
+        const mk::DiscountCurve<double> current = mk::bootstrapDiscountCurve(
+            paper::kReference, paper::kZeroDc, mk::InterpolationSpace::LogDiscount,
+            mk::InterpolationScheme::HymanSpline, pillars);
+        checkBootstrapSameBits(pillars, legacy, current);
+    }
 }
