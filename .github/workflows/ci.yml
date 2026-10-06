@@ -1,7 +1,11 @@
 name: ci
 
+# Push runs are the cheap main-branch smoke (fast tier only); the full suite
+# runs on pull requests. Feature-branch pushes do not trigger this at all —
+# their PR event does, so each change runs once.
 on:
   push:
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -55,18 +59,20 @@ jobs:
         run: cmake --build build-ci -j 4
 
       # Fast tier first: a cheap failure aborts the job (fail-fast) before the
-      # full 520-case suite runs. The full run uploads one JUnit aggregate per
-      # matrix job; --timeout 1800 covers the 500s-class stress cases.
+      # full suite. It also is the whole test step for main pushes; the full
+      # 520-case run only happens on PRs and uploads one JUnit aggregate per
+      # matrix job (--timeout 1800 covers the 500s-class stress cases).
       - name: Test (fast tier)
         run: ctest --test-dir build-ci -L fast -j 4 --output-on-failure
 
       - name: Test (full suite)
+        if: github.event_name == 'pull_request'
         run: >
           ctest --test-dir build-ci -j 4 --output-on-failure --timeout 1800
           --output-junit junit-${{ matrix.os }}-${{ matrix.build_type }}.xml
 
       - name: Upload JUnit results
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: junit-${{ matrix.os }}-${{ matrix.build_type }}
