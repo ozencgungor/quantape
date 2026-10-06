@@ -1,0 +1,66 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Shuffle/repeat flake hunt. Not a required check (branch protection only
+  # lists the ci/sanitizers/analysis/format/policy job names).
+  shuffle-repeat:
+    name: ubuntu-24.04 / Debug shuffle x3
+    runs-on: ubuntu-24.04
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: nightly-ubuntu-24.04-Debug
+          max-size: 500M
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third-party
+            build-nightly/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh') }}
+
+      - name: Fetch pinned dependencies (Eigen, Stan Math)
+        run: repo_tools/fetch_third_party.sh
+
+      # EXTRA_ARGS reaches every discovered case via quantape_add_gtest, so
+      # each CTest case runs its gtest case three times.
+      - name: Configure (shuffle + repeat)
+        run: >
+          cmake -S . -B build-nightly
+          -DCMAKE_BUILD_TYPE=Debug
+          -DQUANTAPE_BUILD_BENCHMARKS=OFF
+          -DQUANTAPE_BUILD_EXAMPLES=ON
+          -DQUANTAPE_BUILD_TOOLS=ON
+          -DQUANTAPE_GTEST_EXTRA_ARGS="--gtest_shuffle;--gtest_repeat=3"
+
+      - name: Build
+        run: cmake --build build-nightly -j 4
+
+      - name: Test (shuffle + repeat)
+        run: >
+          ctest --test-dir build-nightly -j 4 --timeout 1800 --output-on-failure
+          --output-junit nightly-junit.xml
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-junit
+          path: build-nightly/nightly-junit.xml
+          if-no-files-found: ignore
