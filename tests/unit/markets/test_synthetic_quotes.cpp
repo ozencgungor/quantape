@@ -9,15 +9,15 @@
  * the error paths.
  */
 
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/SyntheticQuotes.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <memory>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape;
 
@@ -59,7 +59,9 @@ DiscountCurve<double> makeOvernightCurve(int years) {
                                  InterpolationScheme::Linear);
 }
 
-void testIntegratedBasisAndFra() {
+} // namespace
+
+TEST(SyntheticQuotes, integratedBasisRecoversIndexForward) {
     const DiscountCurve<double> overnight = makeOvernightCurve(5);
     auto parent = std::make_shared<DiscountCurve<double>>(overnight);
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
@@ -76,10 +78,10 @@ void testIntegratedBasisAndFra() {
                                                         maturity, kOvernightDc, kIndexDc, kZeroDc);
     const double exact = (index.discount(t1) / index.discount(t2) - 1.0) / tau;
     const double delta = markets::integratedBasis(index, overnight, t1, t2);
-    CHECK(delta > 0.0);
+    EXPECT_TRUE(delta > 0.0);
     // Exact identity: the integrated basis recovers the index curve forward.
-    util::checkClose("synthetic FRA vs index forward", synthetic, exact, 1e-12);
-    CHECK(synthetic > 0.0);
+    CHECK_CLOSE("synthetic FRA vs index forward", synthetic, exact, 1e-12);
+    EXPECT_TRUE(synthetic > 0.0);
 
     const datetime::Date depositMaturity =
         datetime::Period(3, datetime::TimeUnit::Months).advance(kReference);
@@ -88,10 +90,10 @@ void testIntegratedBasisAndFra() {
     const double tDeposit = datetime::yearFraction(kReference, depositMaturity, kZeroDc);
     const double tauDeposit = datetime::yearFraction(kReference, depositMaturity, kIndexDc);
     const double exactDeposit = (1.0 / index.discount(tDeposit) - 1.0) / tauDeposit;
-    util::checkClose("synthetic deposit vs index rate", syntheticDeposit, exactDeposit, 1e-12);
+    CHECK_CLOSE("synthetic deposit vs index rate", syntheticDeposit, exactDeposit, 1e-12);
 }
 
-void testSyntheticDepositPinsShortEnd() {
+TEST(SyntheticQuotes, syntheticDepositPinsShortEnd) {
     const DiscountCurve<double> overnight = makeOvernightCurve(5);
     auto parent = std::make_shared<DiscountCurve<double>>(overnight);
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
@@ -120,71 +122,41 @@ void testSyntheticDepositPinsShortEnd() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("synthetic short-end reprice",
-                         markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
+        CHECK_CLOSE("synthetic short-end reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
     const double tDeposit = datetime::yearFraction(kReference, deposit.maturity, kZeroDc);
     const double tauDeposit = datetime::yearFraction(kReference, deposit.maturity, kIndexDc);
     // The deposit node solves its own synthetic quote exactly.
-    util::checkClose("synthetic deposit node", curve.zero(tDeposit),
-                     std::log(1.0 + deposit.quote * tauDeposit) / tDeposit, 1e-12);
+    CHECK_CLOSE("synthetic deposit node", curve.zero(tDeposit),
+                std::log(1.0 + deposit.quote * tauDeposit) / tDeposit, 1e-12);
     // The 1Y pillar is repriced from the index curve, so its node matches.
     const datetime::Date oneYear = kReference.plusYears(1);
     const double tOneYear = datetime::yearFraction(kReference, oneYear, kZeroDc);
-    util::checkClose("1y node vs index curve", curve.zero(tOneYear), indexTruth.zero(tOneYear),
-                     1e-9);
+    CHECK_CLOSE("1y node vs index curve", curve.zero(tOneYear), indexTruth.zero(tOneYear), 1e-9);
 }
 
-void testQuoteExtrapolation() {
+TEST(SyntheticQuotes, quoteExtrapolation) {
     const std::vector<double> times{1.0, 2.0, 3.0};
     const std::vector<double> quotes{0.01, 0.02, 0.03};
-    util::checkClose("flat quote extrapolation", markets::extrapolatedQuote(times, quotes, 5.0),
-                     0.03, 1e-15);
-    util::checkClose(
-        "linear quote extrapolation",
-        markets::extrapolatedQuote(times, quotes, 5.0, markets::QuoteExtrapolation::Linear), 0.05,
-        1e-15);
-    bool threw = false;
-    try {
-        (void)markets::extrapolatedQuote(times, quotes, 2.0);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    CHECK_CLOSE("flat quote extrapolation", markets::extrapolatedQuote(times, quotes, 5.0), 0.03,
+                1e-15);
+    CHECK_CLOSE("linear quote extrapolation",
+                markets::extrapolatedQuote(times, quotes, 5.0, markets::QuoteExtrapolation::Linear),
+                0.05, 1e-15);
+    EXPECT_THROW((void)markets::extrapolatedQuote(times, quotes, 2.0), std::invalid_argument);
 }
 
-void testSyntheticErrors() {
+TEST(SyntheticQuotes, rejectsInvalidWindows) {
     const DiscountCurve<double> overnight = makeOvernightCurve(3);
     auto parent = std::make_shared<DiscountCurve<double>>(overnight);
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
     const std::vector<double> spreads{0.0, 0.001, 0.001, 0.001};
     const SpreadCurve<double> index(parent, times, spreads, InterpolationScheme::Linear);
 
-    bool threw = false;
-    try {
-        (void)markets::integratedBasis(index, overnight, 2.0, 1.0);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-
-    threw = false;
-    try {
-        (void)markets::syntheticFraQuote(index, overnight, kReference, kReference.plusYears(1),
-                                         kReference.plusYears(1), kOvernightDc, kIndexDc, kZeroDc);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-}
-
-} // namespace
-
-int main() {
-    testIntegratedBasisAndFra();
-    testSyntheticDepositPinsShortEnd();
-    testQuoteExtrapolation();
-    testSyntheticErrors();
-    QTA_LOG_INFO("test", "test_synthetic_quotes: ok");
-    return 0;
+    EXPECT_THROW((void)markets::integratedBasis(index, overnight, 2.0, 1.0), std::invalid_argument);
+    EXPECT_THROW((void)markets::syntheticFraQuote(index, overnight, kReference,
+                                                  kReference.plusYears(1), kReference.plusYears(1),
+                                                  kOvernightDc, kIndexDc, kZeroDc),
+                 std::invalid_argument);
 }

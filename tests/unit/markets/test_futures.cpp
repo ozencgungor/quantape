@@ -9,17 +9,17 @@
  */
 
 #include "quantape/datetime/Imm.h"
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/CurveConfig.h"
 #include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape;
 
@@ -83,37 +83,39 @@ std::vector<CurvePillar> futurePillars(const FutureStrip& strip, double convexit
     return pillars;
 }
 
-void testHullWhiteAdjustment() {
+} // namespace
+
+TEST(HullWhiteConvexity, adjustmentLimitsAndScaling) {
     // Zero volatility and zero mean reversion handle their limits.
-    util::checkClose("hw zero vol", markets::hullWhiteFuturesAdjustment(0.0, 0.05, 1.0, 0.25, 1.0),
-                     0.0, 1e-18);
+    CHECK_CLOSE("hw zero vol", markets::hullWhiteFuturesAdjustment(0.0, 0.05, 1.0, 0.25, 1.0), 0.0,
+                1e-18);
     const double series = markets::hullWhiteFuturesAdjustment(0.01, 0.0, 1.0, 0.25, 1.0);
     const double nearlySeries = markets::hullWhiteFuturesAdjustment(0.01, 1e-9, 1.0, 0.25, 1.0);
-    util::checkClose("hw series continuity", nearlySeries, series, 1e-12);
+    CHECK_CLOSE("hw series continuity", nearlySeries, series, 1e-12);
     const double seriesExponent = 0.01 * 0.01 * 0.25 * (0.5 * 1.0 * 1.0 + 1.0 * 0.25);
     // (P1/P2) (exp(D) - 1) / accrual, evaluated with the same expm1 the helper uses
     const double expected = std::expm1(seriesExponent) / 0.25;
-    util::checkClose("hw series value", series, expected, 1e-15);
-    util::checkClose("hw branch continuity",
-                     markets::hullWhiteFuturesAdjustment(0.01, 1.1e-8, 1.0, 0.25, 1.0), series,
-                     1e-6 * series);
+    CHECK_CLOSE("hw series value", series, expected, 1e-15);
+    CHECK_CLOSE("hw branch continuity",
+                markets::hullWhiteFuturesAdjustment(0.01, 1.1e-8, 1.0, 0.25, 1.0), series,
+                1e-6 * series);
 
     // Positive convexity, monotone in volatility, quadratic for small sigma.
     const double small = markets::hullWhiteFuturesAdjustment(0.001, 0.0, 1.0, 0.25, 1.0);
     const double doubleSmall = markets::hullWhiteFuturesAdjustment(0.002, 0.0, 1.0, 0.25, 1.0);
-    CHECK(small > 0.0);
+    EXPECT_TRUE(small > 0.0);
     const double smallExponent = 0.001 * 0.001 * 0.25 * (0.5 + 0.25);
-    util::checkClose("hw sigma squared scaling", doubleSmall / small,
-                     std::expm1(4.0 * smallExponent) / std::expm1(smallExponent), 1e-12);
+    CHECK_CLOSE("hw sigma squared scaling", doubleSmall / small,
+                std::expm1(4.0 * smallExponent) / std::expm1(smallExponent), 1e-12);
     const double stronger = markets::hullWhiteFuturesAdjustment(0.02, 0.05, 1.0, 0.25, 1.0);
-    CHECK(stronger > markets::hullWhiteFuturesAdjustment(0.01, 0.05, 1.0, 0.25, 1.0));
+    EXPECT_TRUE(stronger > markets::hullWhiteFuturesAdjustment(0.01, 0.05, 1.0, 0.25, 1.0));
 }
 
-void testImmFutureBootstrap() {
+TEST(FuturesBootstrap, immStripRecoveryForwardAndFinancement) {
     const FutureStrip strip = immStrip(8);
     for (const datetime::Date& start : strip.starts) {
-        CHECK(datetime::isIMMDate(start));
-        CHECK(start.weekday() == datetime::Weekday::Wednesday);
+        EXPECT_TRUE(datetime::isIMMDate(start));
+        EXPECT_TRUE(start.weekday() == datetime::Weekday::Wednesday);
     }
     std::vector<datetime::Date> targetDates{
         datetime::Period(3, datetime::TimeUnit::Months).advance(kReference)};
@@ -129,13 +131,13 @@ void testImmFutureBootstrap() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("future reprice", markets::impliedQuote(pillar, kReference, curve),
-                         pillar.quote, 1e-9);
+        CHECK_CLOSE("future reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
     // IMM dates are curve nodes, so the target is recovered exactly.
     for (std::size_t i = 0; i < strip.ends.size(); ++i) {
         const double t = datetime::yearFraction(kReference, strip.ends[i], kZeroDc);
-        util::checkClose("future node recovery", curve.zero(t), target.zero(t), 1e-10);
+        CHECK_CLOSE("future node recovery", curve.zero(t), target.zero(t), 1e-10);
     }
     // The fitted forward over each period equals the futures quote minus C.
     for (std::size_t i = 0; i < strip.starts.size(); ++i) {
@@ -143,12 +145,11 @@ void testImmFutureBootstrap() {
         const double t2 = datetime::yearFraction(kReference, strip.ends[i], kZeroDc);
         const double tau = datetime::yearFraction(strip.starts[i], strip.ends[i], kIndexDc);
         const double forward = (curve.discount(t1) / curve.discount(t2) - 1.0) / tau;
-        util::checkClose("future implies forward", forward, pillars[i + 1].quote - convexity,
-                         1e-10);
+        CHECK_CLOSE("future implies forward", forward, pillars[i + 1].quote - convexity, 1e-10);
     }
 }
 
-void testConvexityMovesForward() {
+TEST(FuturesBootstrap, convexitySubtractsFromForward) {
     const FutureStrip strip = immStrip(4);
     std::vector<datetime::Date> targetDates{
         datetime::Period(3, datetime::TimeUnit::Months).advance(kReference)};
@@ -175,13 +176,13 @@ void testConvexityMovesForward() {
         const double t2 = datetime::yearFraction(kReference, end, kZeroDc);
         const double tau = datetime::yearFraction(start, end, kIndexDc);
         // The curve forward is the futures-implied rate minus the adjustment.
-        util::checkClose("convexity lowers forward",
-                         (curve.discount(t1) / curve.discount(t2) - 1.0) / tau,
-                         withConvexity[i + 1].quote - 0.0005, 1e-10);
+        CHECK_CLOSE("convexity lowers forward",
+                    (curve.discount(t1) / curve.discount(t2) - 1.0) / tau,
+                    withConvexity[i + 1].quote - 0.0005, 1e-10);
     }
 }
 
-void testFutureRiskRowFiniteDifference() {
+TEST(FuturesRisk, pillarJacobianVsFd) {
     const FutureStrip strip = immStrip(4);
     std::vector<datetime::Date> targetDates{
         datetime::Period(3, datetime::TimeUnit::Months).advance(kReference)};
@@ -196,7 +197,7 @@ void testFutureRiskRowFiniteDifference() {
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     const CurvePillar& future = pillars[2];
     std::vector<double> row;
-    CHECK(markets::pillarJacobianRow(future, kReference, curve, row));
+    EXPECT_TRUE(markets::pillarJacobianRow(future, kReference, curve, row));
     for (std::size_t i = 1; i < curve.size(); ++i) {
         std::vector<double> zeros = curve.zeros();
         zeros[i] += 1e-8;
@@ -205,11 +206,11 @@ void testFutureRiskRowFiniteDifference() {
         const double fd = (markets::impliedQuote(future, kReference, bumped) -
                            markets::impliedQuote(future, kReference, curve)) /
                           1e-8;
-        util::checkClose("future jacobian vs FD", row[i - 1], fd, 1e-5);
+        CHECK_CLOSE("future jacobian vs FD", row[i - 1], fd, 1e-5);
     }
 }
 
-void testFutureConfigRoundTrip() {
+TEST(FuturesConfig, roundTripAndConvexityField) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -227,21 +228,21 @@ void testFutureConfigRoundTrip() {
         }]
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
-    CHECK(stack.curves.size() == 1);
+    EXPECT_TRUE(stack.curves.size() == 1);
     const markets::CurveSpec& spec = stack.curves.front();
-    CHECK(spec.pillars.size() == 2);
-    CHECK(spec.pillars[1].kind == markets::PillarSpec::Kind::Future);
-    util::checkClose("config convexity", spec.pillars[1].convexityAdjustment, 0.0002, 1e-15);
+    EXPECT_TRUE(spec.pillars.size() == 2);
+    EXPECT_TRUE(spec.pillars[1].kind == markets::PillarSpec::Kind::Future);
+    CHECK_CLOSE("config convexity", spec.pillars[1].convexityAdjustment, 0.0002, 1e-15);
     std::vector<CurvePillar> filled;
     const DiscountCurve<double> curve = markets::buildCurve(stack, spec, {}, &filled);
-    CHECK(filled.size() == spec.pillars.size());
+    EXPECT_TRUE(filled.size() == spec.pillars.size());
     for (const CurvePillar& pillar : filled) {
-        util::checkClose("future config reprice", markets::impliedQuote(pillar, stack.asOf, curve),
-                         pillar.quote, 1e-9);
+        CHECK_CLOSE("future config reprice", markets::impliedQuote(pillar, stack.asOf, curve),
+                    pillar.quote, 1e-9);
     }
 }
 
-void testCurveLevelConvexity() {
+TEST(FuturesConfig, selfReferentialConvexityAndMissingAdjustmentRejected) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -259,10 +260,10 @@ void testCurveLevelConvexity() {
         }]
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
-    CHECK(stack.curves.size() == 1);
+    EXPECT_TRUE(stack.curves.size() == 1);
     const markets::CurveSpec& spec = stack.curves.front();
-    CHECK(spec.convexity.enabled);
-    CHECK(!spec.convexity.hasReference);
+    EXPECT_TRUE(spec.convexity.enabled);
+    EXPECT_TRUE(!spec.convexity.hasReference);
     const DiscountCurve<double> curve = markets::buildCurve(stack, spec);
 
     const markets::PillarSpec& futureSpec = spec.pillars.back();
@@ -273,7 +274,7 @@ void testCurveLevelConvexity() {
     const double ratio = curve.discount(t1) / curve.discount(t2);
     const double adjustment = markets::hullWhiteFuturesAdjustment(0.01, 0.05, t1, accrual, ratio);
     const double forward = (ratio - 1.0) / accrual;
-    util::checkClose("self-referential convexity", forward + adjustment, futureSpec.quote, 1e-9);
+    CHECK_CLOSE("self-referential convexity", forward + adjustment, futureSpec.quote, 1e-9);
 
     // A Future pillar without either source of convexity is a config error.
     const std::string missing = R"({
@@ -290,16 +291,11 @@ void testCurveLevelConvexity() {
         }]
     })";
     const markets::CurveStackSpec missingStack = markets::parseCurveStackSpec(missing);
-    bool threw = false;
-    try {
-        (void)markets::buildCurve(missingStack, missingStack.curves.front());
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)markets::buildCurve(missingStack, missingStack.curves.front()),
+                 std::invalid_argument);
 }
 
-void testReferenceCurveConvexity() {
+TEST(FuturesConfig, referenceCurveAdjustmentDiffersAndMissingReferenceThrows) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [
@@ -334,10 +330,10 @@ void testReferenceCurveConvexity() {
         ]
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
-    CHECK(stack.curves.size() == 2);
+    EXPECT_TRUE(stack.curves.size() == 2);
     const markets::CurveSpec& discountSpec = stack.curves[0];
     const markets::CurveSpec& forecastSpec = stack.curves[1];
-    CHECK(forecastSpec.convexity.hasReference);
+    EXPECT_TRUE(forecastSpec.convexity.hasReference);
     const DiscountCurve<double> discount = markets::buildCurve(stack, discountSpec);
     const DiscountCurve<double> forecast =
         markets::buildCurve(stack, forecastSpec, {{discountSpec.key, &discount}});
@@ -352,23 +348,17 @@ void testReferenceCurveConvexity() {
     const double forward = (forecast.discount(t1) / forecast.discount(t2) - 1.0) / accrual;
     const double referenceAdjustment = markets::hullWhiteFuturesAdjustment(
         0.01, 0.05, t1, accrual, discount.discount(t1) / discount.discount(t2));
-    util::checkClose("reference convexity", forward + referenceAdjustment, futureSpec.quote, 1e-9);
+    CHECK_CLOSE("reference convexity", forward + referenceAdjustment, futureSpec.quote, 1e-9);
     // The EUR self-referential adjustment differs: the reference curve was used.
     const double selfAdjustment = markets::hullWhiteFuturesAdjustment(
         0.01, 0.05, t1, accrual, forecast.discount(t1) / forecast.discount(t2));
-    CHECK(std::abs(selfAdjustment - referenceAdjustment) > 1e-10);
-    CHECK(std::abs(forward + selfAdjustment - futureSpec.quote) > 1e-10);
+    EXPECT_TRUE(std::abs(selfAdjustment - referenceAdjustment) > 1e-10);
+    EXPECT_TRUE(std::abs(forward + selfAdjustment - futureSpec.quote) > 1e-10);
 
-    bool threw = false;
-    try {
-        (void)markets::buildCurve(stack, forecastSpec, {});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)markets::buildCurve(stack, forecastSpec, {}), std::invalid_argument);
 }
 
-void testHullWhiteParameterFit() {
+TEST(HullWhiteFit, pinnedSigmaAndMeanReversionAndEmptyThrows) {
     const double trueSigma = 0.011;
     const double trueMeanReversion = 0.045;
     const double tau = 0.25;
@@ -388,28 +378,21 @@ void testHullWhiteParameterFit() {
     sigmaOptions.initialValue = 0.008;
     const markets::HullWhiteFitResult sigmaFit =
         markets::fitHullWhiteSigma(observations, sigmaOptions);
-    util::checkClose("hw fit sigma", sigmaFit.sigma, trueSigma, 1e-9);
-    CHECK(sigmaFit.rmsResidual < 1e-10);
+    CHECK_CLOSE("hw fit sigma", sigmaFit.sigma, trueSigma, 1e-9);
+    EXPECT_TRUE(sigmaFit.rmsResidual < 1e-10);
 
     markets::HullWhiteFitOptions meanReversionOptions;
     meanReversionOptions.pinnedSigma = trueSigma;
     meanReversionOptions.initialValue = 0.03;
     const markets::HullWhiteFitResult meanReversionFit =
         markets::fitHullWhiteMeanReversion(observations, meanReversionOptions);
-    util::checkClose("hw fit mean reversion", meanReversionFit.meanReversion, trueMeanReversion,
-                     1e-7);
-    CHECK(meanReversionFit.rmsResidual < 1e-10);
+    CHECK_CLOSE("hw fit mean reversion", meanReversionFit.meanReversion, trueMeanReversion, 1e-7);
+    EXPECT_TRUE(meanReversionFit.rmsResidual < 1e-10);
 
-    bool threw = false;
-    try {
-        (void)markets::fitHullWhiteSigma({});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)markets::fitHullWhiteSigma({}), std::invalid_argument);
 }
 
-void testRfrFutureStyles() {
+TEST(FuturesBootstrap, compoundedAndSimpleStyles) {
     const FutureStrip strip = immStrip(3);
     std::vector<datetime::Date> targetDates{
         datetime::Period(3, datetime::TimeUnit::Months).advance(kReference)};
@@ -426,18 +409,18 @@ void testRfrFutureStyles() {
     CurvePillar compounded = pillars[1];
     CurvePillar simple = pillars[1];
     simple.futureStyle = markets::FutureStyle::Simple;
-    util::checkClose("compounded telescopes to simple",
-                     markets::impliedQuote(compounded, kReference, target),
-                     markets::impliedQuote(simple, kReference, target), 1e-15);
+    CHECK_CLOSE("compounded telescopes to simple",
+                markets::impliedQuote(compounded, kReference, target),
+                markets::impliedQuote(simple, kReference, target), 1e-15);
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("rfr future reprice", markets::impliedQuote(pillar, kReference, curve),
-                         pillar.quote, 1e-9);
+        CHECK_CLOSE("rfr future reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
 }
 
-void testAveragedRfrFuture() {
+TEST(FuturesBootstrap, averagedArithmeticAndJacobian) {
     const FutureStrip strip = immStrip(3);
     const datetime::Date periodEnd =
         datetime::Period(1, datetime::TimeUnit::Months).advance(strip.starts.front());
@@ -459,7 +442,7 @@ void testAveragedRfrFuture() {
     const double t2 = datetime::yearFraction(kReference, averaged.maturity, kZeroDc);
     const double tau = datetime::yearFraction(averaged.start, averaged.maturity, kIndexDc);
     const double simpleForward = (target.discount(t1) / target.discount(t2) - 1.0) / tau;
-    CHECK(std::abs(averaged.quote - simpleForward) > 1e-7);
+    EXPECT_TRUE(std::abs(averaged.quote - simpleForward) > 1e-7);
 
     std::vector<CurvePillar> pillars = futurePillars(strip, 0.0002);
     pillars[1] = averaged;
@@ -470,12 +453,12 @@ void testAveragedRfrFuture() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("averaged future reprice",
-                         markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
+        CHECK_CLOSE("averaged future reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
 
     std::vector<double> row;
-    CHECK(markets::pillarJacobianRow(averaged, kReference, curve, row));
+    EXPECT_TRUE(markets::pillarJacobianRow(averaged, kReference, curve, row));
     for (std::size_t i = 1; i < curve.size(); ++i) {
         std::vector<double> zeros = curve.zeros();
         zeros[i] += 1e-8;
@@ -484,11 +467,11 @@ void testAveragedRfrFuture() {
         const double fd = (markets::impliedQuote(averaged, kReference, bumped) -
                            markets::impliedQuote(averaged, kReference, curve)) /
                           1e-8;
-        util::checkClose("averaged jacobian vs FD", row[i - 1], fd, 1e-5);
+        CHECK_CLOSE("averaged jacobian vs FD", row[i - 1], fd, 1e-5);
     }
 }
 
-void testAveragedCompoundedFuture() {
+TEST(FuturesBootstrap, averagedCompoundedHandCheckGridAndJacobian) {
     const FutureStrip strip = immStrip(3);
     const datetime::Date periodEnd =
         datetime::Period(1, datetime::TimeUnit::Months).advance(strip.starts.front());
@@ -515,24 +498,24 @@ void testAveragedCompoundedFuture() {
     const double tau = datetime::yearFraction(averaged.start, averaged.maturity, kIndexDc);
     // Flat zero curve under LogDiscount/Linear: D(t) = exp(-z t), so the
     // compounded average reprices to expm1(z (t2 - t1)) / tau plus convexity.
-    util::checkClose("compounded averaged hand check", averaged.quote,
-                     std::expm1(flatZero * (t2 - t1)) / tau + convexity, 1e-14);
+    CHECK_CLOSE("compounded averaged hand check", averaged.quote,
+                std::expm1(flatZero * (t2 - t1)) / tau + convexity, 1e-14);
 
     // The explicit fixing-grid product is the telescoped period ratio, and the
     // quoted rate is its annualization over the reference period.
     const std::vector<datetime::Date> fixings =
         markets::businessDayFixings(averaged.calendar, averaged.start, averaged.maturity);
-    CHECK(fixings.back() == averaged.maturity);
+    EXPECT_TRUE(fixings.back() == averaged.maturity);
     double gridProduct = 1.0;
     for (std::size_t k = 1; k < fixings.size(); ++k) {
         const double previous = datetime::yearFraction(kReference, fixings[k - 1], kZeroDc);
         const double current = datetime::yearFraction(kReference, fixings[k], kZeroDc);
         gridProduct *= target.discount(previous) / target.discount(current);
     }
-    util::checkClose("compounded averaged grid ratio", gridProduct,
-                     target.compoundingFactor(t1, t2), 1e-14);
-    util::checkClose("compounded averaged quote from grid", averaged.quote - convexity,
-                     (gridProduct - 1.0) / tau, 1e-14);
+    CHECK_CLOSE("compounded averaged grid ratio", gridProduct, target.compoundingFactor(t1, t2),
+                1e-14);
+    CHECK_CLOSE("compounded averaged quote from grid", averaged.quote - convexity,
+                (gridProduct - 1.0) / tau, 1e-14);
 
     std::vector<CurvePillar> pillars = futurePillars(strip, 0.0002);
     pillars[1] = averaged;
@@ -543,12 +526,12 @@ void testAveragedCompoundedFuture() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("compounded averaged reprice",
-                         markets::impliedQuote(pillar, kReference, curve), pillar.quote, 1e-9);
+        CHECK_CLOSE("compounded averaged reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
 
     std::vector<double> row;
-    CHECK(markets::pillarJacobianRow(averaged, kReference, curve, row));
+    EXPECT_TRUE(markets::pillarJacobianRow(averaged, kReference, curve, row));
     const double step = 1e-7;
     for (std::size_t i = 1; i < curve.size(); ++i) {
         std::vector<double> plus = curve.zeros();
@@ -562,11 +545,11 @@ void testAveragedCompoundedFuture() {
         const double fd = (markets::impliedQuote(averaged, kReference, bumpedPlus) -
                            markets::impliedQuote(averaged, kReference, bumpedMinus)) /
                           (2.0 * step);
-        util::checkClose("compounded averaged jacobian vs FD", row[i - 1], fd, 1e-6);
+        CHECK_CLOSE("compounded averaged jacobian vs FD", row[i - 1], fd, 1e-6);
     }
 }
 
-void testFutureStyleConfig() {
+TEST(FuturesConfig, styleParsingAndInvalidStyle) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -582,9 +565,9 @@ void testFutureStyleConfig() {
         }]
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
-    CHECK(stack.curves.front().pillars.front().futureStyle == markets::FutureStyle::Averaged);
-    CHECK(stack.curves.front().pillars.front().averagingStyle ==
-          markets::AveragingStyle::Arithmetic);
+    EXPECT_TRUE(stack.curves.front().pillars.front().futureStyle == markets::FutureStyle::Averaged);
+    EXPECT_TRUE(stack.curves.front().pillars.front().averagingStyle ==
+                markets::AveragingStyle::Arithmetic);
 
     const std::string invalid = R"({
         "asOf": "2026-09-29",
@@ -599,16 +582,10 @@ void testFutureStyleConfig() {
             ]
         }]
     })";
-    bool threw = false;
-    try {
-        (void)markets::parseCurveStackSpec(invalid);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)markets::parseCurveStackSpec(invalid), std::invalid_argument);
 }
 
-void testAveragedWeekendFixings() {
+TEST(FutureFixings, weekendGridContract) {
     const datetime::Calendar weekends = datetime::Calendar::weekendsOnly();
     const datetime::Date start = kReference.plusMonths(1);
     const datetime::Date maturity = datetime::Period(1, datetime::TimeUnit::Months).advance(start);
@@ -635,37 +612,17 @@ void testAveragedWeekendFixings() {
     pillars.push_back(averaged);
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
-    util::checkClose("averaged weekend reprice", markets::impliedQuote(averaged, kReference, curve),
-                     averaged.quote, 1e-9);
+    CHECK_CLOSE("averaged weekend reprice", markets::impliedQuote(averaged, kReference, curve),
+                averaged.quote, 1e-9);
     const auto fixings = markets::businessDayFixings(weekends, start, maturity);
-    CHECK(fixings.size() >= 20);
-    CHECK(fixings.back() == maturity);
+    EXPECT_TRUE(fixings.size() >= 20);
+    EXPECT_TRUE(fixings.back() == maturity);
     for (std::size_t k = 1; k < fixings.size(); ++k) {
-        CHECK(fixings[k] > fixings[k - 1]);
+        EXPECT_TRUE(fixings[k] > fixings[k - 1]);
         // Only the final endpoint may be a non-business day: it closes the
         // quoted reference period.
         if (k + 1 < fixings.size()) {
-            CHECK(weekends.isBusinessDay(fixings[k]));
+            EXPECT_TRUE(weekends.isBusinessDay(fixings[k]));
         }
     }
-}
-
-} // namespace
-
-int main() {
-    testHullWhiteAdjustment();
-    testImmFutureBootstrap();
-    testConvexityMovesForward();
-    testFutureRiskRowFiniteDifference();
-    testFutureConfigRoundTrip();
-    testCurveLevelConvexity();
-    testReferenceCurveConvexity();
-    testHullWhiteParameterFit();
-    testRfrFutureStyles();
-    testAveragedRfrFuture();
-    testAveragedCompoundedFuture();
-    testFutureStyleConfig();
-    testAveragedWeekendFixings();
-    QTA_LOG_INFO("test", "test_futures: ok");
-    return 0;
 }

@@ -8,18 +8,18 @@
  * the first floating coupon an already-known fixing.
  */
 
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/CurveConfig.h"
 #include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/FraConvexity.h"
 #include "quantape/markets/Curves/StackRisk.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape;
 
@@ -67,7 +67,9 @@ std::vector<CurvePillar> convexityPillars(const DiscountCurve<double>& target, d
     return pillars;
 }
 
-void testFraConvexityPricing() {
+} // namespace
+
+TEST(FraConvexity, pricingAndNodeRecovery) {
     std::vector<datetime::Date> dates;
     for (int year = 1; year <= 4; ++year) {
         dates.push_back(kReference.plusYears(year));
@@ -78,8 +80,8 @@ void testFraConvexityPricing() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("fra convexity reprice", markets::impliedQuote(pillar, kReference, curve),
-                         pillar.quote, 1e-9);
+        CHECK_CLOSE("fra convexity reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
     const CurvePillar& fra = pillars.back();
     const double t1 = datetime::yearFraction(kReference, fra.start, kZeroDc);
@@ -87,15 +89,15 @@ void testFraConvexityPricing() {
     const double tau = datetime::yearFraction(fra.start, fra.maturity, kIndexDc);
     const double forward = (curve.discount(t1) / curve.discount(t2) - 1.0) / tau;
     const double expectedForward = ((1.0 + fra.quote * tau) * std::exp(-exponent) - 1.0) / tau;
-    util::checkClose("fra convexity forward", forward, expectedForward, 1e-10);
+    CHECK_CLOSE("fra convexity forward", forward, expectedForward, 1e-10);
 
     CurvePillar plain = fra;
     plain.fraConvexityExponent = 0.0;
-    util::checkClose("fra zero exponent identity", markets::impliedQuote(plain, kReference, curve),
-                     (curve.discount(t1) / curve.discount(t2) - 1.0) / tau, 1e-15);
+    CHECK_CLOSE("fra zero exponent identity", markets::impliedQuote(plain, kReference, curve),
+                (curve.discount(t1) / curve.discount(t2) - 1.0) / tau, 1e-15);
 }
 
-void testFraConvexityRiskRow() {
+TEST(FraConvexity, riskRowVsFiniteDifference) {
     std::vector<datetime::Date> dates;
     for (int year = 1; year <= 4; ++year) {
         dates.push_back(kReference.plusYears(year));
@@ -107,14 +109,13 @@ void testFraConvexityRiskRow() {
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     const CurvePillar& fra = pillars.back();
     std::vector<double> row;
-    CHECK(markets::pillarJacobianRow(fra, kReference, curve, row));
+    EXPECT_TRUE(markets::pillarJacobianRow(fra, kReference, curve, row));
     CurvePillar plain = fra;
     plain.fraConvexityExponent = 0.0;
     std::vector<double> plainRow;
-    CHECK(markets::pillarJacobianRow(plain, kReference, curve, plainRow));
+    EXPECT_TRUE(markets::pillarJacobianRow(plain, kReference, curve, plainRow));
     for (std::size_t i = 0; i < row.size(); ++i) {
-        util::checkClose("fra convexity row scaling", row[i], plainRow[i] * std::exp(exponent),
-                         1e-12);
+        CHECK_CLOSE("fra convexity row scaling", row[i], plainRow[i] * std::exp(exponent), 1e-12);
     }
     for (std::size_t i = 1; i < curve.size(); ++i) {
         std::vector<double> zeros = curve.zeros();
@@ -124,22 +125,21 @@ void testFraConvexityRiskRow() {
         const double fd = (markets::impliedQuote(fra, kReference, bumped) -
                            markets::impliedQuote(fra, kReference, curve)) /
                           1e-8;
-        util::checkClose("fra convexity row vs FD", row[i - 1], fd, 1e-5);
+        CHECK_CLOSE("fra convexity row vs FD", row[i - 1], fd, 1e-5);
     }
 }
 
-void testFraConvexityModel() {
-    util::checkClose("fra exponent at fixing", markets::fraConvexityExponent(0.01, 0.008, 0.5, 0.0),
-                     0.0, 1e-18);
+TEST(FraConvexity, model) {
+    CHECK_CLOSE("fra exponent at fixing", markets::fraConvexityExponent(0.01, 0.008, 0.5, 0.0), 0.0,
+                1e-18);
     const double exponent = markets::fraConvexityExponent(0.01, 0.008, 0.5, 2.0);
-    util::checkClose("fra exponent value", exponent, (0.01 * 0.01 - 0.01 * 0.008 * 0.5) * 2.0,
-                     1e-18);
-    CHECK(markets::fraConvexityExponent(0.01, 0.008, -0.5, 2.0) > exponent);
-    util::checkClose("fra market rate", markets::impliedFraMarketRate(0.03, 4e-5, 0.25),
-                     ((1.0 + 0.03 * 0.25) * std::exp(4e-5) - 1.0) / 0.25, 1e-15);
+    CHECK_CLOSE("fra exponent value", exponent, (0.01 * 0.01 - 0.01 * 0.008 * 0.5) * 2.0, 1e-18);
+    EXPECT_TRUE(markets::fraConvexityExponent(0.01, 0.008, -0.5, 2.0) > exponent);
+    CHECK_CLOSE("fra market rate", markets::impliedFraMarketRate(0.03, 4e-5, 0.25),
+                ((1.0 + 0.03 * 0.25) * std::exp(4e-5) - 1.0) / 0.25, 1e-15);
 }
 
-void testFraConvexityConfig() {
+TEST(FraConvexity, configAndInvalidCorrelation) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -158,7 +158,7 @@ void testFraConvexityConfig() {
         }]
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
-    CHECK(stack.curves.front().fraConvexity.enabled);
+    EXPECT_TRUE(stack.curves.front().fraConvexity.enabled);
     const DiscountCurve<double> curve = markets::buildCurve(stack, stack.curves.front());
     const markets::PillarSpec& fraSpec = stack.curves.front().pillars.back();
     CurvePillar fra;
@@ -170,8 +170,8 @@ void testFraConvexityConfig() {
     const double timeToFixing =
         datetime::yearFraction(stack.asOf, fraSpec.start, stack.curves.front().zeroDayCounter);
     fra.fraConvexityExponent = markets::fraConvexityExponent(0.01, 0.008, 0.5, timeToFixing);
-    util::checkClose("fra convexity config reprice", markets::impliedQuote(fra, stack.asOf, curve),
-                     fraSpec.quote, 1e-9);
+    CHECK_CLOSE("fra convexity config reprice", markets::impliedQuote(fra, stack.asOf, curve),
+                fraSpec.quote, 1e-9);
 
     const std::string invalid = R"({
         "asOf": "2026-09-29",
@@ -188,16 +188,10 @@ void testFraConvexityConfig() {
             ]
         }]
     })";
-    bool threw = false;
-    try {
-        (void)markets::parseCurveStackSpec(invalid);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)markets::parseCurveStackSpec(invalid), std::invalid_argument);
 }
 
-void testSeasonedOisPricingAndRisk() {
+TEST(SeasonedOis, pricingAndRisk) {
     std::vector<datetime::Date> dates;
     for (int year = 1; year <= 4; ++year) {
         dates.push_back(kReference.plusYears(year));
@@ -227,16 +221,16 @@ void testSeasonedOisPricingAndRisk() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         kReference, kZeroDc, InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("seasoned ois reprice", markets::impliedQuote(pillar, kReference, curve),
-                         pillar.quote, 1e-9);
+        CHECK_CLOSE("seasoned ois reprice", markets::impliedQuote(pillar, kReference, curve),
+                    pillar.quote, 1e-9);
     }
     // A different fixing produces a different quote for the same curve.
     CurvePillar other = seasoned;
     other.firstCouponRate = 0.0415;
-    CHECK(std::abs(markets::impliedQuote(other, kReference, curve) - seasoned.quote) > 1e-4);
+    EXPECT_TRUE(std::abs(markets::impliedQuote(other, kReference, curve) - seasoned.quote) > 1e-4);
     // Risk row against FD, including the known first coupon.
     std::vector<double> row;
-    CHECK(markets::pillarJacobianRow(seasoned, kReference, curve, row));
+    EXPECT_TRUE(markets::pillarJacobianRow(seasoned, kReference, curve, row));
     for (std::size_t i = 1; i < curve.size(); ++i) {
         std::vector<double> zeros = curve.zeros();
         zeros[i] += 1e-8;
@@ -245,11 +239,11 @@ void testSeasonedOisPricingAndRisk() {
         const double fd = (markets::impliedQuote(seasoned, kReference, bumped) -
                            markets::impliedQuote(seasoned, kReference, curve)) /
                           1e-8;
-        util::checkClose("seasoned ois jacobian vs FD", row[i - 1], fd, 1e-5);
+        CHECK_CLOSE("seasoned ois jacobian vs FD", row[i - 1], fd, 1e-5);
     }
 }
 
-void testSeasonedIrsPricingAndRows() {
+TEST(SeasonedIrs, pricingAndRows) {
     std::vector<datetime::Date> dates;
     for (int year = 1; year <= 5; ++year) {
         dates.push_back(kReference.plusYears(year));
@@ -284,9 +278,9 @@ void testSeasonedIrsPricingAndRows() {
     instruments.push_back(out);
     const markets::SpreadCurve<double> child = markets::bootstrapForecastCurve(
         parentPtr, nullptr, kReference, kZeroDc, InterpolationScheme::Linear, instruments);
-    util::checkClose("seasoned irs reprice",
-                     markets::impliedForecastQuote(child, parent, out, kReference, kZeroDc),
-                     irs.quote, 1e-9);
+    CHECK_CLOSE("seasoned irs reprice",
+                markets::impliedForecastQuote(child, parent, out, kReference, kZeroDc), irs.quote,
+                1e-9);
 
     std::vector<double> fRow;
     std::vector<double> parentRow;
@@ -307,7 +301,7 @@ void testSeasonedIrsPricingAndRows() {
         const double fd = (markets::impliedIrsRate(cp, parent, irs, kReference, kZeroDc) -
                            markets::impliedIrsRate(cm, parent, irs, kReference, kZeroDc)) /
                           (2.0 * epsilon);
-        util::checkClose("seasoned irs own-row vs FD", fRow[k - 1], fd, 1e-6);
+        CHECK_CLOSE("seasoned irs own-row vs FD", fRow[k - 1], fd, 1e-6);
     }
     // Total cross row when the forecast parent is also the discount curve:
     // parent row plus discount row.
@@ -329,8 +323,8 @@ void testSeasonedIrsPricingAndRows() {
             (markets::impliedIrsRate(cp, *bumpedParent(epsilon), irs, kReference, kZeroDc) -
              markets::impliedIrsRate(cm, *bumpedParent(-epsilon), irs, kReference, kZeroDc)) /
             (2.0 * epsilon);
-        util::checkClose("seasoned irs cross-row vs FD", parentRow[i - 1] + discountRow[i - 1], fd,
-                         1e-6);
+        CHECK_CLOSE("seasoned irs cross-row vs FD", parentRow[i - 1] + discountRow[i - 1], fd,
+                    1e-6);
     }
     // With discounting split into an equal copy, the forecast parent row sees
     // only the child forwards (the known first coupon contributes nothing)
@@ -359,7 +353,7 @@ void testSeasonedIrsPricingAndRows() {
             (markets::impliedIrsRate(cp, *discountCopy, irs, kReference, kZeroDc) -
              markets::impliedIrsRate(cm, *discountCopy, irs, kReference, kZeroDc)) /
             (2.0 * epsilon);
-        util::checkClose("seasoned irs parent-row vs FD", splitParentRow[i - 1], fdParent, 1e-6);
+        CHECK_CLOSE("seasoned irs parent-row vs FD", splitParentRow[i - 1], fdParent, 1e-6);
 
         std::vector<double> upZeros = parent.zeros();
         std::vector<double> downZeros = parent.zeros();
@@ -375,12 +369,11 @@ void testSeasonedIrsPricingAndRows() {
             (markets::impliedIrsRate(child, discountUp, irs, kReference, kZeroDc) -
              markets::impliedIrsRate(child, discountDown, irs, kReference, kZeroDc)) /
             (2.0 * epsilon);
-        util::checkClose("seasoned irs discount-row vs FD", splitDiscountRow[i - 1], fdDiscount,
-                         1e-6);
+        CHECK_CLOSE("seasoned irs discount-row vs FD", splitDiscountRow[i - 1], fdDiscount, 1e-6);
     }
 }
 
-void testSeasonedConfig() {
+TEST(SeasonedConfig, roundTripAndInvalidFixing) {
     const std::string json = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -397,8 +390,8 @@ void testSeasonedConfig() {
     })";
     const markets::CurveStackSpec stack = markets::parseCurveStackSpec(json);
     const markets::PillarSpec& spec = stack.curves.front().pillars.front();
-    CHECK(spec.firstCouponFixed);
-    util::checkClose("seasoned config fixing", spec.firstCouponRate, 0.0315, 1e-15);
+    EXPECT_TRUE(spec.firstCouponFixed);
+    CHECK_CLOSE("seasoned config fixing", spec.firstCouponRate, 0.0315, 1e-15);
     const DiscountCurve<double> curve = markets::buildCurve(stack, stack.curves.front());
     CurvePillar out;
     out.kind = PillarKind::OisSwap;
@@ -409,8 +402,8 @@ void testSeasonedConfig() {
     out.calendar = spec.calendar;
     out.firstCouponFixed = spec.firstCouponFixed;
     out.firstCouponRate = spec.firstCouponRate;
-    util::checkClose("seasoned config reprice", markets::impliedQuote(out, stack.asOf, curve),
-                     spec.quote, 1e-9);
+    CHECK_CLOSE("seasoned config reprice", markets::impliedQuote(out, stack.asOf, curve),
+                spec.quote, 1e-9);
 
     const std::string invalid = R"({
         "asOf": "2026-09-29",
@@ -426,25 +419,5 @@ void testSeasonedConfig() {
             ]
         }]
     })";
-    bool threw = false;
-    try {
-        (void)markets::parseCurveStackSpec(invalid);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-}
-
-} // namespace
-
-int main() {
-    testFraConvexityPricing();
-    testFraConvexityRiskRow();
-    testFraConvexityModel();
-    testFraConvexityConfig();
-    testSeasonedOisPricingAndRisk();
-    testSeasonedIrsPricingAndRows();
-    testSeasonedConfig();
-    QTA_LOG_INFO("test", "test_instrument_options: ok");
-    return 0;
+    EXPECT_THROW((void)markets::parseCurveStackSpec(invalid), std::invalid_argument);
 }

@@ -1,4 +1,3 @@
-#include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/CurveOnGrid.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
@@ -6,12 +5,13 @@
 #include "quantape/markets/Curves/ParametricCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/TurnOverlay.h"
-#include "quantape/util/Check.h"
 
 #include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <vector>
+
+#include "support/GtestSupport.h"
 
 using namespace quantape;
 
@@ -28,89 +28,78 @@ DiscountCurve<double> makeLogDiscountCurve() {
                                  InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
 }
 
-void testLogDiscountLinear() {
+} // namespace
+
+TEST(DiscountCurve, logDiscountLinear) {
     const DiscountCurve<double> curve = makeLogDiscountCurve();
 
-    CHECK(curve.size() == 4);
-    CHECK(curve.discount(0.0) == 1.0);
-    CHECK(curve.discount(-1.0) == 1.0);
+    EXPECT_TRUE(curve.size() == 4);
+    EXPECT_TRUE(curve.discount(0.0) == 1.0);
+    EXPECT_TRUE(curve.discount(-1.0) == 1.0);
 
     // Nodes are exact.
     for (std::size_t i = 0; i < curve.size(); ++i) {
         const double t = curve.times()[i];
-        util::checkClose("node discount", curve.discount(t), std::exp(-curve.zeros()[i] * t),
-                         1e-15);
+        CHECK_CLOSE("node discount", curve.discount(t), std::exp(-curve.zeros()[i] * t), 1e-15);
     }
 
     // Between nodes: linear in log discount (y = z t) => constant forward.
     // y nodes: (0, 0), (1, 0.03), (2, 0.07), (3, 0.12).
-    util::checkClose("mid discount", curve.discount(1.5), std::exp(-0.05), 1e-15);
-    util::checkClose("mid zero", curve.zero(1.5), 0.05 / 1.5, 1e-15);
-    util::checkClose("segment forward", curve.forward(1.0, 2.0), 0.04, 1e-15);
-    util::checkClose("cross forward", curve.forward(0.5, 1.5), 0.035, 1e-15);
+    CHECK_CLOSE("mid discount", curve.discount(1.5), std::exp(-0.05), 1e-15);
+    CHECK_CLOSE("mid zero", curve.zero(1.5), 0.05 / 1.5, 1e-15);
+    CHECK_CLOSE("segment forward", curve.forward(1.0, 2.0), 0.04, 1e-15);
+    CHECK_CLOSE("cross forward", curve.forward(0.5, 1.5), 0.035, 1e-15);
 
     // Flat instantaneous forward beyond the last node.
-    util::checkClose("extrapolated forward", curve.forward(2.5, 3.5), curve.forward(2.0, 3.0),
-                     1e-15);
+    CHECK_CLOSE("extrapolated forward", curve.forward(2.5, 3.5), curve.forward(2.0, 3.0), 1e-15);
 
-    bool threw = false;
-    try {
-        (void)curve.forward(2.0, 2.0);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)curve.forward(2.0, 2.0), std::invalid_argument);
 }
 
-void testLinearZero() {
+TEST(DiscountCurve, linearZero) {
     const DiscountCurve<double> curve({0.0, 1.0, 2.0}, {0.0, 0.03, 0.05}, InterpolationSpace::Zero,
                                       InterpolationScheme::Linear);
-    util::checkClose("linear zero mid", curve.zero(1.5), 0.04, 1e-15);
-    util::checkClose("linear zero discount", curve.discount(1.5), std::exp(-0.04 * 1.5), 1e-15);
+    CHECK_CLOSE("linear zero mid", curve.zero(1.5), 0.04, 1e-15);
+    CHECK_CLOSE("linear zero discount", curve.discount(1.5), std::exp(-0.04 * 1.5), 1e-15);
 }
 
-void testAkimaZero() {
+TEST(DiscountCurve, akimaZero) {
     const DiscountCurve<double> curve({0.0, 1.0, 2.0, 3.0}, {0.0, 0.03, 0.033, 0.04},
                                       InterpolationSpace::Zero, InterpolationScheme::Akima);
     for (std::size_t i = 0; i < curve.size(); ++i) {
-        util::checkClose("akima node", curve.zero(curve.times()[i]), curve.zeros()[i], 1e-14);
+        CHECK_CLOSE("akima node", curve.zero(curve.times()[i]), curve.zeros()[i], 1e-14);
     }
     const double left = curve.zero(1.0 - 1e-9);
     const double right = curve.zero(1.0 + 1e-9);
-    util::checkClose("akima continuity", left, right, 1e-8);
+    CHECK_CLOSE("akima continuity", left, right, 1e-8);
 
     // Akima is available in LogDiscount space as well (cubic on log-DF).
     const DiscountCurve<double> logAkima({0.0, 1.0, 2.0, 3.0}, {0.0, 0.03, 0.033, 0.04},
                                          InterpolationSpace::LogDiscount,
                                          InterpolationScheme::Akima);
     for (std::size_t i = 0; i < logAkima.size(); ++i) {
-        util::checkClose("akima log node", logAkima.discount(logAkima.times()[i]),
-                         std::exp(-logAkima.zeros()[i] * logAkima.times()[i]), 1e-14);
+        CHECK_CLOSE("akima log node", logAkima.discount(logAkima.times()[i]),
+                    std::exp(-logAkima.zeros()[i] * logAkima.times()[i]), 1e-14);
     }
 }
 
-void testTensionSpline() {
+TEST(DiscountCurve, tensionSpline) {
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
     const std::vector<double> zeros{0.0, 0.03, 0.035, 0.038, 0.04};
     const DiscountCurve<double> curve(times, zeros, InterpolationSpace::LogDiscount,
                                       InterpolationScheme::TensionSpline, 8.0);
     for (std::size_t i = 0; i < curve.size(); ++i) {
         const double t = curve.times()[i];
-        util::checkClose("tension node discount", curve.discount(t),
-                         std::exp(-curve.zeros()[i] * t), 1e-14);
+        CHECK_CLOSE("tension node discount", curve.discount(t), std::exp(-curve.zeros()[i] * t),
+                    1e-14);
     }
     const double left = curve.zero(2.0 - 1e-9);
     const double right = curve.zero(2.0 + 1e-9);
-    util::checkClose("tension continuity", left, right, 1e-7);
+    CHECK_CLOSE("tension continuity", left, right, 1e-7);
 
-    bool threw = false;
-    try {
-        (void)DiscountCurve<double>(times, zeros, InterpolationSpace::LogDiscount,
-                                    InterpolationScheme::TensionSpline, 0.0);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)DiscountCurve<double>(times, zeros, InterpolationSpace::LogDiscount,
+                                             InterpolationScheme::TensionSpline, 0.0),
+                 std::invalid_argument);
 
     // Larger tension localizes the influence of a bumped node.
     const auto farImpact = [&](double tension) {
@@ -122,31 +111,31 @@ void testTensionSpline() {
                                        InterpolationScheme::TensionSpline, tension);
         return std::abs(up.discount(3.5) - base.discount(3.5));
     };
-    CHECK(farImpact(20.0) < farImpact(2.0));
+    EXPECT_TRUE(farImpact(20.0) < farImpact(2.0));
 }
 
-void testMaterialize() {
+TEST(DiscountCurve, materialize) {
     const DiscountCurve<double> curve = makeLogDiscountCurve();
     const std::vector<double> times{0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0};
     const auto grid = markets::materialize(curve, times);
-    CHECK(grid.size() == times.size());
-    CHECK(grid.nSteps() == times.size() - 1);
+    EXPECT_TRUE(grid.size() == times.size());
+    EXPECT_TRUE(grid.nSteps() == times.size() - 1);
     for (std::size_t k = 0; k < times.size(); ++k) {
-        util::checkClose("grid discount", grid.discountAt(k), curve.discount(times[k]), 1e-15);
-        util::checkClose("grid zero", grid.zero[k], curve.zero(times[k]), 1e-15);
+        CHECK_CLOSE("grid discount", grid.discountAt(k), curve.discount(times[k]), 1e-15);
+        CHECK_CLOSE("grid zero", grid.zero[k], curve.zero(times[k]), 1e-15);
         if (k + 1 < times.size()) {
-            util::checkClose("grid forward", grid.forwardAt(k),
-                             curve.forward(times[k], times[k + 1]), 1e-14);
+            CHECK_CLOSE("grid forward", grid.forwardAt(k), curve.forward(times[k], times[k + 1]),
+                        1e-14);
             const double dt = times[k + 1] - times[k];
-            util::checkClose("grid consistency", static_cast<double>(grid.discountAt(k + 1)),
-                             static_cast<double>(grid.discountAt(k)) *
-                                 std::exp(-static_cast<double>(grid.forwardAt(k)) * dt),
-                             1e-14);
+            CHECK_CLOSE("grid consistency", static_cast<double>(grid.discountAt(k + 1)),
+                        static_cast<double>(grid.discountAt(k)) *
+                            std::exp(-static_cast<double>(grid.forwardAt(k)) * dt),
+                        1e-14);
         }
     }
 }
 
-void testSpreadCurve() {
+TEST(CurveComposition, spreadCurve) {
     static_assert(markets::CurveProvider<DiscountCurve<double>, double>);
     static_assert(markets::CurveProvider<markets::SpreadCurve<double>, double>);
 
@@ -154,18 +143,18 @@ void testSpreadCurve() {
     const markets::SpreadCurve<double> spread(parent, {0.0, 1.0, 2.0, 3.0},
                                               {0.0, 0.001, 0.0015, 0.002});
     for (const double t : {0.5, 1.0, 1.5, 2.0, 2.5}) {
-        util::checkClose("spread zero", spread.zero(t),
-                         static_cast<double>(parent->zero(t)) + spread.spread(t), 1e-15);
-        util::checkClose("spread discount", spread.discount(t),
-                         std::exp(-static_cast<double>(spread.zero(t)) * t), 1e-15);
+        CHECK_CLOSE("spread zero", spread.zero(t),
+                    static_cast<double>(parent->zero(t)) + spread.spread(t), 1e-15);
+        CHECK_CLOSE("spread discount", spread.discount(t),
+                    std::exp(-static_cast<double>(spread.zero(t)) * t), 1e-15);
     }
-    util::checkClose(
+    CHECK_CLOSE(
         "spread forward", spread.forward(1.0, 2.0),
         (static_cast<double>(spread.zero(2.0)) * 2.0 - static_cast<double>(spread.zero(1.0))) / 1.0,
         1e-14);
 }
 
-void testMultiCurveSet() {
+TEST(CurveComposition, multiCurveSet) {
     auto usd = std::make_shared<const DiscountCurve<double>>(makeLogDiscountCurve());
     auto eur = std::make_shared<const DiscountCurve<double>>(
         std::vector<double>{0.0, 1.0, 2.0}, std::vector<double>{0.0, 0.02, 0.025},
@@ -179,15 +168,15 @@ void testMultiCurveSet() {
     markets::MultiCurveSet set = markets::MultiCurveSet::fromBuiltCurves(
         {markets::BuiltCurve{usdKey, markets::CurveRole::Discount, usdHandle},
          markets::BuiltCurve{eurKey, markets::CurveRole::Discount, eurHandle}});
-    CHECK(set.size() == 2);
-    CHECK(set.discountCurve("USD").get() == usdHandle.get());
-    CHECK(set.discountCurve("EUR").get() == eurHandle.get());
+    EXPECT_TRUE(set.size() == 2);
+    EXPECT_TRUE(set.discountCurve("USD").get() == usdHandle.get());
+    EXPECT_TRUE(set.discountCurve("EUR").get() == eurHandle.get());
 
     // The full key, including role and collateral, resolves the entry.
     const markets::BuiltCurve& usdEntry = set.find(usdKey);
-    CHECK(usdEntry.key == usdKey);
-    CHECK(usdEntry.role == markets::CurveRole::Discount);
-    CHECK(usdEntry.curve.get() == usdHandle.get());
+    EXPECT_TRUE(usdEntry.key == usdKey);
+    EXPECT_TRUE(usdEntry.role == markets::CurveRole::Discount);
+    EXPECT_TRUE(usdEntry.curve.get() == usdHandle.get());
 
     // Lookups hand out references into stable storage: hold them across adds.
     const auto& usdCurveRef = set.discountCurve("USD");
@@ -200,50 +189,25 @@ void testMultiCurveSet() {
         markets::BuiltCurve{markets::CurveKey{"USD", markets::CurveRole::Discount,
                                               datetime::Period(1, datetime::TimeUnit::Days), "EUR"},
                             markets::CurveRole::Discount, usdEurHandle});
-    CHECK(set.size() == 3);
+    EXPECT_TRUE(set.size() == 3);
 
     // References captured before the insert still address the same entries.
-    CHECK(&set.find(usdKey) == &usdEntry);
-    CHECK(&set.discountCurve("USD", "USD") == &usdCurveRef);
-    CHECK(usdEntry.curve.get() == usdHandle.get());
+    EXPECT_TRUE(&set.find(usdKey) == &usdEntry);
+    EXPECT_TRUE(&set.discountCurve("USD", "USD") == &usdCurveRef);
+    EXPECT_TRUE(usdEntry.curve.get() == usdHandle.get());
 
     // The one-argument lookup is ambiguous now that USD has two discount curves.
-    bool threw = false;
-    try {
-        (void)set.discountCurve("USD");
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW((void)set.discountCurve("USD"), std::invalid_argument);
 
     // Collateral selects the exact curve.
-    CHECK(set.discountCurve("USD", "USD").get() == usdHandle.get());
-    CHECK(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
-    CHECK(set.discountCurve("EUR", "EUR").get() == eurHandle.get());
+    EXPECT_TRUE(set.discountCurve("USD", "USD").get() == usdHandle.get());
+    EXPECT_TRUE(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
+    EXPECT_TRUE(set.discountCurve("EUR", "EUR").get() == eurHandle.get());
 
-    threw = false;
-    try {
-        set.add(markets::BuiltCurve{usdKey, markets::CurveRole::Discount, usdHandle});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-
-    threw = false;
-    try {
-        (void)set.discountCurve("JPY");
-    } catch (const std::out_of_range&) {
-        threw = true;
-    }
-    CHECK(threw);
-
-    threw = false;
-    try {
-        (void)set.discountCurve("USD", "JPY");
-    } catch (const std::out_of_range&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW(set.add(markets::BuiltCurve{usdKey, markets::CurveRole::Discount, usdHandle}),
+                 std::invalid_argument);
+    EXPECT_THROW((void)set.discountCurve("JPY"), std::out_of_range);
+    EXPECT_THROW((void)set.discountCurve("USD", "JPY"), std::out_of_range);
 
     // A forecast entry with the same currency is not mistaken for a discount
     // curve because the role is part of the lookup.
@@ -253,33 +217,28 @@ void testMultiCurveSet() {
                                         datetime::Period(3, datetime::TimeUnit::Months), "USD"};
     set.add(markets::BuiltCurve{forecastKey, markets::CurveRole::Forecast,
                                 markets::CurveHandle::make(forecast)});
-    CHECK(set.find(forecastKey).role == markets::CurveRole::Forecast);
-    CHECK(set.discountCurve("USD", "USD").get() == usdHandle.get());
-    CHECK(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
+    EXPECT_TRUE(set.find(forecastKey).role == markets::CurveRole::Forecast);
+    EXPECT_TRUE(set.discountCurve("USD", "USD").get() == usdHandle.get());
+    EXPECT_TRUE(set.discountCurve("USD", "EUR").get() == usdEurHandle.get());
 
-    threw = false;
-    try {
-        set.add(markets::BuiltCurve{forecastKey, markets::CurveRole::Forecast, nullptr});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    EXPECT_THROW(set.add(markets::BuiltCurve{forecastKey, markets::CurveRole::Forecast, nullptr}),
+                 std::invalid_argument);
 }
 
-void testCompounding() {
+TEST(CurveComposition, compounding) {
     const DiscountCurve<double> curve = makeLogDiscountCurve();
     const double tau = 1.0;
-    util::checkClose("compound factor", curve.compoundingFactor(1.0, 2.0),
-                     curve.discount(1.0) / curve.discount(2.0), 1e-15);
-    util::checkClose("compounded rate", curve.compoundedRate(1.0, 2.0, tau), (std::exp(0.04) - 1.0),
-                     1e-14);
+    CHECK_CLOSE("compound factor", curve.compoundingFactor(1.0, 2.0),
+                curve.discount(1.0) / curve.discount(2.0), 1e-15);
+    CHECK_CLOSE("compounded rate", curve.compoundedRate(1.0, 2.0, tau), (std::exp(0.04) - 1.0),
+                1e-14);
 
     const std::vector<double> boundaries{0.0, 0.25, 0.5, 0.75, 1.0};
     double manual = 0.0;
     for (std::size_t k = 1; k < boundaries.size(); ++k) {
         manual += (curve.discount(boundaries[k - 1]) / curve.discount(boundaries[k]) - 1.0) / 0.25;
     }
-    util::checkClose("averaged rate", curve.averagedRate(boundaries), manual / 4.0, 1e-15);
+    CHECK_CLOSE("averaged rate", curve.averagedRate(boundaries), manual / 4.0, 1e-15);
 
     // Daily compounding telescopes to the compound factor.
     double product = 1.0;
@@ -288,10 +247,10 @@ void testCompounding() {
             (curve.discount(boundaries[k - 1]) / curve.discount(boundaries[k]) - 1.0) / 0.25;
         product *= 1.0 + simple * 0.25;
     }
-    util::checkClose("compounding telescopes", product, curve.compoundingFactor(0.0, 1.0), 1e-15);
+    CHECK_CLOSE("compounding telescopes", product, curve.compoundingFactor(0.0, 1.0), 1e-15);
 }
 
-void testBasisBootstrap() {
+TEST(CurveBootstrap, basisSpreadRecovery) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDayCounter(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
@@ -330,40 +289,34 @@ void testBasisBootstrap() {
     const markets::SpreadCurve<double> curve = markets::bootstrapSpreadCurve(
         parent, reference, zeroDayCounter, InterpolationScheme::Linear, pillars);
     for (std::size_t i = 0; i < pillars.size(); ++i) {
-        util::checkClose("recovered basis spread", curve.spreadNodes().zeros()[i + 1],
-                         targetSpreads[i], 1e-11);
-        util::checkClose("basis reprice",
-                         markets::impliedBasisSpread(curve, pillars[i], reference, zeroDayCounter),
-                         pillars[i].spread, 1e-11);
+        CHECK_CLOSE("recovered basis spread", curve.spreadNodes().zeros()[i + 1], targetSpreads[i],
+                    1e-11);
+        CHECK_CLOSE("basis reprice",
+                    markets::impliedBasisSpread(curve, pillars[i], reference, zeroDayCounter),
+                    pillars[i].spread, 1e-11);
     }
 }
 
-void testMonotoneCubic() {
+TEST(CurveInterpolation, monotoneCubic) {
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
     const std::vector<double> zeros{0.0, 0.03, 0.033, 0.036, 0.04};
     const DiscountCurve<double> curve(times, zeros, InterpolationSpace::Zero,
                                       InterpolationScheme::MonotoneCubic);
     for (std::size_t i = 0; i < curve.size(); ++i) {
-        util::checkClose("monotone node", curve.zero(times[i]), zeros[i], 1e-14);
+        CHECK_CLOSE("monotone node", curve.zero(times[i]), zeros[i], 1e-14);
     }
     // No overshoot on monotone data, and the derivative keeps the sign.
     double previous = curve.zero(0.0);
     for (double t = 0.05; t <= 4.0; t += 0.05) {
         const double current = curve.zero(t);
-        CHECK(current >= previous - 1e-14);
+        EXPECT_TRUE(current >= previous - 1e-14);
         previous = current;
     }
-    bool threw = false;
-    try {
-        std::vector<double> weights;
-        curve.zeroNodeWeights(2.5, weights);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    std::vector<double> weights;
+    EXPECT_THROW(curve.zeroNodeWeights(2.5, weights), std::invalid_argument);
 }
 
-void testParametricCurve() {
+TEST(CurveInterpolation, parametricCurve) {
     const auto sampleTimes = [] {
         std::vector<double> times;
         for (double t = 0.25; t <= 30.0; t += 0.25) {
@@ -382,9 +335,9 @@ void testParametricCurve() {
         const markets::ParametricCurve fitted = markets::ParametricCurve::fit(
             markets::ParametricForm::NelsonSiegel, sampleTimes, zeros);
         for (const double t : sampleTimes) {
-            util::checkClose("NS fit", fitted.zero(t), exact.zero(t), 1e-5);
+            CHECK_CLOSE("NS fit", fitted.zero(t), exact.zero(t), 1e-5);
         }
-        util::checkClose("NS discount", fitted.discount(5.0), exact.discount(5.0), 1e-5);
+        CHECK_CLOSE("NS discount", fitted.discount(5.0), exact.discount(5.0), 1e-5);
     }
     {
         markets::ParametricCurve exact;
@@ -397,12 +350,12 @@ void testParametricCurve() {
         const markets::ParametricCurve fitted =
             markets::ParametricCurve::fit(markets::ParametricForm::Svensson, sampleTimes, zeros);
         for (const double t : {0.5, 2.0, 5.0, 10.0, 20.0, 30.0}) {
-            util::checkClose("Svensson fit", fitted.zero(t), exact.zero(t), 1e-5);
+            CHECK_CLOSE("Svensson fit", fitted.zero(t), exact.zero(t), 1e-5);
         }
     }
 }
 
-void testMixedLinearCubic() {
+TEST(CurveInterpolation, mixedLinearCubic) {
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
     const std::vector<double> zeros{0.0, 0.03, 0.033, 0.036, 0.04};
     const DiscountCurve<double> mixed(times, zeros, InterpolationSpace::Zero,
@@ -410,18 +363,18 @@ void testMixedLinearCubic() {
     const DiscountCurve<double> akima(times, zeros, InterpolationSpace::Zero,
                                       InterpolationScheme::Akima);
     // Left of the switch: piecewise linear.
-    util::checkClose("mixed linear segment", mixed.zero(0.5), 0.5 * (zeros[0] + zeros[1]), 1e-14);
-    util::checkClose("mixed linear segment 2", mixed.zero(1.5), 0.5 * (zeros[1] + zeros[2]), 1e-14);
+    CHECK_CLOSE("mixed linear segment", mixed.zero(0.5), 0.5 * (zeros[0] + zeros[1]), 1e-14);
+    CHECK_CLOSE("mixed linear segment 2", mixed.zero(1.5), 0.5 * (zeros[1] + zeros[2]), 1e-14);
     // Right of the switch: identical to Akima.
     for (const double t : {2.2, 2.7, 3.5, 3.9}) {
-        util::checkClose("mixed cubic segment", mixed.zero(t), akima.zero(t), 1e-14);
+        CHECK_CLOSE("mixed cubic segment", mixed.zero(t), akima.zero(t), 1e-14);
     }
 }
 
 /// Extrapolated node weights must be the scheme-consistent terminal-slope
 /// derivative, checked against a central-difference reconstruction for every
 /// scheme (including the pinned Hermite schemes).
-void testExtrapolatedRiskWeights() {
+TEST(CurveRiskWeights, extrapolatedRiskWeights) {
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0, 4.0};
     const std::vector<double> zeros{0.0, 0.03, 0.0335, 0.036, 0.04};
     const double t = 4.0 + 2.0 / 365.0;
@@ -460,7 +413,7 @@ void testExtrapolatedRiskWeights() {
             const DiscountCurve<double> down(times, minus, c.space, c.scheme, c.tension,
                                              c.switchIndex);
             const double fd = (up.zero(t) - down.zero(t)) / (2.0 * epsilon);
-            util::checkClose("extrapolated risk weight", weights[j], fd, 1e-7);
+            CHECK_CLOSE("extrapolated risk weight", weights[j], fd, 1e-7);
         }
     }
 }
@@ -470,7 +423,7 @@ void testExtrapolatedRiskWeights() {
 /// primal, so `zeroNodeWeights` matches central differences on a near-flat
 /// Zero-space node set. The difference step stays small because it straddles
 /// the tie kink, which adds an O(step) term.
-void testTiedSecantRiskWeights() {
+TEST(CurveRiskWeights, tiedSecantRiskWeights) {
     const std::vector<double> times{0.0, 1.0, 2.0, 3.0};
     const std::vector<double> zeros{0.0, 0.030, 0.033, 0.036};
     for (const auto scheme : {InterpolationScheme::Akima, InterpolationScheme::MixedLinearCubic}) {
@@ -487,13 +440,13 @@ void testTiedSecantRiskWeights() {
                 const DiscountCurve<double> up(times, plus, InterpolationSpace::Zero, scheme);
                 const DiscountCurve<double> down(times, minus, InterpolationSpace::Zero, scheme);
                 const double fd = (up.zero(t) - down.zero(t)) / (2.0 * epsilon);
-                util::checkClose("tied-secant risk weight", weights[j], fd, 1e-6);
+                CHECK_CLOSE("tied-secant risk weight", weights[j], fd, 1e-6);
             }
         }
     }
 }
 
-void testTurnOverlay() {
+TEST(TurnOverlay, turnOverlay) {
     static_assert(markets::CurveProvider<markets::TurnOverlay<double>, double>);
     auto base = std::make_shared<DiscountCurve<double>>(
         std::vector<double>{0.0, 1.0, 2.0, 3.0}, std::vector<double>{0.0, 0.03, 0.03, 0.03},
@@ -505,22 +458,16 @@ void testTurnOverlay() {
     // Flat base: the difference across the turn is the jump alone.
     const double before = overlay.zero(1.5);
     const double after = overlay.zero(2.5);
-    util::checkClose("turn zero jump", after - before, amplitude * turnTime / 2.5, 1e-15);
+    CHECK_CLOSE("turn zero jump", after - before, amplitude * turnTime / 2.5, 1e-15);
     // DF ratio across the turn is the base carry times exp(-d tTurn).
-    util::checkClose("turn DF multiplier", overlay.discount(2.5) / overlay.discount(1.5),
-                     std::exp(-0.03 * 1.0) * std::exp(-amplitude * turnTime), 1e-14);
+    CHECK_CLOSE("turn DF multiplier", overlay.discount(2.5) / overlay.discount(1.5),
+                std::exp(-0.03 * 1.0) * std::exp(-amplitude * turnTime), 1e-14);
     // Before the turn the overlay equals the base.
-    util::checkClose("turn before base", overlay.discount(1.5), base->discount(1.5), 1e-15);
-    bool threw = false;
-    try {
-        (void)markets::TurnOverlay<double>(nullptr, {});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+    CHECK_CLOSE("turn before base", overlay.discount(1.5), base->discount(1.5), 1e-15);
+    EXPECT_THROW((void)markets::TurnOverlay<double>(nullptr, {}), std::invalid_argument);
 }
 
-void testTurnOverlayNodeProvider() {
+TEST(TurnOverlay, turnOverlayNodeProvider) {
     static_assert(markets::CurveNodeProvider<markets::TurnOverlay<double>>);
     static_assert(
         markets::CurveNodeProvider<markets::TurnOverlay<double, markets::SpreadCurve<double>>>);
@@ -531,9 +478,9 @@ void testTurnOverlayNodeProvider() {
     const markets::TurnOverlay<double> overlay(base, turns, bumps);
 
     // Native grid: reserved fixed origin, then turn amplitudes, then bumps.
-    CHECK(overlay.size() == 4);
-    CHECK(overlay.times() == std::vector<double>({0.0, 0.5, 2.0, 1.0}));
-    CHECK(overlay.zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
+    EXPECT_TRUE(overlay.size() == 4);
+    EXPECT_TRUE(overlay.times() == std::vector<double>({0.0, 0.5, 2.0, 1.0}));
+    EXPECT_TRUE(overlay.zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
 
     // The analytic weights are the amplitude sensitivities: check them against
     // central differences at points before, inside and after every parameter.
@@ -552,12 +499,12 @@ void testTurnOverlayNodeProvider() {
     for (const double t : {-0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 2.0, 2.5, 4.0}) {
         std::vector<double> weights;
         overlay.zeroNodeWeights(t, weights);
-        CHECK(weights.size() == overlay.size());
-        CHECK(weights[0] == 0.0);
+        EXPECT_TRUE(weights.size() == overlay.size());
+        EXPECT_TRUE(weights[0] == 0.0);
         for (std::size_t node = 1; node < weights.size(); ++node) {
             const double fd =
                 (shiftedZero(node, step, t) - shiftedZero(node, -step, t)) / (2.0 * step);
-            util::checkClose("turn overlay amplitude weight", weights[node], fd, 1e-6);
+            CHECK_CLOSE("turn overlay amplitude weight", weights[node], fd, 1e-6);
         }
     }
 
@@ -565,14 +512,14 @@ void testTurnOverlayNodeProvider() {
     // the same parameter grid and its own pricing surface.
     const markets::CurveHandle::Ptr handle =
         markets::CurveHandle::make(std::make_shared<const markets::TurnOverlay<double>>(overlay));
-    CHECK(handle->size() == overlay.size());
-    CHECK(handle->times() == overlay.times());
-    CHECK(handle->zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
+    EXPECT_TRUE(handle->size() == overlay.size());
+    EXPECT_TRUE(handle->times() == overlay.times());
+    EXPECT_TRUE(handle->zeroDayCounter().convention() == datetime::DayCount::Actual365Fixed);
     std::vector<double> handleWeights;
     std::vector<double> overlayWeights;
     handle->zeroNodeWeights(1.1, handleWeights);
     overlay.zeroNodeWeights(1.1, overlayWeights);
-    CHECK(handleWeights == overlayWeights);
+    EXPECT_TRUE(handleWeights == overlayWeights);
 
     // A forecast curve bootstrapped over the overlay as its parent provider
     // reprices its synthetic FRA exactly.
@@ -608,26 +555,26 @@ void testTurnOverlayNodeProvider() {
     const markets::SpreadCurve<double, markets::TurnOverlay<double>> forecast =
         markets::bootstrapForecastCurve(pricedOverlay, nullptr, reference, zeroDc,
                                         markets::InterpolationScheme::Linear, {pillar});
-    util::checkClose("overlay parent bootstrap reprice",
-                     markets::impliedSimpleForward(forecast, pillar, reference, zeroDc),
-                     pillar.quote, 1e-10);
+    CHECK_CLOSE("overlay parent bootstrap reprice",
+                markets::impliedSimpleForward(forecast, pillar, reference, zeroDc), pillar.quote,
+                1e-10);
 }
 
-void testNonAct365ZeroClock() {
+TEST(DiscountCurve, nonAct365ZeroClock) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::Date pillar = reference.plusYears(1);
     const datetime::DayCounter act360(datetime::DayCount::Actual360);
     const DiscountCurve<double> curve(reference, {pillar}, act360, {0.04},
                                       InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
     const double expected = datetime::yearFraction(reference, pillar, act360);
-    util::checkClose("ACT/360 zero clock", curve.times()[1], expected, 1e-15);
-    CHECK(std::abs(expected - datetime::yearFraction(
-                                  reference, pillar,
-                                  datetime::DayCounter(datetime::DayCount::Actual365Fixed))) >
-          1e-4);
+    CHECK_CLOSE("ACT/360 zero clock", curve.times()[1], expected, 1e-15);
+    EXPECT_TRUE(std::abs(expected - datetime::yearFraction(
+                                        reference, pillar,
+                                        datetime::DayCounter(datetime::DayCount::Actual365Fixed))) >
+                1e-4);
 }
 
-void testSchemeSpaceMatrix() {
+TEST(CurveBootstrap, schemeSpaceMatrix) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
@@ -685,9 +632,9 @@ void testSchemeSpaceMatrix() {
 
         // Exact reprice and node recovery in every space/scheme combination.
         for (std::size_t i = 0; i < pillars.size(); ++i) {
-            util::checkClose("matrix reprice", markets::impliedQuote(pillars[i], reference, curve),
-                             pillars[i].quote, 1e-10);
-            util::checkClose("matrix recovery", curve.zeros()[i + 1], targetZeros[i + 1], 5e-9);
+            CHECK_CLOSE("matrix reprice", markets::impliedQuote(pillars[i], reference, curve),
+                        pillars[i].quote, 1e-10);
+            CHECK_CLOSE("matrix recovery", curve.zeros()[i + 1], targetZeros[i + 1], 5e-9);
         }
         // Continuity of zeros across knot boundaries, finite forwards, and
         // monotone decreasing discounts.
@@ -695,12 +642,12 @@ void testSchemeSpaceMatrix() {
         std::vector<double> weights;
         for (double t = 0.05; t <= 5.0; t += 0.05) {
             const double df = curve.discount(t);
-            CHECK(df > 0.0);
-            CHECK(df <= previousDf + 1e-12);
+            EXPECT_TRUE(df > 0.0);
+            EXPECT_TRUE(df <= previousDf + 1e-12);
             previousDf = df;
             const double left = curve.zero(t - 1e-9);
             const double right = curve.zero(t + 1e-9);
-            util::checkClose("matrix continuity", left, right, 1e-5);
+            CHECK_CLOSE("matrix continuity", left, right, 1e-5);
         }
         if (c.weights) {
             // Partition holds over ALL nodes (including the fixed t=0 node)
@@ -710,11 +657,11 @@ void testSchemeSpaceMatrix() {
             for (const double w : weights) {
                 total += w;
             }
-            util::checkClose("matrix weights partition", total, 1.0, 1e-10);
+            CHECK_CLOSE("matrix weights partition", total, 1.0, 1e-10);
         }
         if (c.space == InterpolationSpace::LogDiscount && c.scheme == InterpolationScheme::Linear) {
-            util::checkClose("log-linear flat forward", curve.forward(1.1, 1.2),
-                             curve.forward(1.3, 1.4), 1e-14);
+            CHECK_CLOSE("log-linear flat forward", curve.forward(1.1, 1.2), curve.forward(1.3, 1.4),
+                        1e-14);
         }
         // Extrapolation-slope consistency at the ACTUAL last knot (ACT/365F
         // year fractions are not integers, so checks must use `times().back()`).
@@ -727,43 +674,32 @@ void testSchemeSpaceMatrix() {
             const double delta = 0.4;
             const double extension = curve.zero(knot + delta) - curve.zero(knot);
             const double inside = curve.zero(knot) - curve.zero(knot - 1e-6);
-            util::checkClose("zero extrapolation slope", extension, delta * inside / 1e-6, 5e-6);
+            CHECK_CLOSE("zero extrapolation slope", extension, delta * inside / 1e-6, 5e-6);
         }
         if (c.space == InterpolationSpace::LogDiscount) {
             const double knot = curve.times().back();
             const double beyond = curve.forward(knot, knot + 0.5);
-            util::checkClose("flat forward extension", curve.forward(knot + 0.5, knot + 1.0),
-                             beyond, 1e-12);
-            util::checkClose("flat forward slope", curve.forward(knot - 1e-6, knot), beyond, 5e-6);
+            CHECK_CLOSE("flat forward extension", curve.forward(knot + 0.5, knot + 1.0), beyond,
+                        1e-12);
+            CHECK_CLOSE("flat forward slope", curve.forward(knot - 1e-6, knot), beyond, 5e-6);
         }
         // Forwards finite and free of NaN across the grid.
         for (double t = 0.1; t < 5.0; t += 0.1) {
             const double f = curve.forward(t, t + 0.1);
-            CHECK(quantape::util::isFiniteBitwise(f));
+            EXPECT_TRUE(quantape::util::isFiniteBitwise(f));
         }
     }
 }
 
-void testErrors() {
-    bool threw = false;
-    try {
-        (void)DiscountCurve<double>(std::vector<double>{}, std::vector<double>{});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-
-    threw = false;
-    try {
-        (void)DiscountCurve<double>(std::vector<double>{0.0, 2.0, 1.0},
-                                    std::vector<double>{0.0, 0.03, 0.04});
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
+TEST(DiscountCurve, errors) {
+    EXPECT_THROW((void)DiscountCurve<double>(std::vector<double>{}, std::vector<double>{}),
+                 std::invalid_argument);
+    EXPECT_THROW((void)DiscountCurve<double>(std::vector<double>{0.0, 2.0, 1.0},
+                                             std::vector<double>{0.0, 0.03, 0.04}),
+                 std::invalid_argument);
 }
 
-void testBootstrapRecovery() {
+TEST(CurveBootstrap, bootstrapRecovery) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDayCounter(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
@@ -805,17 +741,17 @@ void testBootstrapRecovery() {
     const DiscountCurve<double> curve =
         markets::bootstrapDiscountCurve(reference, zeroDayCounter, InterpolationSpace::LogDiscount,
                                         InterpolationScheme::Linear, pillars);
-    CHECK(curve.size() == pillars.size() + 1);
-    CHECK(curve.discount(0.0) == 1.0);
+    EXPECT_TRUE(curve.size() == pillars.size() + 1);
+    EXPECT_TRUE(curve.discount(0.0) == 1.0);
 
     for (std::size_t i = 0; i < pillars.size(); ++i) {
-        util::checkClose("recovered zero", curve.zeros()[i + 1], targetZeros[i], 1e-11);
-        util::checkClose("reprice", markets::impliedQuote(pillars[i], reference, curve),
-                         pillars[i].quote, 1e-11);
+        CHECK_CLOSE("recovered zero", curve.zeros()[i + 1], targetZeros[i], 1e-11);
+        CHECK_CLOSE("reprice", markets::impliedQuote(pillars[i], reference, curve),
+                    pillars[i].quote, 1e-11);
     }
 }
 
-void testOisPaymentLag() {
+TEST(CurveBootstrap, oisPaymentLag) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDayCounter(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::noHolidays();
@@ -846,17 +782,17 @@ void testOisPaymentLag() {
         markets::bootstrapDiscountCurve(reference, zeroDayCounter, InterpolationSpace::LogDiscount,
                                         InterpolationScheme::Linear, pillars);
     for (const CurvePillar& pillar : pillars) {
-        util::checkClose("OIS payment-lag reprice", markets::impliedQuote(pillar, reference, curve),
-                         pillar.quote, 1e-11);
+        CHECK_CLOSE("OIS payment-lag reprice", markets::impliedQuote(pillar, reference, curve),
+                    pillar.quote, 1e-11);
     }
 }
 
-void testOisBusinessDayConvention() {
+TEST(CurveBootstrap, oisBusinessDayConvention) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDayCounter(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::weekendsOnly();
     const datetime::Date maturity(2027, 7, 31); // Saturday
-    CHECK(maturity.weekday() == datetime::Weekday::Saturday);
+    EXPECT_TRUE(maturity.weekday() == datetime::Weekday::Saturday);
     const datetime::Schedule following(
         reference, maturity, datetime::Period(1, datetime::TimeUnit::Years), calendar,
         datetime::BusinessDayConvention::Following, datetime::DateGeneration::Forward, false);
@@ -864,8 +800,8 @@ void testOisBusinessDayConvention() {
                                       datetime::Period(1, datetime::TimeUnit::Years), calendar,
                                       datetime::BusinessDayConvention::ModifiedFollowing,
                                       datetime::DateGeneration::Forward, false);
-    CHECK(following.endDate() == datetime::Date(2027, 8, 2));
-    CHECK(modified.endDate() == datetime::Date(2027, 7, 30));
+    EXPECT_TRUE(following.endDate() == datetime::Date(2027, 8, 2));
+    EXPECT_TRUE(modified.endDate() == datetime::Date(2027, 7, 30));
 
     const std::vector<datetime::Date> pillarDates{maturity};
     const std::vector<double> targetZeros{0.04};
@@ -884,12 +820,12 @@ void testOisBusinessDayConvention() {
         const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
             reference, zeroDayCounter, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
             std::vector<CurvePillar>{swap});
-        util::checkClose("OIS convention reprice", markets::impliedQuote(swap, reference, curve),
-                         swap.quote, 1e-11);
+        CHECK_CLOSE("OIS convention reprice", markets::impliedQuote(swap, reference, curve),
+                    swap.quote, 1e-11);
     }
 }
 
-void testPillarMaturityAdjustment() {
+TEST(CurveBootstrap, pillarMaturityAdjustment) {
     const datetime::Date reference(2026, 9, 29);
     const datetime::DayCounter zeroDayCounter(datetime::DayCount::Actual365Fixed);
     const datetime::Calendar calendar = datetime::Calendar::weekendsOnly();
@@ -909,10 +845,10 @@ void testPillarMaturityAdjustment() {
     const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
         reference, zeroDayCounter, InterpolationSpace::LogDiscount, InterpolationScheme::Linear,
         std::vector<CurvePillar>{deposit});
-    util::checkClose("adjusted deposit node time", curve.times().back(),
-                     datetime::yearFraction(reference, friday, zeroDayCounter), 1e-15);
-    util::checkClose("adjusted deposit reprice", markets::impliedQuote(deposit, reference, curve),
-                     deposit.quote, 1e-11);
+    CHECK_CLOSE("adjusted deposit node time", curve.times().back(),
+                datetime::yearFraction(reference, friday, zeroDayCounter), 1e-15);
+    CHECK_CLOSE("adjusted deposit reprice", markets::impliedQuote(deposit, reference, curve),
+                deposit.quote, 1e-11);
 
     CurvePillar raw = deposit;
     raw.businessDayConvention = datetime::BusinessDayConvention::Unadjusted;
@@ -920,8 +856,8 @@ void testPillarMaturityAdjustment() {
     const DiscountCurve<double> rawCurve =
         markets::bootstrapDiscountCurve(reference, zeroDayCounter, InterpolationSpace::LogDiscount,
                                         InterpolationScheme::Linear, std::vector<CurvePillar>{raw});
-    util::checkClose("unadjusted deposit node time", rawCurve.times().back(),
-                     datetime::yearFraction(reference, saturday, zeroDayCounter), 1e-15);
+    CHECK_CLOSE("unadjusted deposit node time", rawCurve.times().back(),
+                datetime::yearFraction(reference, saturday, zeroDayCounter), 1e-15);
 
     CurvePillar fra;
     fra.kind = PillarKind::Fra;
@@ -933,52 +869,15 @@ void testPillarMaturityAdjustment() {
     const DiscountCurve<double> fraCurve =
         markets::bootstrapDiscountCurve(reference, zeroDayCounter, InterpolationSpace::LogDiscount,
                                         InterpolationScheme::Linear, std::vector<CurvePillar>{fra});
-    util::checkClose("adjusted FRA reprice", markets::impliedQuote(fra, reference, fraCurve),
-                     fra.quote, 1e-11);
+    CHECK_CLOSE("adjusted FRA reprice", markets::impliedQuote(fra, reference, fraCurve), fra.quote,
+                1e-11);
 }
 
-void testImpliedQuoteUnknownKind() {
+TEST(CurveBootstrap, impliedQuoteUnknownKind) {
     const DiscountCurve<double> curve = makeLogDiscountCurve();
     const datetime::Date reference(2026, 9, 29);
     CurvePillar pillar;
     pillar.kind = static_cast<PillarKind>(42);
     pillar.maturity = datetime::Date(2027, 9, 29);
-    bool threw = false;
-    try {
-        (void)markets::impliedQuote(pillar, reference, curve);
-    } catch (const std::invalid_argument&) {
-        threw = true;
-    }
-    CHECK(threw);
-}
-
-} // namespace
-
-int main() {
-    testLogDiscountLinear();
-    testLinearZero();
-    testAkimaZero();
-    testTensionSpline();
-    testMaterialize();
-    testSpreadCurve();
-    testMultiCurveSet();
-    testCompounding();
-    testBasisBootstrap();
-    testMonotoneCubic();
-    testParametricCurve();
-    testMixedLinearCubic();
-    testExtrapolatedRiskWeights();
-    testTiedSecantRiskWeights();
-    testTurnOverlay();
-    testTurnOverlayNodeProvider();
-    testNonAct365ZeroClock();
-    testSchemeSpaceMatrix();
-    testErrors();
-    testBootstrapRecovery();
-    testOisPaymentLag();
-    testOisBusinessDayConvention();
-    testPillarMaturityAdjustment();
-    testImpliedQuoteUnknownKind();
-    QTA_LOG_INFO("test", "test_curve: ok");
-    return 0;
+    EXPECT_THROW((void)markets::impliedQuote(pillar, reference, curve), std::invalid_argument);
 }
