@@ -1,0 +1,22 @@
+name: format
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pin the same clang-format major as local dev (brew clang-format 21.x)
+      # so CI and pre-commit agree on layout.
+      - run: pip install clang-format==21.1.6
+      - run: ./repo_tools/format_code.sh --check

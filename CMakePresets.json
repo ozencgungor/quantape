@@ -33,6 +33,13 @@
         "QUANTAPE_BUILD_BENCHMARKS": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "ci",
+      "displayName": "CI / analysis",
+      "description": "Debug with the compile database, used by the analysis workflow (benchmarks off)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/ci"
     }
   ],
   "buildPresets": [
@@ -47,6 +54,12 @@
       "configurePreset": "release",
       "targets": ["build_all"],
       "jobs": 2
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci",
+      "targets": ["build_all"],
+      "jobs": 4
     }
   ],
   "testPresets": [
@@ -58,6 +71,11 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci",
       "output": { "outputOnFailure": true }
     }
   ]

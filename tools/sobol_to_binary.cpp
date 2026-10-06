@@ -6,12 +6,14 @@
  * Layout: "QSB1" | u32 dims | u32 maxBits | u32 wordBytes | u32 pad
  *         then (dims-1) x maxBits words, row-major by dimension (dim 2..dims).
  *
- * Usage: sobol_to_binary [--bits=32|64] input.txt output.qsb
+ * Usage: sobol_to_binary [--bits=32|64] [--dims=N] input.txt output.qsb
+ *        --dims=N clamps the table to dimensions 2..N (default: all).
  */
 #include "quantape/log/Log.h"
 #include "quantape/math/Random/Sobol/DirectionNumbers.h"
 #include "quantape/math/Random/Sobol/GF2.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -24,11 +26,14 @@ using namespace quantape::math::mc::sobol;
 
 int main(int argc, char** argv) {
     int bits = 32;
+    std::uint32_t maxDims = 0; // 0 = all
     std::string input, output;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg.rfind("--bits=", 0) == 0) {
             bits = std::atoi(arg.c_str() + 7);
+        } else if (arg.rfind("--dims=", 0) == 0) {
+            maxDims = static_cast<std::uint32_t>(std::atoi(arg.c_str() + 7));
         } else if (input.empty()) {
             input = arg;
         } else {
@@ -37,7 +42,7 @@ int main(int argc, char** argv) {
     }
     if (input.empty() || output.empty() || bits < 1 || bits > 64) {
         QTA_LOG_ERROR("quantape.tools",
-                      "usage: sobol_to_binary [--bits=32|64] input.txt output.qsb");
+                      "usage: sobol_to_binary [--bits=32|64] [--dims=N] input.txt output.qsb");
         return 1;
     }
     const auto entries = load_joe_kuo(input);
@@ -45,7 +50,10 @@ int main(int argc, char** argv) {
         QTA_LOG_ERROR("quantape.tools", "cannot load {}", input);
         return 1;
     }
-    const std::uint32_t dims = entries.back().dim;
+    std::uint32_t dims = entries.back().dim;
+    if (maxDims > 0) {
+        dims = std::min(dims, std::max(maxDims, 2u));
+    }
     const std::uint32_t wordBytes = (bits <= 32) ? 4 : 8;
     std::FILE* out = std::fopen(output.c_str(), "wb");
     if (out == nullptr) {

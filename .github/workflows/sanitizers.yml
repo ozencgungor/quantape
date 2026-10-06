@@ -1,0 +1,59 @@
+name: sanitizers
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asan-ubsan:
+    runs-on: ubuntu-24.04
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      SAN_FLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: sanitizers-${{ github.ref_name }}
+          max-size: 300M
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third-party
+            build-san/_deps
+          key: deps-sanitizers-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh') }}
+
+      - name: Fetch pinned dependencies (Eigen, Stan Math)
+        run: repo_tools/fetch_third_party.sh
+
+      - name: Configure (ASan + UBSan)
+        run: >
+          cmake -S . -B build-san
+          -DCMAKE_BUILD_TYPE=Debug
+          -DQUANTAPE_BUILD_BENCHMARKS=OFF
+          -DQUANTAPE_BUILD_TOOLS=OFF
+          -DQUANTAPE_BUILD_EXAMPLES=OFF
+          "-DCMAKE_CXX_FLAGS=${SAN_FLAGS}"
+          "-DCMAKE_C_FLAGS=${SAN_FLAGS}"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-san -j 4
+
+      # Leak checking is off for now: TBB/quill keep intentional process-lifetime
+      # allocations. UBSan reports but does not abort (third-party deps are
+      # compiled with the same sanitizer flags).
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
+        run: ctest --test-dir build-san -j 2 --output-on-failure --timeout 1800

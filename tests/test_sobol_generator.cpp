@@ -438,9 +438,10 @@ int main() {
         const std::string def = SobolGenerator::defaultTablePath();
         if (!def.empty() && std::filesystem::exists(def)) {
             const auto bin = SobolGenerator::fromDefaultTable(SobolOptions{0, 1, false});
+            const std::uint32_t dims = bin.dimensionCount();
             CHECK(bin.mapped());
-            CHECK(bin.dimensionCount() == 65536);
-            CHECK(bin.preparedDimension() == 65536);
+            CHECK(dims >= 4096); // committed prebuilt asset is 8192 dims; raw tables reach 65536
+            CHECK(bin.preparedDimension() == dims);
 
             const char* txtCandidates[] = {"joe-kuo-65536-refined-w256.txt",
                                            "../joe-kuo-65536-refined-w256.txt"};
@@ -450,7 +451,7 @@ int main() {
                 }
                 const auto text = SobolGenerator::fromFile(txt, SobolOptions{0, 1, false});
                 for (std::uint64_t p : {1ULL, 999ULL, 123456ULL, (1ULL << 20) + 7}) {
-                    for (std::uint32_t d : {1u, 2u, 21202u, 65536u}) {
+                    for (std::uint32_t d : {1u, 2u, std::min(dims, 21202u), dims}) {
                         CHECK(bin.uniformBits(p, d) == text.uniformBits(p, d));
                         CHECK(bin.normal(p, d) == text.normal(p, d));
                     }

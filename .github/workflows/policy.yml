@@ -1,0 +1,16 @@
+name: policy
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./repo_tools/check_policy.sh

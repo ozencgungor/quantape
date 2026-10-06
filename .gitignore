@@ -33,7 +33,6 @@ Makefile
 .DS_Store
 
 # Executables
-example_usage
 
 
 # pdfs:
@@ -41,14 +40,12 @@ example_usage
 .aider*
 
 # personal stuff:
-interview_prep/
-.claude/
 
 # Internal working docs (kept out of version control)
-internal_docs/
+
+# Local agent instructions (not published for now)
 
 # Internal experiments (bridges, disconnected prototypes)
-internal_tests/
 
 # Sublime Text project/workspace files
 *.sublime-project

@@ -1,7 +1,15 @@
 #!/bin/bash
 
-# Script to format all C++ source files using clang-format
-# Usage: ./format_code.sh
+# Script to format all C++ source files using clang-format (repo-wide).
+# Usage: repo_tools/format_code.sh [--check]
+#
+# Works from any directory: the repository root is resolved from the script
+# location (git top-level when available, otherwise the script's parent).
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if ! root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null); then
+    root=$(dirname -- "$script_dir")
+fi
+cd "$root" || exit 2
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -30,7 +38,7 @@ if [[ "${1:-}" == "--check" ]]; then
         ! -path "./build*/*" \
         ! -path "./third-party/*" \
         -print0 | xargs -0 clang-format --dry-run --Werror || {
-        echo -e "${RED}Formatting check failed: run ./format_code.sh${NC}"
+        echo -e "${RED}Formatting check failed: run repo_tools/format_code.sh${NC}"
         exit 1
     }
     echo -e "${GREEN}Formatting check passed.${NC}"

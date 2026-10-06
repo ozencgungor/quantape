@@ -4,7 +4,7 @@
 # defaults plus these settings produce complete reference output. Generated
 # HTML goes to docs/html (gitignored), reachable through docs/index.html;
 # regenerate with
-#   cmake --build build --target doc
+#   cmake --build build --target docs
 # or directly:  doxygen docs/Doxyfile
 
 PROJECT_NAME           = "Quantape"

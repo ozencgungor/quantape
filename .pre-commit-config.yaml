@@ -1,0 +1,44 @@
+# Fast local gates. Heavy checks (builds, sanitizers, tests, nightly benches)
+# live in GitHub Actions; this file is for catch-it-before-commit hygiene.
+#
+# Setup:  pip install pre-commit && pre-commit install
+# Requires clang-format on PATH (same major version as CI, currently 21.x).
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: check-yaml
+      - id: check-json
+      - id: check-executables-have-shebangs
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: clang-format
+        name: clang-format (changed files)
+        entry: clang-format --dry-run --Werror
+        language: system
+        files: \.(h|hpp|cpp)$
+      - id: policy
+        name: policy (fast-math/AGPL/self-containment/conventions)
+        entry: ./repo_tools/check_policy.sh
+        language: system
+        pass_filenames: false
+      - id: commit-msg-style
+        name: terse commit subject (advisory)
+        entry: ./repo_tools/check_commit_msg.sh
+        language: system
+        stages: [commit-msg]

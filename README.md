@@ -63,7 +63,7 @@ work.
 ## Build
 
 ```bash
-# Configured presets: debug (-O0 -g3, benchmarks off), release (-O3, benchmarks on)
+# Configured presets: debug (benchmarks off), release (-O3, benchmarks on)
 cmake --preset release
 cmake --build --preset release
 
@@ -71,23 +71,25 @@ cmake --build --preset release
 cmake -S . -B build
 cmake --build build --target <target> -j 2
 
-# Optional: compile-time Sobol table (text or .qsb); packed to a binary asset
-# automatically and exposed via SobolGenerator::fromDefaultTable
+# Optional: compile-time Sobol table override (text or .qsb); packed to a
+# binary asset automatically and exposed via SobolGenerator::fromDefaultTable.
+# Without it, the committed prebuilt asset (8192 dims, QSB1) is used.
 cmake -S . -B build -DQUANTAPE_SOBOL_TABLE=/path/to/joe-kuo-table.txt
 
 # clang-format the tree, or verify it (wrapper: repo_tools/format_code.sh)
 cmake --build build --target format
 cmake --build build --target format-check
 
-# API documentation (Doxygen) -> build/docs/doxygen/html
-cmake --build build --target doc
+# API documentation (Doxygen) -> docs/html
+cmake --build build --target docs
 ```
 
-Requires C++20 (tested with Homebrew LLVM 20). Third-party dependencies
-(Stan Math 4.9, Eigen, Boost, oneTBB, SUNDIALS) are fetched/configured by
-CMake; see the top-level `CMakeLists.txt` for the exact versions. The static
+Requires C++20 (tested with Homebrew LLVM 20). Eigen and Stan Math 4.9 are
+fetched into `third-party/` by `repo_tools/fetch_third_party.sh` (SHA256-pinned;
+also run by `repo_tools/setup_dev.sh`); Boost, oneTBB, SUNDIALS, quill, zmij and
+nlohmann/json are fetched by CMake's FetchContent at configure time. The static
 library target is `quantape`; tests, benchmarks and examples link it
-transitively.
+transitively. Third-party licenses are listed in `NOTICE`.
 
 ## Tests
 
@@ -223,7 +225,7 @@ layer — KKT route or weighted instrument-Jacobian pseudo-inverse
 ## Documentation
 
 Headers are comment-dense (`/** ... */` file/class/method docs). Generate the
-API reference with `cmake --build build --target doc` (Doxygen + Graphviz,
+API reference with `cmake --build build --target docs` (Doxygen + Graphviz,
 `docs/Doxyfile`); the output lands in `docs/html` and is reachable through the
 single entry point `docs/index.html` (open it in a browser). The generated
 HTML is gitignored — regenerate after changes. Class graphs, collaboration

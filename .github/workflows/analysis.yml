@@ -1,0 +1,52 @@
+name: analysis
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for --changed (merge-base with the target ref)
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third-party
+            build-ci/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh') }}
+
+      - name: Fetch pinned dependencies (Eigen, Stan Math)
+        run: repo_tools/fetch_third_party.sh
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+
+      - name: Configure (compile database only)
+        run: >
+          cmake -S . -B build-ci
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DQUANTAPE_BUILD_BENCHMARKS=OFF
+          -DQUANTAPE_BUILD_TOOLS=OFF
+          -DQUANTAPE_BUILD_EXAMPLES=OFF
+
+      # Allowlist in repo_tools/check_tidy.sh grows module by module; it exits
+      # 0 when nothing allowlisted changed.
+      - name: clang-tidy (allowlisted modules)
+        env:
+          BUILD_DIR: build-ci
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            repo_tools/check_tidy.sh --changed "origin/${{ github.base_ref }}"
+          else
+            repo_tools/check_tidy.sh
+          fi

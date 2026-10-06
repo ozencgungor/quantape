@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+        build_type: [Debug, Release]
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.build_type }}
+          max-size: 500M
+
+      # third-party/ and FetchContent downloads dominate a cold build; cache
+      # both, keyed on the dependency wiring so pin changes invalidate.
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            third-party
+            build-ci/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh') }}
+
+      - name: Fetch pinned dependencies (Eigen, Stan Math)
+        run: repo_tools/fetch_third_party.sh
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-ci
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DQUANTAPE_BUILD_BENCHMARKS=OFF
+          -DQUANTAPE_BUILD_EXAMPLES=ON
+          -DQUANTAPE_BUILD_TOOLS=ON
+
+      - name: Build
+        run: cmake --build build-ci -j 4
+
+      - name: Test
+        run: ctest --test-dir build-ci -j 4 --output-on-failure --timeout 900

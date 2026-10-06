@@ -132,10 +132,12 @@ target_link_libraries(quantape PRIVATE nlohmann_json::nlohmann_json)
 # ============================================================================
 # Generated assets
 #
-# Sobol direction-number table (QSB1 binary, zero-copy mmap). Default: the
-# refined 65,536-dimension table, falling back to the unrefined run and then
-# the Joe-Kuo D(7) base table. Override with
-#   cmake -DQUANTAPE_SOBOL_TABLE=/path/to/table
+# Sobol direction-number table (QSB1 binary, zero-copy mmap). Resolution:
+#   1. raw Joe-Kuo text present in the tree -> pack it for this build
+#   2. otherwise the committed prebuilt asset (8192 dims) is used as-is
+#      (keeps fresh clones/CI functional; the raw 65536-dim files are large
+#      and stay out of version control)
+# Override with:  cmake -DQUANTAPE_SOBOL_TABLE=/path/to/table
 # ============================================================================
 
 add_executable(sobol_to_binary tools/sobol_to_binary.cpp)
@@ -146,6 +148,8 @@ set(_sobol_table_candidates
     "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-refined-w256.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/joe-kuo-65536-unrefined-w256.txt"
     "${CMAKE_CURRENT_SOURCE_DIR}/internal_docs/new-joe-kuo-7.21201")
+set(_sobol_prebuilt_asset
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/sobol/joe-kuo-refined-w256-8192dim-b32.qsb")
 set(_sobol_default "")
 foreach(_candidate IN LISTS _sobol_table_candidates)
     if(EXISTS "${_candidate}")
@@ -175,6 +179,10 @@ if(EXISTS "${QUANTAPE_SOBOL_TABLE}")
     target_compile_definitions(quantape PUBLIC
         QUANTAPE_SOBOL_DEFAULT_TABLE_PATH="${QUANTAPE_SOBOL_ASSET}")
     add_dependencies(quantape sobol_table)
+elseif(EXISTS "${_sobol_prebuilt_asset}")
+    message(STATUS "Sobol table (prebuilt asset): ${_sobol_prebuilt_asset}")
+    target_compile_definitions(quantape PUBLIC
+        QUANTAPE_SOBOL_DEFAULT_TABLE_PATH="${_sobol_prebuilt_asset}")
 else()
     message(STATUS "QUANTAPE_SOBOL_TABLE not found (${QUANTAPE_SOBOL_TABLE}); "
                    "SobolGenerator::fromDefaultTable will be unavailable")
@@ -239,7 +247,7 @@ message(STATUS "===========================================")
 # ============================================================================
 find_package(Doxygen QUIET)
 if(Doxygen_FOUND)
-    add_custom_target(doc
+    add_custom_target(docs
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/docs/html
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -247,13 +255,13 @@ if(Doxygen_FOUND)
         VERBATIM)
 endif()
 
-# Formatting automation (clang-format via format_code.sh).
+# Formatting automation (clang-format via repo_tools/format_code.sh).
 add_custom_target(format
-    COMMAND "${CMAKE_SOURCE_DIR}/format_code.sh"
+    COMMAND "${CMAKE_SOURCE_DIR}/repo_tools/format_code.sh"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Formatting C++ sources with clang-format")
 
 add_custom_target(format-check
-    COMMAND "${CMAKE_SOURCE_DIR}/format_code.sh" --check
+    COMMAND "${CMAKE_SOURCE_DIR}/repo_tools/format_code.sh" --check
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     COMMENT "Checking C++ formatting with clang-format")

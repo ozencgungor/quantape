@@ -6,7 +6,7 @@ same code runs in `double`, `stan::math::var` (exact gradients) and
 `stan::math::fvar<...>` (Hessians / Hessian-vector products).
 
 Full reference: the headers themselves are the documentation (comment-dense),
-rendered by Doxygen — `cmake --build build --target doc`, then open
+rendered by Doxygen — `cmake --build build --target docs`, then open
 `docs/index.html`.
 
 ## Includes

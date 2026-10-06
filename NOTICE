@@ -1,0 +1,24 @@
+Quantape — third-party notices
+==============================
+
+This product includes software developed by third parties. Full license texts
+ship with each dependency (or are fetched with it); the components and their
+licenses are:
+
+  Stan Math          https://github.com/stan-dev/math          BSD-3-Clause
+  Eigen              https://eigen.tuxfamily.org               MPL-2.0
+  Boost (via Stan)   https://www.boost.org                     BSL-1.0
+  oneTBB             https://github.com/oneapi-src/oneTBB      Apache-2.0
+  SUNDIALS           https://github.com/LLNL/sundials          BSD-3-Clause
+  quill              https://github.com/odygrd/quill           MIT
+  zmij               https://github.com/vitaut/zmij            MIT
+  nlohmann/json      https://github.com/nlohmann/json          MIT
+
+Planned/optional dependencies (not currently vendored):
+
+  Abseil             https://abseil.io                         Apache-2.0
+  GoogleTest         https://github.com/google/googletest      BSD-3-Clause
+  SLEEF              https://sleef.org                          BSL-1.0
+
+Ported algorithm implementations retain their upstream notices (e.g. Stan Math
+special-function kernels, BSD-3-Clause). No AGPL-licensed code is included.
