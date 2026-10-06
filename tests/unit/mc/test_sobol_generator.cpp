@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <string>
 #include <thread>
@@ -67,6 +68,14 @@ double normalCdf(double x) {
     return 0.5 * std::erfc(-x / std::sqrt(2.0));
 }
 
+struct DimParam {
+    std::uint32_t dim;
+};
+
+void PrintTo(const DimParam& p, std::ostream* os) {
+    *os << "Dim" << p.dim;
+}
+
 } // namespace
 
 class SobolGeneratorTest : public ::testing::Test {
@@ -74,11 +83,9 @@ protected:
     std::vector<Entry> fixture = makeFixture(100, 4);
 };
 
-class SobolBin1DTest : public SobolGeneratorTest,
-                       public ::testing::WithParamInterface<std::uint32_t> {};
+class SobolBin1DTest : public SobolGeneratorTest, public ::testing::WithParamInterface<DimParam> {};
 
-class SobolBin2DTest : public SobolGeneratorTest,
-                       public ::testing::WithParamInterface<std::uint32_t> {};
+class SobolBin2DTest : public SobolGeneratorTest, public ::testing::WithParamInterface<DimParam> {};
 
 TEST_F(SobolGeneratorTest, dimensionOneKnownValuesAndDimensionCount) {
     const SobolGenerator gen(fixture, SobolOptions{0, 0, true});
@@ -91,7 +98,7 @@ TEST_F(SobolGeneratorTest, dimensionOneKnownValuesAndDimensionCount) {
 }
 
 TEST_P(SobolBin1DTest, oneDimension) {
-    const std::uint32_t dim = GetParam();
+    const std::uint32_t dim = GetParam().dim;
     const SobolGenerator gen(fixture, SobolOptions{0, 0, true});
     constexpr int kM = 10;
     const std::uint32_t N = 1u << kM;
@@ -109,7 +116,7 @@ TEST_P(SobolBin1DTest, oneDimension) {
 }
 
 TEST_P(SobolBin2DTest, twoDimensionalDigitalNet) {
-    const std::uint32_t d = GetParam();
+    const std::uint32_t d = GetParam().dim;
     const SobolGenerator gen(fixture, SobolOptions{0, 0, true});
     constexpr int kM = 10;
     const std::uint32_t N = 1u << kM;
@@ -136,14 +143,18 @@ TEST_P(SobolBin2DTest, twoDimensionalDigitalNet) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Table, SobolBin1DTest, ::testing::Values(1u, 2u, 3u, 10u, 50u, 100u),
-                         [](const ::testing::TestParamInfo<std::uint32_t>& info) {
-                             return "Dim" + std::to_string(info.param);
+INSTANTIATE_TEST_SUITE_P(Table, SobolBin1DTest,
+                         ::testing::Values(DimParam{1u}, DimParam{2u}, DimParam{3u}, DimParam{10u},
+                                           DimParam{50u}, DimParam{100u}),
+                         [](const ::testing::TestParamInfo<DimParam>& info) {
+                             return "Dim" + std::to_string(info.param.dim);
                          });
 
-INSTANTIATE_TEST_SUITE_P(Table, SobolBin2DTest, ::testing::Values(3u, 9u, 27u, 55u, 99u),
-                         [](const ::testing::TestParamInfo<std::uint32_t>& info) {
-                             return "Dim" + std::to_string(info.param);
+INSTANTIATE_TEST_SUITE_P(Table, SobolBin2DTest,
+                         ::testing::Values(DimParam{3u}, DimParam{9u}, DimParam{27u}, DimParam{55u},
+                                           DimParam{99u}),
+                         [](const ::testing::TestParamInfo<DimParam>& info) {
+                             return "Dim" + std::to_string(info.param.dim);
                          });
 
 TEST_F(SobolGeneratorTest, digitalShiftReproducibilityAndPointOffset) {
@@ -185,7 +196,7 @@ TEST_F(SobolGeneratorTest, engineScheduleAndBlockBitwiseInvariance) {
     const GbmProcess model{0.03, 0.2};
 
     const std::size_t nPaths = 4096;
-    const auto makeSource = [this, steps](std::uint64_t seed) {
+    const auto makeSource = [this](std::uint64_t seed) {
         return SobolGaussianSource(SobolGenerator(fixture, SobolOptions{seed, 1, true}), 1, steps,
                                    1, 0);
     };
@@ -232,7 +243,7 @@ TEST_F(SobolGeneratorTest, qmcVsIidVsBlackScholes) {
     const GbmProcess model{0.03, 0.2};
 
     const std::size_t nPaths = 4096;
-    const auto makeSource = [this, steps](std::uint64_t seed) {
+    const auto makeSource = [this](std::uint64_t seed) {
         return SobolGaussianSource(SobolGenerator(fixture, SobolOptions{seed, 1, true}), 1, steps,
                                    1, 0);
     };
