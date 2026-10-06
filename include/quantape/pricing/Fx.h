@@ -2,9 +2,8 @@
 
 #include "quantape/datetime/Date.h"
 #include "quantape/datetime/DayCounter.h"
+#include "quantape/instruments/BootstrapInstrument.h"
 #include "quantape/instruments/FxInstruments.h"
-#include "quantape/markets/Curves/BootstrapInstrument.h"
-#include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Data/FXRate.h"
 #include "quantape/markets/Data/FxQuote.h"
 

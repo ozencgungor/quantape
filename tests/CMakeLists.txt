@@ -111,6 +111,14 @@ quantape_enable_stan(test_instruments)
 quantape_set_warnings(test_instruments)
 quantape_register_test(test_instruments)
 
+# Money-market instruments: factory validation, date/target/kindName/priority
+# metadata, the overlap ordering and the var/fvar<var> quote gates.
+add_executable(test_ir_instruments test_ir_instruments.cpp)
+target_link_libraries(test_ir_instruments PRIVATE quantape)
+quantape_enable_stan(test_ir_instruments)
+quantape_set_warnings(test_ir_instruments)
+quantape_register_test(test_ir_instruments)
+
 add_executable(test_curve_risk_report test_curve_risk_report.cpp)
 target_link_libraries(test_curve_risk_report PRIVATE quantape)
 quantape_set_warnings(test_curve_risk_report)

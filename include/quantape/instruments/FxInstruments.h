@@ -10,9 +10,7 @@
 #include "quantape/markets/Data/FxQuote.h"
 #include "quantape/markets/Descriptors/FXDescriptor.h"
 
-#include <cstddef>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace quantape::instruments {
@@ -32,15 +30,6 @@ namespace quantape::instruments {
  * store the dates; cashflow materialization can also roll them from a supplied
  * reference date when the instrument was left undated.
  */
-
-/// Inline three-character currency record for cashflow materialization.
-inline Currency currencyFromCode(const std::string& code) {
-    Currency out;
-    for (std::size_t i = 0; i < out.code.size(); ++i) {
-        out.code[i] = i < code.size() ? code[i] : ' ';
-    }
-    return out;
-}
 
 /// Joint spot date of a pair: the reference date advanced by
 /// `max(baseSpotLag, quoteSpotLag)` days and adjusted on the joint calendar.

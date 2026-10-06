@@ -57,7 +57,7 @@ DiscountCurve<double> buildCurve(const dt::Date& reference, const dt::DayCounter
 }
 
 std::string codeOf(const inst::Currency& currency) {
-    return std::string(currency.code.data(), currency.code.size());
+    return inst::currencyCode(currency);
 }
 
 /// Nested-AD functor of the instrument forward value over the spot and the 2Y

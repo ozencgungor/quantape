@@ -154,8 +154,11 @@ void testFxSpotAndForwardPricing() {
                      0.0, 1e-12);
     const markets::FXDescriptor eurusd("EUR", "USD");
     const markets::FXRate<double> rate(spot, baseCurve, quoteCurve, eurusd);
-    util::checkClose("fx forward rate overload",
-                     markets::fxForwardPv(rate, maturity, strike, notional), forwardPv, 1e-12);
+    // Relative tolerance: the two overloads agree mathematically, but at
+    // notional-scale values (~1e5) a 1e-12 absolute tolerance is below one ULP.
+    util::checkCloseRel("fx forward rate overload",
+                        markets::fxForwardPv(rate, maturity, strike, notional), forwardPv, 1e-12,
+                        1e-12);
 
     // Reverse mode: the spot delta must equal the discounted base notional and
     // the curve node adjoints the analytic curve weights.

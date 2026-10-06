@@ -6,10 +6,13 @@
 #include "quantape/datetime/Period.h"
 #include "quantape/datetime/Schedule.h"
 #include "quantape/datetime/TimeConversion.h"
+#include "quantape/instruments/IrInstruments.h"
 #include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/math/Solvers/BrentSolver.h"
+#include "quantape/pricing/Ir.h"
+#include "quantape/pricing/IrMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -62,19 +65,9 @@ constexpr std::string_view pillarKindName(PillarKind kind) noexcept {
     return "Unknown";
 }
 
-/// Rate-future underlying style. `Simple` and `Compounded` are numerically
-/// identical on a curve whose overnight index is the curve itself (the
-/// compounded rate telescopes to the simple forward); `Averaged` averages the
-/// overnight index over the reference period, either arithmetically over the
-/// business-day fixing grid (SR1-style daily-rate mean) or compounded
-/// (SR3-style: `(D(start)/D(maturity) - 1) / yearFraction`; the compounded rate
-/// telescopes, so no fixing grid is needed) per `averagingStyle`.
-enum class FutureStyle : std::uint8_t { Simple, Compounded, Averaged };
-
-/// Averaging convention for `FutureStyle::Averaged`: `Arithmetic` is the mean
-/// of the daily simple overnight fixings on the business-day grid;
-/// `Compounded` is the period compounded overnight rate.
-enum class AveragingStyle : std::uint8_t { Arithmetic, Compounded };
+/// Rate-future underlying style, defined with the scalar quote algebra.
+using pricing::AveragingStyle;
+using pricing::FutureStyle;
 
 /// One bootstrap instrument with its market convention.
 struct CurvePillar {
@@ -111,65 +104,8 @@ struct BasisPillar {
 };
 
 /// Consecutive business-day fixing dates over `[effective, maturity]`, used by
-/// averaged overnight futures (weekends and holidays are skipped; the fixing
-/// preceding a gap carries the multi-day accrual). The grid ends exactly at
-/// `maturity`, even when that is not a business day, so the final fixing spans
-/// the end of the quoted reference period.
-inline std::vector<datetime::Date> businessDayFixings(const datetime::Calendar& calendar,
-                                                      const datetime::Date& effective,
-                                                      const datetime::Date& maturity) {
-    if (maturity < effective) {
-        throw std::invalid_argument("businessDayFixings: maturity before effective");
-    }
-    std::vector<datetime::Date> dates{effective};
-    while (dates.back() < maturity) {
-        const datetime::Date next =
-            calendar.advance(dates.back(), datetime::Period(1, datetime::TimeUnit::Days),
-                             datetime::BusinessDayConvention::Following);
-        if (!(next > dates.back())) {
-            throw std::invalid_argument("businessDayFixings: calendar is not advancing");
-        }
-        dates.push_back(next >= maturity ? maturity : next);
-    }
-    return dates;
-}
-
-namespace detail {
-/// Averaged arithmetic overnight future quote shared by the discount-curve and
-/// forecast-curve future paths: the mean of the daily simple overnight forwards
-/// over the business-day fixing grid, excluding the convexity adjustment.
-template <typename DoubleT, typename CurveT>
-    requires CurveProvider<CurveT, DoubleT>
-inline DoubleT averagedArithmeticFuturesQuote(
-    const CurveT& curve, const datetime::Date& referenceDate, const datetime::Calendar& calendar,
-    const datetime::Date& start, const datetime::Date& maturity,
-    const datetime::DayCounter& quoteDayCounter, const datetime::DayCounter& zeroDayCounter,
-    std::string_view context) {
-    const std::vector<datetime::Date> fixings = businessDayFixings(calendar, start, maturity);
-    if (fixings.size() < 2) {
-        throw std::invalid_argument(std::string(context) +
-                                    ": empty averaged futures reference period");
-    }
-    const double t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    if (!(t1 >= 0.0)) {
-        throw std::invalid_argument(std::string(context) +
-                                    ": futures fixing before the reference date");
-    }
-    DoubleT sum = 0.0;
-    for (std::size_t k = 1; k < fixings.size(); ++k) {
-        const double tau = datetime::yearFraction(fixings[k - 1], fixings[k], quoteDayCounter);
-        if (!(tau > 0.0)) {
-            throw std::invalid_argument(std::string(context) +
-                                        ": non-positive averaged futures accrual");
-        }
-        const double previous =
-            datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter);
-        const double current = datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter);
-        sum += (curve.discount(previous) / curve.discount(current) - 1.0) / tau;
-    }
-    return sum / static_cast<double>(fixings.size() - 1);
-}
-} // namespace detail
+/// averaged overnight futures; re-exported from the scalar math header.
+using pricing::businessDayFixings;
 
 /// One par fixed-vs-floating IRS pillar on a forecast curve: the floating leg
 /// fixes on the forecast curve, the fixed leg and all discounting use the
@@ -251,148 +187,115 @@ inline std::string riskMaturityTag(const datetime::Date& adjustedMaturity, doubl
     return std::to_string(std::lround(t * 12.0)) + "M";
 }
 
-/// Model-implied quote of `pillar` against `curve` (exact-fit residual target).
-template <typename DoubleT>
-inline DoubleT impliedQuote(const CurvePillar& pillar, const datetime::Date& referenceDate,
-                            const DiscountCurve<DoubleT>& curve) {
-    const datetime::DayCounter& zeroDayCounter = curve.zeroDayCounter();
+namespace detail {
+
+/// Adapter that presents one OIS pillar as a plain bootstrap instrument: risk
+/// maturity and target from the pillar, the par rate from its prepared coupon
+/// times through the shared money-market algebra. OIS keeps its tagged-pillar
+/// adapter until it lands as a plain instrument.
+class OisPillarInstrument {
+public:
+    OisPillarInstrument(datetime::Date date, double target,
+                        std::vector<pricing::OisCouponTimes> coupons)
+        : m_date(date), m_target(target), m_coupons(std::move(coupons)) {}
+
+    datetime::Date date() const { return m_date; }
+    double target() const { return m_target; }
+
+    template <typename ScalarT, typename CurveSetT>
+    ScalarT impliedQuote(const CurveSetT& curves) const {
+        return pricing::impliedOisParRate<ScalarT>(m_coupons, curves);
+    }
+
+private:
+    datetime::Date m_date;
+    double m_target = 0.0;
+    std::vector<pricing::OisCouponTimes> m_coupons;
+};
+
+} // namespace detail
+
+/// Closed-set discount-curve bootstrap instrument: the four money-market
+/// families as plain-data instruments plus the OIS adapter.
+using DiscountInstrument = Ladder<instruments::Deposit, instruments::Repo, instruments::Fra,
+                                  instruments::Future, detail::OisPillarInstrument>;
+
+/// Adapter from the tagged `CurvePillar` POD to the concept instrument: quote
+/// times are prepared once per instrument (never per Brent step) with the
+/// caller's zero clock, and `date()` is the instrument's risk maturity.
+inline DiscountInstrument toInstrument(const CurvePillar& pillar,
+                                       const datetime::Date& referenceDate,
+                                       const datetime::DayCounter& zeroDayCounter) {
+    using Instrument = DiscountInstrument::Instrument;
     switch (pillar.kind) {
-        case PillarKind::Repo:
         case PillarKind::Deposit: {
-            const datetime::Date maturity = adjustedMaturity(pillar);
-            const double tau =
-                datetime::yearFraction(referenceDate, maturity, pillar.quoteDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument("impliedQuote: non-positive deposit accrual");
-            }
-            const double t = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-            return (1.0 / curve.discount(t) - 1.0) / tau;
+            instruments::Deposit out;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
+        }
+        case PillarKind::Repo: {
+            instruments::Repo out;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
         }
         case PillarKind::Fra: {
-            const datetime::Date start = adjustedStart(pillar);
-            const datetime::Date maturity = adjustedMaturity(pillar);
-            const double t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-            const double t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-            const double tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument("impliedQuote: non-positive FRA accrual");
-            }
-            if (!(t1 >= 0.0)) {
-                throw std::invalid_argument("impliedQuote: FRA start before the reference date");
-            }
-            const DoubleT forward = (curve.discount(t1) / curve.discount(t2) - 1.0) / tau;
-            if (pillar.fraConvexityExponent == 0.0) {
-                return forward;
-            }
-            using std::exp;
-            return ((1.0 + forward * tau) * exp(pillar.fraConvexityExponent) - 1.0) / tau;
+            instruments::Fra out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.fraConvexityExponent = pillar.fraConvexityExponent;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
         }
         case PillarKind::Future: {
-            // Exchange fixings and accrual ends are quoted dates, not rolled on
-            // a calendar.
-            const double convexity = pillar.convexityAdjustment;
-            if (pillar.futureStyle == FutureStyle::Averaged &&
-                pillar.averagingStyle == AveragingStyle::Compounded) {
-                // Compounded overnight average: the daily compoundings over the
-                // business-day fixing grid are multiplied and annualized by the
-                // reference period's year fraction. On a self-consistent curve
-                // the product telescopes to the period discount ratio, so the
-                // simple-rate risk row stays exact.
-                const std::vector<datetime::Date> fixings =
-                    businessDayFixings(pillar.calendar, pillar.start, pillar.maturity);
-                if (fixings.size() < 2) {
-                    throw std::invalid_argument(
-                        "impliedQuote: empty averaged futures reference period");
-                }
-                const double t1 =
-                    datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
-                const double tau =
-                    datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-                if (!(tau > 0.0)) {
-                    throw std::invalid_argument("impliedQuote: non-positive futures accrual");
-                }
-                if (!(t1 >= 0.0)) {
-                    throw std::invalid_argument(
-                        "impliedQuote: futures fixing before the reference date");
-                }
-                DoubleT accumulated = 1.0;
-                for (std::size_t k = 1; k < fixings.size(); ++k) {
-                    const double previous =
-                        datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter);
-                    const double current =
-                        datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter);
-                    accumulated *= curve.discount(previous) / curve.discount(current);
-                }
-                return (accumulated - 1.0) / tau + convexity;
-            }
-            if (pillar.futureStyle == FutureStyle::Averaged) {
-                return detail::averagedArithmeticFuturesQuote<DoubleT>(
-                           curve, referenceDate, pillar.calendar, pillar.start, pillar.maturity,
-                           pillar.quoteDayCounter, zeroDayCounter, "impliedQuote") +
-                       convexity;
-            }
-            // Simple and compounded rate futures: on a curve whose overnight
-            // index is the curve itself the compounded rate telescopes to the
-            // simple forward over the accrual period.
-            const double t1 = datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
-            const double t2 =
-                datetime::yearFraction(referenceDate, pillar.maturity, zeroDayCounter);
-            const double tau =
-                datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument("impliedQuote: non-positive futures accrual");
-            }
-            if (!(t1 >= 0.0)) {
-                throw std::invalid_argument(
-                    "impliedQuote: futures fixing before the reference date");
-            }
-            return (curve.discount(t1) / curve.discount(t2) - 1.0) / tau + convexity;
+            instruments::Future out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.futureStyle = pillar.futureStyle;
+            out.averagingStyle = pillar.averagingStyle;
+            out.convexityAdjustment = pillar.convexityAdjustment;
+            out.quote = pillar.quote;
+            out.prepare(referenceDate, zeroDayCounter, "impliedQuote");
+            return DiscountInstrument{Instrument{std::move(out)}};
         }
         case PillarKind::OisSwap: {
-            // A seasoned swap anchors its schedule at the past effective date.
             const datetime::Date effective =
                 pillar.start.serial() != 0 ? pillar.start : referenceDate;
-            const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
-                                              pillar.calendar, pillar.businessDayConvention,
-                                              datetime::DateGeneration::Forward, false,
-                                              datetime::BusinessDayConvention::Unadjusted);
-            const std::vector<datetime::Date>& dates = schedule.dates();
-            DoubleT annuity = 0.0;
-            DoubleT floating = 0.0;
-            for (std::size_t k = 1; k < dates.size(); ++k) {
-                const double tau =
-                    datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
-                if (!(tau > 0.0)) {
-                    throw std::invalid_argument("impliedQuote: non-positive OIS accrual");
-                }
-                const datetime::Date payDate = pillar.calendar.advance(
-                    dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-                    pillar.businessDayConvention);
-                const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-                const DoubleT discountPay = curve.discount(tPay);
-                annuity += tau * discountPay;
-                if (k == 1 && pillar.firstCouponFixed) {
-                    floating += discountPay * tau * pillar.firstCouponRate;
-                    continue;
-                }
-                const double tStart =
-                    datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-                const double tEnd = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-                if (!(tStart >= 0.0) || !(tEnd > 0.0)) {
-                    throw std::invalid_argument(
-                        "impliedQuote: coupons before the reference date must be fixed");
-                }
-                const DoubleT discountStart = curve.discount(tStart);
-                const DoubleT discountEnd = curve.discount(tEnd);
-                floating += discountPay * (discountStart / discountEnd - 1.0);
-            }
-            if (!(annuity > 0.0)) {
-                throw std::invalid_argument("impliedQuote: non-positive OIS annuity");
-            }
-            return floating / annuity;
+            std::vector<pricing::OisCouponTimes> coupons = pricing::prepareOisCouponTimes(
+                effective, pillar.maturity, pillar.fixedTenor, pillar.calendar,
+                pillar.businessDayConvention, pillar.paymentLag, pillar.quoteDayCounter,
+                pillar.firstCouponFixed, pillar.firstCouponRate, referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{detail::OisPillarInstrument(
+                pillarRiskMaturity(pillar), pillar.quote, std::move(coupons))}};
         }
     }
     throw std::invalid_argument("impliedQuote: unknown pillar kind");
+}
+
+/// Model-implied quote of `pillar` against `curve` (exact-fit residual target):
+/// maps the tagged pillar to its concept instrument and evaluates it on the
+/// curve. Error texts and validation order match the per-kind implementation.
+template <typename DoubleT>
+inline DoubleT impliedQuote(const CurvePillar& pillar, const datetime::Date& referenceDate,
+                            const DiscountCurve<DoubleT>& curve) {
+    const DiscountInstrument instrument =
+        toInstrument(pillar, referenceDate, curve.zeroDayCounter());
+    return instrument.template impliedQuote<DoubleT>(DiscountSet<DiscountCurve<DoubleT>>{curve});
 }
 
 /// Annuity of one leg schedule over the discount curve at its payment dates:
@@ -695,61 +598,21 @@ constexpr std::string_view forecastPillarKindName(ForecastPillar::Kind kind) noe
 
 namespace detail {
 
-/// Precomputed deposit/repo quote inputs: accrual year fraction and zero time.
-struct DepositQuoteTimes {
-    double tau = 0.0;
-    double t = 0.0;
-};
+/// Precomputed money-market quote times, aliased from the scalar math header.
+using SimpleForwardQuoteTimes = pricing::SimpleForwardQuoteTimes;
+using FutureQuoteTimes = pricing::FutureQuoteTimes;
 
-/// Precomputed FRA quote inputs.
-struct FraQuoteTimes {
-    double t1 = 0.0;
-    double t2 = 0.0;
-    double tau = 0.0;
-    double convexityExponent = 0.0;
-};
-
-/// Precomputed future quote inputs for every underlying style. Simple and
-/// compounded futures use `t1`/`t2`/`tau`; the averaged styles carry the
-/// fixing grid times (with per-fixing accruals for the arithmetic mean).
-struct FutureQuoteTimes {
-    enum class Style : std::uint8_t { Simple, AveragedArithmetic, AveragedCompounded };
-    Style style = Style::Simple;
-    double t1 = 0.0;
-    double t2 = 0.0;
-    double tau = 0.0;
-    double convexity = 0.0;
-    std::vector<double> previousTimes;
-    std::vector<double> currentTimes;
-    std::vector<double> accrualTaus;
-};
-
-/// Precomputed quote inputs of one OIS coupon.
-struct OisCouponTimes {
-    double tau = 0.0;
-    double tPay = 0.0;
-    double tStart = 0.0;
-    double tEnd = 0.0;
-    bool firstFixed = false;
-    double firstRate = 0.0;
-};
-
-/// Everything a discount-curve bootstrap residual needs for one pillar. The
-/// schedule and date arithmetic are resolved once when the bootstrap starts;
-/// each root-find step only evaluates the trial curve at the stored times.
+/// Everything a discount-curve bootstrap residual needs for one pillar, kept
+/// as a thin forwarder to the scalar algebra for the frozen legacy oracle.
+/// The schedule and date arithmetic are resolved once when the bootstrap
+/// starts; each root-find step only evaluates the trial curve at the times.
 struct PillarQuoteTimes {
     PillarKind kind = PillarKind::Deposit;
-    DepositQuoteTimes deposit;
-    FraQuoteTimes fra;
-    FutureQuoteTimes future;
-    std::vector<OisCouponTimes> oisCoupons;
-};
-
-/// Precomputed simple-forward quote inputs (deposit and FRA forecast pillars).
-struct SimpleForwardQuoteTimes {
-    double t1 = 0.0;
-    double t2 = 0.0;
-    double tau = 0.0;
+    pricing::SimpleForwardQuoteTimes deposit;
+    pricing::SimpleForwardQuoteTimes fra;
+    double fraConvexityExponent = 0.0;
+    pricing::FutureQuoteTimes future;
+    std::vector<pricing::OisCouponTimes> oisCoupons;
 };
 
 /// Precomputed quote inputs of one IRS float coupon.
@@ -786,150 +649,6 @@ struct ForecastQuoteTimes {
     bool spreadOnParentLeg = true;
 };
 
-inline DepositQuoteTimes makeDepositQuoteTimes(const CurvePillar& pillar,
-                                               const datetime::Date& referenceDate,
-                                               const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date maturity = adjustedMaturity(pillar);
-    DepositQuoteTimes times;
-    times.tau = datetime::yearFraction(referenceDate, maturity, pillar.quoteDayCounter);
-    if (!(times.tau > 0.0)) {
-        throw std::invalid_argument("impliedQuote: non-positive deposit accrual");
-    }
-    times.t = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    return times;
-}
-
-inline FraQuoteTimes makeFraQuoteTimes(const CurvePillar& pillar,
-                                       const datetime::Date& referenceDate,
-                                       const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date start = adjustedStart(pillar);
-    const datetime::Date maturity = adjustedMaturity(pillar);
-    FraQuoteTimes times;
-    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    times.tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-    times.convexityExponent = pillar.fraConvexityExponent;
-    if (!(times.tau > 0.0)) {
-        throw std::invalid_argument("impliedQuote: non-positive FRA accrual");
-    }
-    if (!(times.t1 >= 0.0)) {
-        throw std::invalid_argument("impliedQuote: FRA start before the reference date");
-    }
-    return times;
-}
-
-inline FutureQuoteTimes makeFutureQuoteTimes(
-    const datetime::Date& start, const datetime::Date& maturity, const datetime::Calendar& calendar,
-    const datetime::DayCounter& quoteDayCounter, FutureStyle futureStyle,
-    AveragingStyle averagingStyle, double convexityAdjustment, const datetime::Date& referenceDate,
-    const datetime::DayCounter& zeroDayCounter, std::string_view context) {
-    FutureQuoteTimes times;
-    times.convexity = convexityAdjustment;
-    if (futureStyle == FutureStyle::Averaged && averagingStyle == AveragingStyle::Compounded) {
-        times.style = FutureQuoteTimes::Style::AveragedCompounded;
-        const std::vector<datetime::Date> fixings = businessDayFixings(calendar, start, maturity);
-        if (fixings.size() < 2) {
-            throw std::invalid_argument(std::string(context) +
-                                        ": empty averaged futures reference period");
-        }
-        times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-        times.tau = datetime::yearFraction(start, maturity, quoteDayCounter);
-        if (!(times.tau > 0.0)) {
-            throw std::invalid_argument(std::string(context) + ": non-positive futures accrual");
-        }
-        if (!(times.t1 >= 0.0)) {
-            throw std::invalid_argument(std::string(context) +
-                                        ": futures fixing before the reference date");
-        }
-        times.previousTimes.reserve(fixings.size() - 1);
-        times.currentTimes.reserve(fixings.size() - 1);
-        for (std::size_t k = 1; k < fixings.size(); ++k) {
-            times.previousTimes.push_back(
-                datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter));
-            times.currentTimes.push_back(
-                datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter));
-        }
-        return times;
-    }
-    if (futureStyle == FutureStyle::Averaged) {
-        times.style = FutureQuoteTimes::Style::AveragedArithmetic;
-        const std::vector<datetime::Date> fixings = businessDayFixings(calendar, start, maturity);
-        if (fixings.size() < 2) {
-            throw std::invalid_argument(std::string(context) +
-                                        ": empty averaged futures reference period");
-        }
-        times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-        if (!(times.t1 >= 0.0)) {
-            throw std::invalid_argument(std::string(context) +
-                                        ": futures fixing before the reference date");
-        }
-        times.previousTimes.reserve(fixings.size() - 1);
-        times.currentTimes.reserve(fixings.size() - 1);
-        times.accrualTaus.reserve(fixings.size() - 1);
-        for (std::size_t k = 1; k < fixings.size(); ++k) {
-            const double tau = datetime::yearFraction(fixings[k - 1], fixings[k], quoteDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument(std::string(context) +
-                                            ": non-positive averaged futures accrual");
-            }
-            times.previousTimes.push_back(
-                datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter));
-            times.currentTimes.push_back(
-                datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter));
-            times.accrualTaus.push_back(tau);
-        }
-        return times;
-    }
-    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    times.tau = datetime::yearFraction(start, maturity, quoteDayCounter);
-    if (!(times.tau > 0.0)) {
-        throw std::invalid_argument(std::string(context) + ": non-positive futures accrual");
-    }
-    if (!(times.t1 >= 0.0)) {
-        throw std::invalid_argument(std::string(context) +
-                                    ": futures fixing before the reference date");
-    }
-    return times;
-}
-
-inline std::vector<OisCouponTimes> makeOisCouponTimes(const CurvePillar& pillar,
-                                                      const datetime::Date& referenceDate,
-                                                      const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
-                                      pillar.calendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    std::vector<OisCouponTimes> coupons;
-    coupons.reserve(dates.size() - 1);
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        OisCouponTimes coupon;
-        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
-        if (!(coupon.tau > 0.0)) {
-            throw std::invalid_argument("impliedQuote: non-positive OIS accrual");
-        }
-        const datetime::Date payDate = pillar.calendar.advance(
-            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        if (k == 1 && pillar.firstCouponFixed) {
-            coupon.firstFixed = true;
-            coupon.firstRate = pillar.firstCouponRate;
-        } else {
-            coupon.tStart = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-            coupon.tEnd = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-            if (!(coupon.tStart >= 0.0) || !(coupon.tEnd > 0.0)) {
-                throw std::invalid_argument(
-                    "impliedQuote: coupons before the reference date must be fixed");
-            }
-        }
-        coupons.push_back(coupon);
-    }
-    return coupons;
-}
-
 inline PillarQuoteTimes makePillarQuoteTimes(const CurvePillar& pillar,
                                              const datetime::Date& referenceDate,
                                              const datetime::DayCounter& zeroDayCounter) {
@@ -938,131 +657,51 @@ inline PillarQuoteTimes makePillarQuoteTimes(const CurvePillar& pillar,
     switch (pillar.kind) {
         case PillarKind::Repo:
         case PillarKind::Deposit:
-            times.deposit = makeDepositQuoteTimes(pillar, referenceDate, zeroDayCounter);
+            times.deposit = pricing::prepareDepositTimes(adjustedMaturity(pillar), referenceDate,
+                                                         pillar.quoteDayCounter, zeroDayCounter);
             break;
         case PillarKind::Fra:
-            times.fra = makeFraQuoteTimes(pillar, referenceDate, zeroDayCounter);
+            times.fra =
+                pricing::prepareFraTimes(adjustedStart(pillar), adjustedMaturity(pillar),
+                                         referenceDate, pillar.quoteDayCounter, zeroDayCounter);
+            times.fraConvexityExponent = pillar.fraConvexityExponent;
             break;
         case PillarKind::Future:
-            times.future = makeFutureQuoteTimes(pillar.start, pillar.maturity, pillar.calendar,
-                                                pillar.quoteDayCounter, pillar.futureStyle,
-                                                pillar.averagingStyle, pillar.convexityAdjustment,
-                                                referenceDate, zeroDayCounter, "impliedQuote");
+            times.future = pricing::prepareFutureTimes(
+                pillar.start, pillar.maturity, pillar.calendar, pillar.quoteDayCounter,
+                pillar.futureStyle, pillar.averagingStyle, pillar.convexityAdjustment,
+                referenceDate, zeroDayCounter, "impliedQuote");
             break;
         case PillarKind::OisSwap:
-            times.oisCoupons = makeOisCouponTimes(pillar, referenceDate, zeroDayCounter);
+            times.oisCoupons = pricing::prepareOisCouponTimes(
+                pillar.start.serial() != 0 ? pillar.start : referenceDate, pillar.maturity,
+                pillar.fixedTenor, pillar.calendar, pillar.businessDayConvention, pillar.paymentLag,
+                pillar.quoteDayCounter, pillar.firstCouponFixed, pillar.firstCouponRate,
+                referenceDate, zeroDayCounter);
             break;
     }
     return times;
 }
 
-/// Discount-curve quote from precomputed times; the arithmetic mirrors
-/// `impliedQuote` exactly.
+/// Discount-curve quote from precomputed times: a thin forwarder to the scalar
+/// algebra, kept for the frozen old-vs-new oracle.
 template <typename DoubleT>
 inline DoubleT evaluatePillarQuote(const PillarQuoteTimes& times,
                                    const DiscountCurve<DoubleT>& curve) {
     switch (times.kind) {
         case PillarKind::Repo:
+            return pricing::impliedRepoQuote<DoubleT>(times.deposit, curve);
         case PillarKind::Deposit:
-            return (1.0 / curve.discount(times.deposit.t) - 1.0) / times.deposit.tau;
-        case PillarKind::Fra: {
-            const FraQuoteTimes& fra = times.fra;
-            const DoubleT forward =
-                (curve.discount(fra.t1) / curve.discount(fra.t2) - 1.0) / fra.tau;
-            if (fra.convexityExponent == 0.0) {
-                return forward;
-            }
-            using std::exp;
-            return ((1.0 + forward * fra.tau) * exp(fra.convexityExponent) - 1.0) / fra.tau;
-        }
-        case PillarKind::Future: {
-            const FutureQuoteTimes& future = times.future;
-            if (future.style == FutureQuoteTimes::Style::AveragedCompounded) {
-                DoubleT accumulated = 1.0;
-                DoubleT previousDiscount = 0.0;
-                bool hasPrevious = false;
-                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
-                    if (!hasPrevious) {
-                        previousDiscount = curve.discount(future.previousTimes[k]);
-                    }
-                    const DoubleT currentDiscount = curve.discount(future.currentTimes[k]);
-                    accumulated *= previousDiscount / currentDiscount;
-                    previousDiscount = currentDiscount;
-                    hasPrevious = true;
-                }
-                return (accumulated - 1.0) / future.tau + future.convexity;
-            }
-            if (future.style == FutureQuoteTimes::Style::AveragedArithmetic) {
-                DoubleT sum = 0.0;
-                DoubleT previousDiscount = 0.0;
-                bool hasPrevious = false;
-                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
-                    if (!hasPrevious) {
-                        previousDiscount = curve.discount(future.previousTimes[k]);
-                    }
-                    const DoubleT currentDiscount = curve.discount(future.currentTimes[k]);
-                    sum += (previousDiscount / currentDiscount - 1.0) / future.accrualTaus[k];
-                    previousDiscount = currentDiscount;
-                    hasPrevious = true;
-                }
-                return sum / static_cast<double>(future.previousTimes.size()) + future.convexity;
-            }
-            return (curve.discount(future.t1) / curve.discount(future.t2) - 1.0) / future.tau +
-                   future.convexity;
-        }
-        case PillarKind::OisSwap: {
-            DoubleT annuity = 0.0;
-            DoubleT floating = 0.0;
-            DoubleT startDiscount = 0.0;
-            bool hasStart = false;
-            for (const OisCouponTimes& coupon : times.oisCoupons) {
-                const DoubleT discountPay = curve.discount(coupon.tPay);
-                annuity += coupon.tau * discountPay;
-                if (coupon.firstFixed) {
-                    floating += discountPay * coupon.tau * coupon.firstRate;
-                    hasStart = false;
-                    continue;
-                }
-                const DoubleT couponStart =
-                    hasStart ? startDiscount : curve.discount(coupon.tStart);
-                const DoubleT discountEnd = curve.discount(coupon.tEnd);
-                floating += discountPay * (couponStart / discountEnd - 1.0);
-                startDiscount = discountEnd;
-                hasStart = true;
-            }
-            if (!(annuity > 0.0)) {
-                throw std::invalid_argument("impliedQuote: non-positive OIS annuity");
-            }
-            return floating / annuity;
-        }
+            return pricing::impliedDepositQuote<DoubleT>(times.deposit, curve);
+        case PillarKind::Fra:
+            return pricing::impliedFraQuote<DoubleT>(times.fra, times.fraConvexityExponent, curve);
+        case PillarKind::Future:
+            return pricing::impliedFutureQuote<DoubleT>(times.future, curve);
+        case PillarKind::OisSwap:
+            return pricing::impliedOisParRate<DoubleT>(times.oisCoupons, curve);
     }
     throw std::invalid_argument("impliedQuote: unknown pillar kind");
 }
-
-/// Adapter that presents one tagged discount pillar as a plain bootstrap
-/// instrument: risk maturity and target come from the pillar, the model quote
-/// from its precomputed quote times through `evaluatePillarQuote`.
-class DiscountPillarInstrument {
-public:
-    DiscountPillarInstrument(const CurvePillar& pillar, PillarQuoteTimes times)
-        : m_date(pillarRiskMaturity(pillar)), m_target(pillar.quote), m_times(std::move(times)) {}
-
-    datetime::Date date() const { return m_date; }
-    double target() const { return m_target; }
-
-    template <typename ScalarT>
-    ScalarT impliedQuote(const DiscountSet<DiscountCurve<ScalarT>>& curves) const {
-        return evaluatePillarQuote(m_times, curves.curve);
-    }
-
-private:
-    datetime::Date m_date;
-    double m_target = 0.0;
-    PillarQuoteTimes m_times;
-};
-
-static_assert(BootstrapInstrument<DiscountPillarInstrument, DiscountSet<DiscountCurve<double>>>,
-              "DiscountPillarInstrument must model BootstrapInstrument on a discount set");
 
 inline SimpleForwardQuoteTimes
 makeSimpleForwardQuoteTimes(const ForecastPillar& pillar, const datetime::Date& referenceDate,
@@ -1070,17 +709,8 @@ makeSimpleForwardQuoteTimes(const ForecastPillar& pillar, const datetime::Date& 
     const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
     const datetime::Date maturity =
         pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
-    SimpleForwardQuoteTimes times;
-    times.t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    times.t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    times.tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-    if (!(times.tau > 0.0)) {
-        throw std::invalid_argument("impliedSimpleForward: non-positive accrual");
-    }
-    if (!(times.t1 >= 0.0)) {
-        throw std::invalid_argument("impliedSimpleForward: start before the reference date");
-    }
-    return times;
+    return pricing::prepareSimpleForwardTimes(start, maturity, referenceDate,
+                                              pillar.quoteDayCounter, zeroDayCounter);
 }
 
 inline std::vector<IrsFloatCouponTimes>
@@ -1181,7 +811,7 @@ inline ForecastQuoteTimes makeForecastQuoteTimes(const ForecastPillar& pillar,
             times.simple = makeSimpleForwardQuoteTimes(pillar, referenceDate, zeroDayCounter);
             break;
         case ForecastPillar::Kind::Future:
-            times.future = makeFutureQuoteTimes(
+            times.future = pricing::prepareFutureTimes(
                 pillar.start, pillar.maturity, pillar.calendar, pillar.quoteDayCounter,
                 pillar.futureStyle, pillar.averagingStyle, pillar.convexityAdjustment,
                 referenceDate, zeroDayCounter, "impliedForecastFuture");
@@ -1309,6 +939,91 @@ inline double evaluateForecastQuote(const ForecastQuoteTimes& times, const Forec
     throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
 }
 
+/// Adapter that presents an IRS or basis-swap forecast pillar as a bootstrap
+/// instrument; the swap legs still need a double forecast curve.
+class ForecastSwapInstrument {
+public:
+    ForecastSwapInstrument(const ForecastPillar& pillar, const datetime::Date& referenceDate,
+                           const datetime::DayCounter& zeroDayCounter)
+        : m_date(forecastPillarRiskMaturity(pillar)), m_target(forecastPillarTarget(pillar)),
+          m_times(makeForecastQuoteTimes(pillar, referenceDate, zeroDayCounter)) {}
+
+    datetime::Date date() const { return m_date; }
+    double target() const { return m_target; }
+
+    template <typename ScalarT, typename CurveSetT>
+    ScalarT impliedQuote(const CurveSetT& curves) const {
+        if constexpr (std::is_same_v<ScalarT, double>) {
+            return evaluateForecastQuote(m_times, curves.forecastCurve, curves.discountCurve);
+        } else {
+            (void)curves;
+            throw std::invalid_argument(
+                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+        }
+    }
+
+private:
+    datetime::Date m_date;
+    double m_target = 0.0;
+    ForecastQuoteTimes m_times;
+};
+
+/// Forecast-curve bootstrap instrument: money-market pillars evaluate through
+/// the plain-data instruments; IRS and basis pillars keep the swap adapter.
+using ForecastInstrument =
+    Ladder<instruments::Deposit, instruments::Fra, instruments::Future, ForecastSwapInstrument>;
+
+/// Adapter from the tagged `ForecastPillar` POD to the concept instrument:
+/// quote times are prepared once per instrument with the caller's zero clock.
+inline ForecastInstrument forecastToInstrument(const ForecastPillar& pillar,
+                                               const datetime::Date& referenceDate,
+                                               const datetime::DayCounter& zeroDayCounter) {
+    using Instrument = ForecastInstrument::Instrument;
+    switch (pillar.kind) {
+        case ForecastPillar::Kind::Deposit: {
+            instruments::Deposit out;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareForecast(pillar.start.serial() != 0 ? pillar.start : referenceDate,
+                                referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case ForecastPillar::Kind::Fra: {
+            instruments::Fra out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareForecast(pillar.start.serial() != 0 ? pillar.start : referenceDate,
+                                referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case ForecastPillar::Kind::Future: {
+            instruments::Future out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.futureStyle = pillar.futureStyle;
+            out.averagingStyle = pillar.averagingStyle;
+            out.convexityAdjustment = pillar.convexityAdjustment;
+            out.quote = pillar.quote;
+            out.prepare(referenceDate, zeroDayCounter, "impliedForecastFuture");
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case ForecastPillar::Kind::Irs:
+        case ForecastPillar::Kind::BasisSwap:
+            return ForecastInstrument{
+                Instrument{ForecastSwapInstrument(pillar, referenceDate, zeroDayCounter)}};
+    }
+    throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
+}
+
 } // namespace detail
 
 /// Simple forward of the forecast curve over the pillar's accrual period:
@@ -1323,16 +1038,9 @@ inline DoubleT impliedSimpleForward(const SpreadCurve<DoubleT, ParentT>& forecas
     const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
     const datetime::Date maturity =
         pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
-    const double t1 = datetime::yearFraction(referenceDate, start, zeroDayCounter);
-    const double t2 = datetime::yearFraction(referenceDate, maturity, zeroDayCounter);
-    const double tau = datetime::yearFraction(start, maturity, pillar.quoteDayCounter);
-    if (!(tau > 0.0)) {
-        throw std::invalid_argument("impliedSimpleForward: non-positive accrual");
-    }
-    if (!(t1 >= 0.0)) {
-        throw std::invalid_argument("impliedSimpleForward: start before the reference date");
-    }
-    return (forecast.discount(t1) / forecast.discount(t2) - 1.0) / tau;
+    const pricing::SimpleForwardQuoteTimes times = pricing::prepareSimpleForwardTimes(
+        start, maturity, referenceDate, pillar.quoteDayCounter, zeroDayCounter);
+    return pricing::impliedSimpleForwardQuote<DoubleT>(times, forecast);
 }
 
 /// Model quote of an exchange-traded future on a forecast curve: the forward
@@ -1348,59 +1056,17 @@ inline DoubleT impliedForecastFuture(const SpreadCurve<DoubleT, ParentT>& foreca
                                      const ForecastPillar& pillar,
                                      const datetime::Date& referenceDate,
                                      const datetime::DayCounter& zeroDayCounter) {
-    const double convexity = pillar.convexityAdjustment;
-    if (pillar.futureStyle == FutureStyle::Averaged &&
-        pillar.averagingStyle == AveragingStyle::Compounded) {
-        // Compounded overnight average: the daily compoundings over the
-        // business-day fixing grid are multiplied and annualized by the
-        // reference period's year fraction.
-        const std::vector<datetime::Date> fixings =
-            businessDayFixings(pillar.calendar, pillar.start, pillar.maturity);
-        if (fixings.size() < 2) {
-            throw std::invalid_argument(
-                "impliedForecastFuture: empty averaged futures reference period");
-        }
-        const double t1 = datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
-        const double tau =
-            datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-        if (!(tau > 0.0)) {
-            throw std::invalid_argument("impliedForecastFuture: non-positive futures accrual");
-        }
-        if (!(t1 >= 0.0)) {
-            throw std::invalid_argument(
-                "impliedForecastFuture: futures fixing before the reference date");
-        }
-        DoubleT accumulated = 1.0;
-        for (std::size_t k = 1; k < fixings.size(); ++k) {
-            const double previous =
-                datetime::yearFraction(referenceDate, fixings[k - 1], zeroDayCounter);
-            const double current =
-                datetime::yearFraction(referenceDate, fixings[k], zeroDayCounter);
-            accumulated *= forecast.discount(previous) / forecast.discount(current);
-        }
-        return (accumulated - 1.0) / tau + convexity;
-    }
-    if (pillar.futureStyle == FutureStyle::Averaged) {
-        return detail::averagedArithmeticFuturesQuote<DoubleT>(
-                   forecast, referenceDate, pillar.calendar, pillar.start, pillar.maturity,
-                   pillar.quoteDayCounter, zeroDayCounter, "impliedForecastFuture") +
-               convexity;
-    }
-    // Simple and compounded rate futures: on a curve whose overnight index is
-    // the curve itself the compounded rate telescopes to the simple forward
-    // over the accrual period.
-    const double t1 = datetime::yearFraction(referenceDate, pillar.start, zeroDayCounter);
-    const double t2 = datetime::yearFraction(referenceDate, pillar.maturity, zeroDayCounter);
-    const double tau =
-        datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-    if (!(tau > 0.0)) {
-        throw std::invalid_argument("impliedForecastFuture: non-positive futures accrual");
-    }
-    if (!(t1 >= 0.0)) {
-        throw std::invalid_argument(
-            "impliedForecastFuture: futures fixing before the reference date");
-    }
-    return (forecast.discount(t1) / forecast.discount(t2) - 1.0) / tau + convexity;
+    instruments::Future instrument;
+    instrument.start = pillar.start;
+    instrument.maturity = pillar.maturity;
+    instrument.calendar = pillar.calendar;
+    instrument.quoteDayCounter = pillar.quoteDayCounter;
+    instrument.futureStyle = pillar.futureStyle;
+    instrument.averagingStyle = pillar.averagingStyle;
+    instrument.convexityAdjustment = pillar.convexityAdjustment;
+    instrument.prepare(referenceDate, zeroDayCounter, "impliedForecastFuture");
+    return instrument.template impliedQuote<DoubleT>(
+        DiscountSet<SpreadCurve<DoubleT, ParentT>>{forecast});
 }
 
 /// Model quote of a swap-style forecast instrument: the basis spread or the
@@ -1489,17 +1155,20 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
                 "bootstrapForecastCurve: maturities must be strictly increasing");
         }
     }
-    std::vector<detail::ForecastQuoteTimes> quoteTimes(count);
-    std::vector<double> targets(count);
+    std::vector<detail::ForecastInstrument> instruments;
+    instruments.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        quoteTimes[i] = detail::makeForecastQuoteTimes(pillars[i], referenceDate, zeroDayCounter);
-        targets[i] = forecastPillarTarget(pillars[i]);
+        instruments.push_back(
+            detail::forecastToInstrument(pillars[i], referenceDate, zeroDayCounter));
     }
     const auto quoteTrial = [&](const auto& trial, std::size_t i) {
+        using ForecastT = std::decay_t<decltype(trial)>;
         if (discountCurve != nullptr) {
-            return detail::evaluateForecastQuote(quoteTimes[i], trial, *discountCurve);
+            return instruments[i].template impliedQuote<double>(
+                ForecastSet<ForecastT, DiscountCurve<double>>{trial, *discountCurve});
         }
-        return detail::evaluateForecastQuote(quoteTimes[i], trial, *parent);
+        return instruments[i].template impliedQuote<double>(
+            ForecastSet<ForecastT, ParentT>{trial, *parent});
     };
 
     const quantape::math::BrentSolver<double> solver;
@@ -1531,7 +1200,7 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
                     }
                     const SpreadCurve<double, ParentT> trial(parent, trialTimes, trialSpreads,
                                                              scheme, tension);
-                    cachedF = quoteTrial(trial, i) - targets[i];
+                    cachedF = quoteTrial(trial, i) - instruments[i].target();
                     cachedX = trialSpread;
                     cacheValid = true;
                     return cachedF;
@@ -1579,7 +1248,7 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
         const SpreadCurve<double, ParentT> curve(parent, times, values, scheme, tension);
         double worst = 0.0;
         for (std::size_t i = 0; i < count; ++i) {
-            const double check = quoteTrial(curve, i) - targets[i];
+            const double check = quoteTrial(curve, i) - instruments[i].target();
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {
@@ -1686,16 +1355,13 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
     // date-constructed curve and uses the caller's clock. Precomputing both
     // keeps the solve and the check on their original clocks.
     const datetime::DayCounter trialZeroDayCounter(datetime::DayCount::Actual365Fixed);
-    std::vector<detail::DiscountPillarInstrument> solveInstruments;
-    std::vector<detail::DiscountPillarInstrument> checkInstruments;
+    std::vector<DiscountInstrument> solveInstruments;
+    std::vector<DiscountInstrument> checkInstruments;
     solveInstruments.reserve(count);
     checkInstruments.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
-        solveInstruments.emplace_back(
-            pillars[i],
-            detail::makePillarQuoteTimes(pillars[i], referenceDate, trialZeroDayCounter));
-        checkInstruments.emplace_back(
-            pillars[i], detail::makePillarQuoteTimes(pillars[i], referenceDate, zeroDayCounter));
+        solveInstruments.push_back(toInstrument(pillars[i], referenceDate, trialZeroDayCounter));
+        checkInstruments.push_back(toInstrument(pillars[i], referenceDate, zeroDayCounter));
     }
 
     const quantape::math::BrentSolver<double> solver;
