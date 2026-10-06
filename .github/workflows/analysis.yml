@@ -40,7 +40,9 @@ jobs:
           -DQUANTAPE_BUILD_EXAMPLES=OFF
 
       # Allowlist in repo_tools/check_tidy.sh grows module by module; it exits
-      # 0 when nothing allowlisted changed.
+      # 0 when nothing allowlisted changed. gtest/gmock include dirs are marked
+      # SYSTEM in cmake/Dependencies.cmake (quantape_mark_system), so
+      # --warnings-as-errors never trips on third-party test-framework headers.
       - name: clang-tidy (allowlisted modules)
         env:
           BUILD_DIR: build-ci

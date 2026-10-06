@@ -53,5 +53,21 @@ jobs:
       - name: Build
         run: cmake --build build-ci -j 4
 
-      - name: Test
-        run: ctest --test-dir build-ci -j 4 --output-on-failure --timeout 900
+      # Fast tier first: a cheap failure aborts the job (fail-fast) before the
+      # full 520-case suite runs. The full run uploads one JUnit aggregate per
+      # matrix job; --timeout 1800 covers the 500s-class stress cases.
+      - name: Test (fast tier)
+        run: ctest --test-dir build-ci -L fast -j 4 --output-on-failure
+
+      - name: Test (full suite)
+        run: >
+          ctest --test-dir build-ci -j 4 --output-on-failure --timeout 1800
+          --output-junit junit-${{ matrix.os }}-${{ matrix.build_type }}.xml
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.os }}-${{ matrix.build_type }}
+          path: build-ci/junit-${{ matrix.os }}-${{ matrix.build_type }}.xml
+          if-no-files-found: ignore
