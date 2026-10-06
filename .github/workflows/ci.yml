@@ -32,7 +32,7 @@ jobs:
       # third-party/ and FetchContent downloads dominate a cold build; cache
       # both, keyed on the dependency wiring so pin changes invalidate.
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             third-party
