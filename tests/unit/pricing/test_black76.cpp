@@ -123,7 +123,10 @@ void checkB76Greeks2_FD(double DF, double F, double K, double vol, double T, Opt
 
 void checkB76StanVar(double DF0, double F0, double K0, double vol0, double T, OptionType type) {
     var DF(DF0), F(F0), K(K0), vol(vol0);
-    var price = Black76<var>{DF, F, K, vol, T, type}.price();
+    // The vari returned by price() chains through a callback that references
+    // this functor, so it must outlive grad() (ASan stack-use-after-scope).
+    const Black76<var> b76{DF, F, K, vol, T, type};
+    var price = b76.price();
     stan::math::grad(price.vi_);
 
     auto res = black76Analytical(DF0, F0, K0, vol0, T, type);
@@ -200,7 +203,9 @@ void checkGBSEquivalence(double S, double K, double r_disc, double b, double vol
 void checkGBSStanVar(double S0, double K0, double r0, double b0, double vol0, double T,
                      OptionType type) {
     var S(S0), K(K0), r_disc(r0), b(b0), vol(vol0);
-    var price = GBS<var>{S, K, r_disc, b, vol, T, type}.price();
+    // Same lifetime contract as checkB76StanVar: the functor must outlive grad().
+    const GBS<var> gbs{S, K, r_disc, b, vol, T, type};
+    var price = gbs.price();
     stan::math::grad(price.vi_);
 
     double ad_dS = S.adj(), ad_dK = K.adj(), ad_dr = r_disc.adj(), ad_db = b.adj(),
