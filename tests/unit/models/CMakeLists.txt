@@ -1,13 +1,19 @@
-# models/: Heston calibration/AD/MC. All four targets keep the legacy
-# Stan-defs + TBB profile.
+# models/: Heston pricer, calibration, IFT and Monte Carlo gates. The analytic
+# file is double-only (TBB); the four AD files keep the legacy STAN_DEFS + TBB
+# profile.
 
-foreach(_test test_heston_stan test_heston_calibration test_heston_mc
-               test_heston_ift)
-    add_executable(${_test} ${CMAKE_SOURCE_DIR}/tests/${_test}.cpp)
-    target_link_libraries(${_test} PRIVATE quantape TBB::tbb)
-    quantape_enable_stan_defs(${_test})
-    quantape_set_warnings(${_test})
-    quantape_register_test(${_test})
-endforeach()
+quantape_add_gtest(qta_test_models
+    SOURCES test_heston_analytic.cpp
+    LIBS TBB::tbb
+    LABELS unit models mc slow)
+
+quantape_add_gtest(qta_test_models_ad
+    SOURCES test_heston_stan.cpp
+            test_heston_calibration.cpp
+            test_heston_mc.cpp
+            test_heston_ift.cpp
+    STAN_DEFS
+    LIBS TBB::tbb
+    LABELS unit models mc ad slow)
 
 quantape_collect_executables()

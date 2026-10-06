@@ -15,7 +15,6 @@
 
 #include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/calibration/HestonCalibration.h"
-#include "quantape/log/Log.h"
 #include "quantape/math/Integrals/DoubleExponentialIntegrator.h"
 #include "quantape/math/Optimization/LBFGS.h"
 #include "quantape/mc/Gradients.h"
@@ -25,7 +24,6 @@
 #include "quantape/mc/processes/HestonQeProcess.h"
 #include "quantape/mc/processes/SdeProcesses.h"
 #include "quantape/models/HestonModel.h"
-#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 using ::quantape::util::kPi;
 
@@ -33,13 +31,13 @@ using ::quantape::util::kPi;
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <type_traits>
 #include <vector>
-using quantape::util::checkClose;
-using quantape::util::isFiniteBitwise;
+
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
 using quantape::mc::diffusionOf;
 using quantape::mc::driftOf;
@@ -84,9 +82,33 @@ std::vector<double> thetaOf(const HestonProcess& p) {
     return {p.mu, p.kappa, p.level, p.eta, p.rho};
 }
 
+/// Maps the engine sensitivity layout [lnS0, v0, mu, kappa, level, eta, rho]
+/// to the analytic full gradient at market {S=1, K, r=q=0, T=1}.
+Eigen::VectorXd analyticEngineGradient(const quantape::models::HestonModel& model,
+                                       const quantape::models::HestonParams& params,
+                                       double strike) {
+    const quantape::models::HestonMarket market{1.0, strike, 0.0, 0.0, 1.0};
+    const quantape::models::HestonFullPoint point = quantape::models::toFullPoint(params, market);
+    const auto g = model.fullGradient(point, market.tMax);
+    const double price = model.call(params, market);
+    Eigen::VectorXd out(7);
+    out(0) = g(quantape::models::HESTON_SPOT); // d/d lnS0 at S0 = 1
+    out(1) = g(quantape::models::HESTON_V0);
+    out(2) = market.tMax * price + g(quantape::models::HESTON_RATE); // d/d mu
+    out(3) = g(quantape::models::HESTON_KAPPA);
+    out(4) = g(quantape::models::HESTON_THETA);
+    out(5) = g(quantape::models::HESTON_SIGMA);
+    out(6) = g(quantape::models::HESTON_RHO);
+    return out;
+}
+
+} // namespace
+
+class HestonMcTest : public StanTapeTest {};
+
 // ── 1. theta-driven == member-driven, bitwise ──
 
-void testThetaEquivalence() {
+TEST_F(HestonMcTest, thetaDrivenPathsBitwiseEqual) {
     const HestonProcess model{0.02, 2.0, 0.04, 0.5, -0.6};
     const Eigen::VectorXd x0 = (Eigen::Vector2d() << 0.0, 0.04).finished();
     const std::size_t nSteps = 16;
@@ -119,23 +141,20 @@ void testThetaEquivalence() {
     const Eigen::MatrixXd qeFilled = terminal(filledTheta, HestonQeProcess<HestonProcess>{model});
     const Eigen::MatrixXd euEmpty = terminal(emptyTheta, Euler{});
     const Eigen::MatrixXd euFilled = terminal(filledTheta, Euler{});
-    CHECK(qeEmpty.rows() == qeFilled.rows() && qeEmpty.cols() == qeFilled.cols());
+    EXPECT_TRUE(qeEmpty.rows() == qeFilled.rows() && qeEmpty.cols() == qeFilled.cols());
     int diffs = 0;
     for (Eigen::Index i = 0; i < qeEmpty.size(); ++i) {
         diffs += bitwiseEqual(qeEmpty(i), qeFilled(i)) ? 0 : 1;
         diffs += bitwiseEqual(euEmpty(i), euFilled(i)) ? 0 : 1;
     }
-    checkClose("theta equivalence (QE + Euler)", static_cast<double>(diffs), 0.0, 0.0);
-    QTA_LOG_INFO("test", "  [ok] theta-driven paths bitwise equal to member-driven (QE + Euler)");
+    CHECK_CLOSE("theta equivalence (QE + Euler)", static_cast<double>(diffs), 0.0, 0.0);
 }
 
 // ── 2. catalog: QE + Sobol QMC vs analytic ──
 
-void testQmcPricesVsAnalytic() {
-    if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        QTA_LOG_WARN("test", "  [skip] no compile-time Sobol table configured");
-        return;
-    }
+TEST_F(HestonMcTest, qmcCatalogMatchesAnalytic) {
+    SKIP_UNLESS_ASSET(!quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty(),
+                      "no QUANTAPE_SOBOL_DEFAULT_TABLE_PATH");
     const auto generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
     const quantape::models::HestonModel analytic;
 
@@ -164,7 +183,7 @@ void testQmcPricesVsAnalytic() {
         const auto blocks = simulator.simulate(x0, driftOf(process), diffusionOf(process), source,
                                                nPaths, 8192, Schedule::Parallel);
         for (double k : strikes) {
-            const HestonCallPayoff payoff{k};
+            SCOPED_TRACE(::testing::Message() << "steps=" << c.steps << " strike=" << k);
             double sum = 0.0;
             std::size_t n = 0;
             for (const auto& b : blocks) {
@@ -181,34 +200,12 @@ void testQmcPricesVsAnalytic() {
         }
     }
     // QMC noise + the documented QE scheme discretization bias.
-    checkClose("catalog QE vs analytic", worst, 0.0, 5e-3);
-    QTA_LOG_INFO("test", "  [ok] catalog QE+Sobol vs analytic (worst |err| {})",
-                 quantape::util::num(worst, 2));
+    CHECK_CLOSE("catalog QE vs analytic", worst, 0.0, 5e-3);
 }
 
 // ── 3. pathwise QE gradients vs analytic ──
 
-/// Maps the engine sensitivity layout [lnS0, v0, mu, kappa, level, eta, rho]
-/// to the analytic full gradient at market {S=1, K, r=q=0, T=1}.
-Eigen::VectorXd analyticEngineGradient(const quantape::models::HestonModel& model,
-                                       const quantape::models::HestonParams& params,
-                                       double strike) {
-    const quantape::models::HestonMarket market{1.0, strike, 0.0, 0.0, 1.0};
-    const quantape::models::HestonFullPoint point = quantape::models::toFullPoint(params, market);
-    const auto g = model.fullGradient(point, market.tMax);
-    const double price = model.call(params, market);
-    Eigen::VectorXd out(7);
-    out(0) = g(quantape::models::HESTON_SPOT); // d/d lnS0 at S0 = 1
-    out(1) = g(quantape::models::HESTON_V0);
-    out(2) = market.tMax * price + g(quantape::models::HESTON_RATE); // d/d mu
-    out(3) = g(quantape::models::HESTON_KAPPA);
-    out(4) = g(quantape::models::HESTON_THETA);
-    out(5) = g(quantape::models::HESTON_SIGMA);
-    out(6) = g(quantape::models::HESTON_RHO);
-    return out;
-}
-
-void testPathwiseGradientsVsAnalytic() {
+TEST_F(HestonMcTest, pathwiseGradientsMatchAnalytic) {
     const quantape::models::HestonParams params{0.04, 2.5, 0.06, 0.30, -0.1};
     const HestonProcess process{0.0, params.kappa, params.theta, params.sigma, params.rho};
     const Eigen::VectorXd x0 = (Eigen::Vector2d() << 0.0, params.v0).finished();
@@ -231,25 +228,37 @@ void testPathwiseGradientsVsAnalytic() {
     const quantape::models::HestonMarket market{1.0, strike, 0.0, 0.0, 1.0};
     const double exactPrice = model.call(params, market);
 
-    QTA_LOG_INFO("test", "  pathwise QE value {} vs analytic {} (err {}, mc se {})",
-                 quantape::util::num(ad.value, 6), quantape::util::num(exactPrice, 6),
-                 quantape::util::num(ad.value - exactPrice, 2),
-                 quantape::util::num(ad.valueStdError, 2));
-    checkClose("pathwise value vs analytic", ad.value, exactPrice, 5e-3 + 4.0 * ad.valueStdError);
+    CHECK_CLOSE("pathwise value vs analytic", ad.value, exactPrice, 5e-3 + 4.0 * ad.valueStdError);
 
     const char* names[7] = {"lnS0", "v0", "mu", "kappa", "level", "eta", "rho"};
     double worstRel = 0.0;
     for (int i = 0; i < 7; ++i) {
+        SCOPED_TRACE(names[i]);
         const double tol = 8e-3 * std::max(0.5, std::fabs(exact(i))) + 6.0 * ad.stdErrors(i);
         worstRel = std::max(worstRel, std::fabs(ad.gradient(i) - exact(i)) /
                                           std::max(1e-12, std::fabs(exact(i))));
-        checkClose(names[i], ad.gradient(i), exact(i), tol);
-        QTA_LOG_INFO("test", "    d/d {} pathwise {}  analytic {}  err {}", names[i],
-                     quantape::util::num(ad.gradient(i), 6), quantape::util::num(exact(i), 6),
-                     quantape::util::num(ad.gradient(i) - exact(i), 2));
+        CHECK_CLOSE(names[i], ad.gradient(i), exact(i), tol);
     }
-    QTA_LOG_INFO("test", "  [ok] pathwise QE gradients vs analytic (worst rel {})",
-                 quantape::util::num(worstRel, 2));
+    ::testing::Test::RecordProperty("pathwise_worst_rel", quantape::util::num(worstRel, 3));
+}
+
+TEST_F(HestonMcTest, pathwiseGradientsMatchEngineFiniteDifference) {
+    const quantape::models::HestonParams params{0.04, 2.5, 0.06, 0.30, -0.1};
+    const HestonProcess process{0.0, params.kappa, params.theta, params.sigma, params.rho};
+    const Eigen::VectorXd x0 = (Eigen::Vector2d() << 0.0, params.v0).finished();
+    const std::size_t nSteps = 64;
+    const std::size_t nPaths = 1u << 12;
+    const double strike = 1.0;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<std::vector<double>> thetaSteps(nSteps, thetaOf(process));
+    const HestonCallPayoff payoff{strike};
+    const std::vector<double> theta = thetaOf(process);
+
+    const SdeSimulator<double, HestonQeProcess<HestonProcess>> simulator(
+        grid, thetaSteps, HestonQeProcess<HestonProcess>{process, true});
+    const IidGaussianSource<> iid(2, 777);
+    const GradientEstimate ad = simulateGradient(simulator, x0, theta, driftOf(process),
+                                                 diffusionOf(process), iid, payoff, nPaths);
 
     // Engine central-FD cross-check on the same discretization (tight).
     auto engineValue = [&](const std::vector<double>& th, const Eigen::VectorXd& x) {
@@ -265,7 +274,9 @@ void testPathwiseGradientsVsAnalytic() {
         }
         return sum / static_cast<double>(nPaths);
     };
+    const char* names[7] = {"lnS0", "v0", "mu", "kappa", "level", "eta", "rho"};
     for (int j = 0; j < 7; ++j) {
+        SCOPED_TRACE(names[j]);
         Eigen::VectorXd xp = x0;
         Eigen::VectorXd xm = x0;
         std::vector<double> tp = theta;
@@ -281,9 +292,8 @@ void testPathwiseGradientsVsAnalytic() {
             tm[static_cast<std::size_t>(j - 2)] -= h;
         }
         const double fd = (engineValue(tp, xp) - engineValue(tm, xm)) / (2.0 * h);
-        checkClose(names[j], ad.gradient(j), fd, 1e-4 * std::max(1.0, std::fabs(fd)));
+        CHECK_CLOSE(names[j], ad.gradient(j), fd, 1e-4 * std::max(1.0, std::fabs(fd)));
     }
-    QTA_LOG_INFO("test", "  [ok] pathwise AD == engine central FD (7 sensitivities)");
 }
 
 // ── 4. flagship: SDE simulation -> calibration -> IFT market risk ──
@@ -292,7 +302,9 @@ void testPathwiseGradientsVsAnalytic() {
 // partials) propagated through the analytic calibration IFT must match the
 // analytic total dV/da of a product outside the quote set.
 
-void testFlagshipSdeToIft() {
+TEST_F(HestonMcTest, flagshipSdeToIftMarketRisk) {
+    SKIP_UNLESS_ASSET(!quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty(),
+                      "no QUANTAPE_SOBOL_DEFAULT_TABLE_PATH");
     const quantape::models::HestonParams params{0.04, 2.5, 0.06, 0.30, -0.1};
     const HestonProcess process{0.0, params.kappa, params.theta, params.sigma, params.rho};
     const Eigen::VectorXd x0 = (Eigen::Vector2d() << 0.0, params.v0).finished();
@@ -311,10 +323,6 @@ void testFlagshipSdeToIft() {
     // risk usable.
     const double productStrike = 1.0;
     const HestonCallPayoff payoff{productStrike};
-    if (quantape::math::mc::sobol::SobolGenerator::defaultTablePath().empty()) {
-        QTA_LOG_WARN("test", "  [skip] flagship chain: no compile-time Sobol table configured");
-        return;
-    }
     const auto generator = quantape::math::mc::sobol::SobolGenerator::sharedFromDefaultTable();
     const SobolSource qmc(generator, 2, nSteps, 1);
     const GradientEstimate mc = simulateGradient(simulator, x0, theta, driftOf(process),
@@ -362,7 +370,6 @@ void testFlagshipSdeToIft() {
         const quantape::models::HestonParams bParams{bHat(0), bHat(1), bHat(2), bHat(3), bHat(4)};
         const auto gex = analytic.fullGradient(
             quantape::models::toFullPoint(bParams, productMarket), productMarket.tMax);
-        const char* names[5] = {"v0", "kappa", "theta", "sigma", "rho"};
         const int idx[5] = {quantape::models::HESTON_V0, quantape::models::HESTON_KAPPA,
                             quantape::models::HESTON_THETA, quantape::models::HESTON_SIGMA,
                             quantape::models::HESTON_RHO};
@@ -377,12 +384,6 @@ void testFlagshipSdeToIft() {
                                                         diffusionOf(process), src, payoff, nPaths);
             Eigen::VectorXd block(5);
             block << e.gradient(1), e.gradient(3), e.gradient(4), e.gradient(5), e.gradient(6);
-            std::string stepLine = "    steps=" + std::to_string(steps) + ":";
-            for (int i = 0; i < 5; ++i) {
-                stepLine += " " + std::string(names[i]) + " err " +
-                            quantape::util::num(block(i) - gex(0, idx[i]), 2);
-            }
-            QTA_LOG_INFO("test", "{}", stepLine);
             if (steps == 64) {
                 g64 = block;
             } else if (steps == 128) {
@@ -394,8 +395,8 @@ void testFlagshipSdeToIft() {
         for (int i = 0; i < 5; ++i) {
             ge(i) = gex(0, idx[i]);
         }
-        QTA_LOG_INFO("test", "    Richardson(64,128) err: {} (max)",
-                     quantape::util::num((gExtrap - ge).cwiseAbs().maxCoeff(), 2));
+        ::testing::Test::RecordProperty(
+            "richardson_err", quantape::util::num((gExtrap - ge).cwiseAbs().maxCoeff(), 3));
     }
     // -------------------------------------------------------------------
     const Eigen::VectorXd mcRisk = dVdb.transpose() * ift.dbda;
@@ -422,46 +423,19 @@ void testFlagshipSdeToIft() {
     }
     const double worstRatio =
         ((mcRisk - analyticRisk).array().abs() / (0.02 + 4.0 * sigma.array())).maxCoeff();
-    QTA_LOG_INFO("test",
-                 "  flagship: MC dV/db through db/da ({}x{}); worst |diff|/(2% + 4 sigma) = {}",
-                 static_cast<long>(ift.dbda.rows()), static_cast<long>(ift.dbda.cols()),
-                 quantape::util::num(worstRatio, 2));
-    checkClose("flagship MC+IFT risk vs analytic", worstRatio, 0.0, 1.0);
-    QTA_LOG_INFO("test", "  [ok] SDE -> calibration IFT -> market risk chain (worst ratio {})",
-                 quantape::util::num(worstRatio, 2));
+    CHECK_CLOSE("flagship MC+IFT risk vs analytic", worstRatio, 0.0, 1.0);
 }
 
 // QE step-convergence: the scheme (Andersen 2008, verified branch-for-branch)
 // is first-order accurate; the constant is large only in the extreme
 // Feller-violating / long-maturity corner (sigma = 0.75, T = 2).
-void testQeStepConvergence() {
+TEST_F(HestonMcTest, qeStepConvergenceExtreme) {
     const quantape::models::HestonModel model;
     const std::size_t nPaths = 1u << 14;
 
-    // Independent certification of the analytic reference for the extreme
-    // configuration (CF-matched Lewis integrand via the double-exponential
-    // rule).
     const quantape::models::HestonParams extreme{0.04, 2.5, 0.06, 0.75, -0.1};
     const quantape::models::HestonMarket market2{1.0, 1.0, 0.0, 0.0, 2.0};
     const double exact = model.call(extreme, market2);
-    {
-        const auto p5 = quantape::models::HestonModel::toComplex(extreme);
-        const std::complex<double> phiHalf =
-            quantape::models::HestonModel::characteristic(std::complex<double>(0.0, -0.5), p5, 2.0);
-        const double sigmaBs = std::sqrt(-4.0 * std::log(phiHalf.real()));
-        const double base =
-            quantape::pricing::GBS<double>{
-                1.0, 1.0, 0.0, 0.0, sigmaBs, 2.0, quantape::pricing::OptionType::Call}
-                .price();
-        const double de = quantape::math::integrateDoubleExponential<double>([&](double u) {
-            const std::complex<double> phi =
-                quantape::models::HestonModel::characteristicOnContour(u, p5.data(), 2.0);
-            const double w = u * u + 0.25;
-            const double phiCv = std::exp(-0.5 * sigmaBs * sigmaBs * 2.0 * w);
-            return ((std::complex<double>(phiCv, 0.0) - phi) / w).real();
-        });
-        checkClose("DE-certified analytic reference", base + de / kPi, exact, 1e-12);
-    }
 
     // Extreme corner: bias decreases with refinement.
     const HestonProcess process{0.0, extreme.kappa, extreme.theta, extreme.sigma, extreme.rho};
@@ -490,35 +464,67 @@ void testQeStepConvergence() {
     };
     const double bias64 = priceAt(process, x0, theta, 2.0, 64, 1.0, 999) - exact;
     const double bias256 = priceAt(process, x0, theta, 2.0, 256, 1.0, 999) - exact;
-    QTA_LOG_INFO("test", "  extreme corner (sigma=0.75, T=2): bias 64 steps {}, 256 steps {}",
-                 quantape::util::num(bias64, 2), quantape::util::num(bias256, 2));
-    CHECK(bias64 < 0.0 && bias256 < 0.0);
-    CHECK(std::fabs(bias256) < 0.75 * std::fabs(bias64));
-    CHECK(std::fabs(bias256) < 2e-2);
+    EXPECT_TRUE(bias64 < 0.0 && bias256 < 0.0);
+    EXPECT_TRUE(std::fabs(bias256) < 0.75 * std::fabs(bias64));
+    EXPECT_TRUE(std::fabs(bias256) < 2e-2);
+}
+
+TEST_F(HestonMcTest, qeStepConvergenceModerateAndDeReference) {
+    const quantape::models::HestonModel model;
+    const std::size_t nPaths = 1u << 14;
+
+    // Independent certification of the analytic reference for the extreme
+    // configuration (CF-matched Lewis integrand via the double-exponential
+    // rule).
+    const quantape::models::HestonParams extreme{0.04, 2.5, 0.06, 0.75, -0.1};
+    const quantape::models::HestonMarket market2{1.0, 1.0, 0.0, 0.0, 2.0};
+    const double exact = model.call(extreme, market2);
+    {
+        const auto p5 = quantape::models::HestonModel::toComplex(extreme);
+        const std::complex<double> phiHalf =
+            quantape::models::HestonModel::characteristic(std::complex<double>(0.0, -0.5), p5, 2.0);
+        const double sigmaBs = std::sqrt(-4.0 * std::log(phiHalf.real()));
+        const double base =
+            quantape::pricing::GBS<double>{
+                1.0, 1.0, 0.0, 0.0, sigmaBs, 2.0, quantape::pricing::OptionType::Call}
+                .price();
+        const double de = quantape::math::integrateDoubleExponential<double>([&](double u) {
+            const std::complex<double> phi =
+                quantape::models::HestonModel::characteristicOnContour(u, p5.data(), 2.0);
+            const double w = u * u + 0.25;
+            const double phiCv = std::exp(-0.5 * sigmaBs * sigmaBs * 2.0 * w);
+            return ((std::complex<double>(phiCv, 0.0) - phi) / w).real();
+        });
+        CHECK_CLOSE("DE-certified analytic reference", base + de / kPi, exact, 1e-12);
+    }
 
     // Moderate vol-of-vol: sub-basis-point accuracy already at 64 steps.
     const quantape::models::HestonParams moderate{0.04, 2.5, 0.06, 0.30, -0.1};
     const quantape::models::HestonMarket market1{1.0, 1.0, 0.0, 0.0, 1.0};
     const HestonProcess procM{0.0, moderate.kappa, moderate.theta, moderate.sigma, moderate.rho};
     const Eigen::VectorXd y0 = (Eigen::Vector2d() << 0.0, moderate.v0).finished();
+    auto priceAt = [&](const HestonProcess& pr, const Eigen::VectorXd& yy0,
+                       const std::vector<double>& th, double tMax, std::size_t steps, double strike,
+                       std::uint64_t seed) {
+        const TimeGrid grid(tMax, steps);
+        const SdeSimulator<double, HestonQeProcess<HestonProcess>> sim(
+            grid, std::vector<std::vector<double>>(steps, th),
+            HestonQeProcess<HestonProcess>{pr, true});
+        const IidGaussianSource<> src(2, seed);
+        const auto blocks =
+            sim.simulate(yy0, driftOf(pr), diffusionOf(pr), src, nPaths, 8192, Schedule::Parallel);
+        double sum = 0.0;
+        std::size_t n = 0;
+        for (const auto& b : blocks) {
+            const auto& x = b.states.back();
+            for (Eigen::Index p = 0; p < x.cols(); ++p) {
+                sum += std::max(std::exp(x(0, p)) - strike, 0.0);
+                ++n;
+            }
+        }
+        return sum / static_cast<double>(n);
+    };
     const double biasModerate =
         priceAt(procM, y0, thetaOf(procM), 1.0, 64, 1.0, 555) - model.call(moderate, market1);
-    QTA_LOG_INFO("test", "  moderate (sigma=0.30, T=1): bias at 64 steps {}",
-                 quantape::util::num(biasModerate, 2));
-    CHECK(std::fabs(biasModerate) < 2e-3);
-    QTA_LOG_INFO("test", "  [ok] QE step convergence (first order; large constant only in the "
-                         "extreme Feller-violating corner)");
-}
-
-} // namespace
-
-int main() {
-    QTA_LOG_INFO("test", "Heston MC gates (H5)");
-    testQeStepConvergence();
-    testThetaEquivalence();
-    testQmcPricesVsAnalytic();
-    testPathwiseGradientsVsAnalytic();
-    testFlagshipSdeToIft();
-    QTA_LOG_INFO("test", "ALL HESTON MC TESTS PASSED");
-    return 0;
+    EXPECT_TRUE(std::fabs(biasModerate) < 2e-3);
 }
