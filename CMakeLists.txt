@@ -14,8 +14,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ----------------------------------------------------------------------------
 # Build types: Debug (default) and Release are the supported configurations.
 # Debug: -g, no optimization (debugger-friendly). Release: -O3 -DNDEBUG plus
-# -march=native below. -ffast-math is deliberately absent: it breaks the IEEE
-# semantics (NaN/inf, signed zero, reassociation) the AD stack relies on.
+# -march=native below unless QUANTAPE_NATIVE_ARCH=OFF (CI). -ffast-math is
+# deliberately absent: it breaks the IEEE semantics (NaN/inf, signed zero,
+# reassociation) the AD stack relies on.
 # ----------------------------------------------------------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -27,14 +28,22 @@ endif()
 # and single-stepping are reliable. NDEBUG stays undefined, so asserts fire.
 # Release keeps CMake's -O3 -DNDEBUG and adds -march=native. MSVC uses its own
 # default /Od /Zi and /O2 /DNDEBUG pairs.
+# Host-CPU tuning for optimized builds. Local Release keeps it on; CI turns it
+# off because the shared ccache would otherwise mix objects compiled with
+# different `-march=native` expansions across runner CPUs (SIGILL when a cached
+# AVX-512 object lands on a runner without it).
+option(QUANTAPE_NATIVE_ARCH
+       "Tune optimized builds for the host CPU (-march=native)" ON)
 if(NOT MSVC)
     add_compile_options(
         $<$<CONFIG:Debug>:-O0>
         $<$<CONFIG:Debug>:-g3>
         $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
         $<$<CONFIG:Debug>:-fno-optimize-sibling-calls>
-        $<$<CONFIG:Release>:-march=native>
     )
+    if(QUANTAPE_NATIVE_ARCH)
+        add_compile_options($<$<CONFIG:Release>:-march=native>)
+    endif()
 endif()
 
 option(QUANTAPE_BUILD_EXAMPLES "Build example executables" ON)

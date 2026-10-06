@@ -46,6 +46,7 @@ jobs:
         run: >
           cmake -S . -B build-ci
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DQUANTAPE_NATIVE_ARCH=OFF
           -DQUANTAPE_BUILD_BENCHMARKS=OFF
           -DQUANTAPE_BUILD_EXAMPLES=ON
           -DQUANTAPE_BUILD_TOOLS=ON
