@@ -1,21 +1,16 @@
-# math/ad: full-Stan AD math kernels (legacy link profiles kept until each
-# file converts to googletest).
+# math/ad: full-Stan AD math kernels. Converted files form qta_test_math_ad;
+# the legacy stanzas below stay until their file converts.
 
-add_executable(test_math_utils ${CMAKE_SOURCE_DIR}/tests/test_math_utils.cpp)
-target_link_libraries(test_math_utils PRIVATE quantape)
-quantape_enable_stan(test_math_utils)
-quantape_set_warnings(test_math_utils)
-quantape_register_test(test_math_utils)
-
-add_executable(test_ad ${CMAKE_SOURCE_DIR}/tests/test_ad.cpp)
-target_link_libraries(test_ad PRIVATE quantape)
-quantape_enable_stan(test_ad)
-quantape_set_warnings(test_ad)
-quantape_register_test(test_ad)
+quantape_add_gtest(qta_test_math_ad
+    SOURCES test_math_utils.cpp
+            test_ad.cpp
+            test_autodiff_primitives.cpp
+    STAN
+    LABELS unit numerics ad slow)
 
 foreach(_test test_cubic_weights test_bicubic_weights test_tanh_sinh
                test_integrator_primitives test_solvers_ad
-               test_interpolation_xad test_autodiff_primitives)
+               test_interpolation_xad)
     add_executable(${_test} ${CMAKE_SOURCE_DIR}/tests/${_test}.cpp)
     target_link_libraries(${_test} PRIVATE quantape_log quantape_format)
     quantape_enable_stan(${_test})
