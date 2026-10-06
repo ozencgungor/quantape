@@ -176,6 +176,34 @@ quantape_mark_system(zmij)
 target_compile_definitions(zmij PUBLIC ZMIJ_USE_CONSTEXPR=0)
 
 # ----------------------------------------------------------------------------
+# GoogleTest (test framework for the gtest migration; D1)
+#
+# v1.18.0 builds standalone: GTEST_HAS_ABSL=OFF needs neither Abseil nor RE2.
+# The build/cache options are FORCE-ed because googletest's subdirectory reads
+# them again; BUILD_TESTING is only shadowed around MakeAvailable so unrelated
+# dependencies keep their own setting.
+# ----------------------------------------------------------------------------
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+set(BUILD_GMOCK OFF CACHE BOOL "Build googlemock" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "Install GoogleTest" FORCE)
+set(GTEST_HAS_ABSL OFF CACHE BOOL "Build GoogleTest with Abseil" FORCE)
+set(gtest_build_samples OFF CACHE BOOL "Build GoogleTest samples" FORCE)
+set(gtest_build_tests OFF CACHE BOOL "Build GoogleTest tests" FORCE)
+set(gtest_disable_pthreads OFF CACHE BOOL "Disable pthreads in GoogleTest" FORCE)
+set(_quantape_build_testing_saved "${BUILD_TESTING}")
+set(BUILD_TESTING OFF)
+FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.18.0.tar.gz
+    URL_HASH SHA256=6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(googletest)
+set(BUILD_TESTING "${_quantape_build_testing_saved}")
+quantape_mark_system(gtest)
+quantape_mark_system(gtest_main)
+
+# ----------------------------------------------------------------------------
 # nlohmann/json (human-editable curve/quote configuration; loader TU only)
 # ----------------------------------------------------------------------------
 if(EXISTS ${THIRD_PARTY_DIR}/nlohmann/nlohmann/json.hpp)
