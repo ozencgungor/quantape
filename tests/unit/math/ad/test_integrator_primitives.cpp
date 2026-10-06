@@ -24,33 +24,29 @@
 //       to 0 * -inf = NaN at x = 0, which Stan's fvar produces while rev-mode
 //       special-cases the same point.
 //
-// Run: ./test_integrator_primitives
+// The legacy helper close(a, b, tol) was relative: |a-b| <= tol*(1+|b|).
+// CHECK_CLOSE is absolute, so each call passes the effective absolute
+// tolerance tol*(1+|expected|), keeping the contract identical.
 #include "quantape/math/StanMath.h"
 
 #include "quantape/math/Integrals/IntegratorStanPrimitives.h"
 
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
 #include <type_traits>
 #include <vector>
 
-// On failure, flush and skip static teardown: Stan's arena and callback-var
-// lambdas are still live after a failed check, and normal exit-time
-// destruction order can otherwise crash instead of reporting the failure.
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
 
-using stan::math::fvar;
 using stan::math::var;
+
+class IntegratorPrimitivesTest : public StanTapeTest {};
 
 namespace {
 
-bool close(double a, double b, double tol) {
-    return std::abs(a - b) <= tol * (1.0 + std::abs(b));
+double effectiveTol(double expected, double tol) {
+    return tol * (1.0 + std::abs(expected));
 }
 
 constexpr double A = 0.0;
@@ -93,14 +89,13 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
     {
         auto integ = factory(quantape::math::ScalarTag<double>{});
         const double I = integ([&](double x) { return f(x, theta_d); }, A, B);
-        CHECK(close(I, value_ref, tol));
+        CHECK_CLOSE("double value", I, value_ref, effectiveTol(value_ref, tol));
         n_evals = integ.numberOfEvaluations();
-        CHECK(n_evals > 0);
+        EXPECT_GT(n_evals, 0U);
     }
 
     // ── var: value + gradient + rule parity with double ──
     {
-        stan::math::recover_memory();
         std::vector<var> th;
         th.reserve(n);
         for (double t : theta_d)
@@ -110,16 +105,14 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
         var I = integ([&](auto x) { return f(x, th); }, var(A), var(B));
         I.grad();
 
-        CHECK(close(I.val(), value_ref, tol));
+        CHECK_CLOSE("var value", I.val(), value_ref, effectiveTol(value_ref, tol));
         for (size_t i = 0; i < n; ++i)
-            CHECK(close(th[i].adj(), grad_ref[i], tol));
-        CHECK(integ.numberOfEvaluations() == n_evals);
+            CHECK_CLOSE("var gradient", th[i].adj(), grad_ref[i], effectiveTol(grad_ref[i], tol));
+        EXPECT_EQ(integ.numberOfEvaluations(), n_evals);
     }
 
     // ── `fvar<var>`: value + gradient + Hessian ──
     {
-        stan::math::recover_memory();
-
         Eigen::VectorXd x0(n);
         for (size_t i = 0; i < n; ++i)
             x0(static_cast<Eigen::Index>(i)) = theta_d[i];
@@ -136,18 +129,22 @@ void checkIntegrand(const Factory& factory, const Fn& f, const std::vector<doubl
         Eigen::Matrix<double, -1, -1> H;
         stan::math::hessian(runner, x0, fx, grad, H);
 
-        CHECK(close(fx, value_ref, tol));
+        CHECK_CLOSE("fvar value", fx, value_ref, effectiveTol(value_ref, tol));
         for (size_t i = 0; i < n; ++i)
-            CHECK(close(grad(static_cast<Eigen::Index>(i)), grad_ref[i], tol));
+            CHECK_CLOSE("fvar gradient", grad(static_cast<Eigen::Index>(i)), grad_ref[i],
+                        effectiveTol(grad_ref[i], tol));
         for (size_t i = 0; i < n; ++i)
             for (size_t j = 0; j < n; ++j)
-                CHECK(close(H(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)),
-                            hess_ref[i * n + j], tol));
+                CHECK_CLOSE("fvar hessian",
+                            H(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)),
+                            hess_ref[i * n + j], effectiveTol(hess_ref[i * n + j], tol));
     }
 }
 
 template <typename Factory>
 void runIntegrator(const char* name, const Factory& factory, double tol_quad, double tol_pow) {
+    SCOPED_TRACE(name);
+
     // polynomial: exactly integrated by the polynomial rules
     checkIntegrand(factory, integrand, {TH0, TH1}, I_REF, {G0_REF, G1_REF},
                    {H00_REF, 0.0, 0.0, 0.0}, tol_quad);
@@ -156,59 +153,65 @@ void runIntegrator(const char* name, const Factory& factory, double tol_quad, do
 
     // bounds carrying parameters: I(theta) = int_0^theta x^2 dx = theta^3/3,
     // dI/dtheta = theta^2 (frozen rule, affine nodes + interval-scaled weights)
-    {
-        stan::math::recover_memory();
-        var theta = 2.0;
-        auto integ = factory(quantape::math::ScalarTag<var>{});
-        var I = integ([](auto x) { return x * x; }, var(0.0), theta);
-        I.grad();
-        CHECK(close(I.val(), 8.0 / 3.0, tol_quad));
-        CHECK(close(theta.adj(), 4.0, tol_quad));
-    }
-
-    QTA_LOG_INFO("test", "  {}: double/var/fvar<var> vs analytic OK", name);
+    var theta = 2.0;
+    auto integ = factory(quantape::math::ScalarTag<var>{});
+    var I = integ([](auto x) { return x * x; }, var(0.0), theta);
+    I.grad();
+    CHECK_CLOSE("moving-bound value", I.val(), 8.0 / 3.0, effectiveTol(8.0 / 3.0, tol_quad));
+    CHECK_CLOSE("moving-bound gradient", theta.adj(), 4.0, effectiveTol(4.0, tol_quad));
 }
+
+auto trapezoid = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::TrapezoidIntegratorDefault<S>(1e-9, MAX_EVALS);
+};
+// MidPointPolicy's nodes do not nest across the 3x refinement, so its
+// recurrence converges only linearly (~1/3 error decay per level). The
+// values are correct but ~1e-9 would need ~1e9 evaluations; use a
+// tolerance the policy reaches in ~2e4 evaluations instead.
+auto trapezoid_mid = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::TrapezoidIntegratorMidPoint<S>(1e-3, MAX_EVALS);
+};
+auto simpson = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::SimpsonIntegrator<S>(1e-10, MAX_EVALS);
+};
+auto lobatto = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::GaussLobattoIntegrator<S>(1e-9, MAX_EVALS);
+};
+auto legendre = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::GaussLegendreIntegrator<S>(20);
+};
+auto tanh_sinh = [](auto tag) {
+    using S = typename decltype(tag)::type;
+    return quantape::math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
+};
 
 } // namespace
 
-int main() {
-    auto trapezoid = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::TrapezoidIntegratorDefault<S>(1e-9, MAX_EVALS);
-    };
-    // MidPointPolicy's nodes do not nest across the 3x refinement, so its
-    // recurrence converges only linearly (~1/3 error decay per level). The
-    // values are correct but ~1e-9 would need ~1e9 evaluations; use a
-    // tolerance the policy reaches in ~2e4 evaluations instead.
-    auto trapezoid_mid = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::TrapezoidIntegratorMidPoint<S>(1e-3, MAX_EVALS);
-    };
-    auto simpson = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::SimpsonIntegrator<S>(1e-10, MAX_EVALS);
-    };
-    auto lobatto = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::GaussLobattoIntegrator<S>(1e-9, MAX_EVALS);
-    };
-    auto legendre = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::GaussLegendreIntegrator<S>(20);
-    };
-    auto tanh_sinh = [](auto tag) {
-        using S = typename decltype(tag)::type;
-        return quantape::math::TanhSinhIntegrator<S>(1e-10, MAX_EVALS);
-    };
+TEST_F(IntegratorPrimitivesTest, trapezoidDefault) {
+    runIntegrator("trapezoid (default)", trapezoid, 1e-8, 1e-6);
+}
 
-    QTA_LOG_INFO("test", "── analytic value/gradient/Hessian, all scalar types ──");
-    runIntegrator("trapezoid (default) ", trapezoid, 1e-8, 1e-6);
+TEST_F(IntegratorPrimitivesTest, trapezoidMidpoint) {
     runIntegrator("trapezoid (midpoint)", trapezoid_mid, 1e-3, 1e-3);
-    runIntegrator("simpson             ", simpson, 1e-8, 1e-6);
-    runIntegrator("gauss-lobatto       ", lobatto, 1e-8, 1e-6);
-    runIntegrator("gauss-legendre (20) ", legendre, 1e-8, 1e-6);
-    runIntegrator("tanh-sinh           ", tanh_sinh, 1e-8, 1e-6);
+}
 
-    QTA_LOG_INFO("test", "test_integrator_primitives: all invariants hold");
-    return 0;
+TEST_F(IntegratorPrimitivesTest, simpson) {
+    runIntegrator("simpson", simpson, 1e-8, 1e-6);
+}
+
+TEST_F(IntegratorPrimitivesTest, gaussLobatto) {
+    runIntegrator("gauss-lobatto", lobatto, 1e-8, 1e-6);
+}
+
+TEST_F(IntegratorPrimitivesTest, gaussLegendre20) {
+    runIntegrator("gauss-legendre (20)", legendre, 1e-8, 1e-6);
+}
+
+TEST_F(IntegratorPrimitivesTest, tanhSinh) {
+    runIntegrator("tanh-sinh", tanh_sinh, 1e-8, 1e-6);
 }
