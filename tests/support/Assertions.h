@@ -3,7 +3,7 @@
 
 // Assertion helpers built on quantape::util::isCloseAbs / isClose.
 //
-// Semantics match the retired util::checkClose family exactly: NaN never
+// Semantics match the retired legacy close-gate family exactly: NaN never
 // passes, +/-Inf only equals itself, and the failure text formats values with
 // quantape::util::num(got, 12) / num(expected, 12) / num(tol, 3) and echoes the
 // got/expected expressions. The macros wrap a SCOPED_TRACE(label), so a failing
@@ -47,7 +47,7 @@ inline ::testing::AssertionResult closeRelResult(const char* gotExpr, const char
 
 /// Element-wise result for sized sequences (std containers, C arrays,
 /// initializer_list, Eigen dense and `.eval()`-ed expressions). Reports a size
-/// mismatch and the first mismatching index, like util::checkClose did.
+/// mismatch and the first mismatching index, like the retired legacy gate did.
 template <quantape::util::detail::ScalarSequence R1, quantape::util::detail::ScalarSequence R2>
 ::testing::AssertionResult closeSeqResult(const char* gotExpr, const char* expExpr, const R1& got,
                                           const R2& expected, double tol) {
@@ -73,7 +73,7 @@ template <quantape::util::detail::ScalarSequence R1, quantape::util::detail::Sca
 }
 
 /// AD-scalar result: checks the value AND the adjoint, like the retired
-/// util::checkClose overload. Accepts anything exposing val()/adj().
+/// legacy AD overload. Accepts anything exposing val()/adj().
 template <quantape::util::detail::ValAdjScalar T, quantape::util::detail::ValAdjScalar U>
 ::testing::AssertionResult adCloseResult(const char* gotExpr, const char* expExpr, const T& got,
                                          const U& expected, double tol) {

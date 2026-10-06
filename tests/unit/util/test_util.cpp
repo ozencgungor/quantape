@@ -174,8 +174,8 @@ TEST(NumericHelpers, clampSignPowersAndLerp) {
     EXPECT_EQ(alignUp(17, 16), 32);
 }
 
-// Generic checkClose success paths: scalar, iterable, matrix (via the support
-// macros with the same semantics).
+// Generic close-assertion success paths: scalar, iterable, matrix (via the
+// support macros with the same semantics).
 TEST(CheckCloseSuccess, scalarAndSequencePaths) {
     CHECK_CLOSE("scalar", 1.0, 1.0 + 1e-15, 1e-14);
     const std::vector<double> vec{1.0, 2.0, 3.0};

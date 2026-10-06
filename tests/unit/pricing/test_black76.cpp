@@ -343,7 +343,7 @@ TEST_F(Black76Test, gbsStanHessianMatchesFiniteDifference) {
     }
 }
 
-// util::checkClose AD-scalar overload: checks value and adjoint together.
+// AD-scalar close gate: checks value and adjoint together.
 TEST_F(Black76Test, adScalarValueAndAdjoint) {
     var x = 2.0;
     var y = 2.0;
