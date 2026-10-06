@@ -15,13 +15,8 @@ quantape_add_gtest(qta_test_mc
 quantape_add_gtest(qta_test_mc_ad
     SOURCES test_sde_schemes.cpp
             test_sde_gradients.cpp
+            test_sde_qmc.cpp
     STAN
     LABELS unit mc ad slow)
-
-add_executable(test_sde_qmc ${CMAKE_SOURCE_DIR}/tests/test_sde_qmc.cpp)
-target_link_libraries(test_sde_qmc PRIVATE quantape TBB::tbb)
-quantape_enable_stan_defs(test_sde_qmc)
-quantape_set_warnings(test_sde_qmc)
-quantape_register_test(test_sde_qmc)
 
 quantape_collect_executables()
