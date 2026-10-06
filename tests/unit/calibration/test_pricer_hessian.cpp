@@ -1,6 +1,6 @@
 /**
  * @file test_pricer_hessian.cpp
- * @brief Production architecture for mixed 1st/2nd order AD through a pricer hierarchy
+ * @brief Mixed 1st/2nd order AD through a pricer hierarchy
  *
  * Architecture:
  *
@@ -21,30 +21,31 @@
  * code compiles with `fvar<var>` and Stan tapes everything (Level 0).
  * Pricers that DO override get the speed benefit.
  *
- * The TradePricer doesn't know or care which level each pricer uses.
+ * This is a NOGATE demo file: consistency comparisons are recorded as test
+ * properties (not asserted) until the P2 assertion backfill lands.
  */
 
 #include "quantape/math/StanMath.h"
 
-#include "quantape/log/Log.h"
-#include "quantape/util/Check.h"
 #include "quantape/util/Constants.h"
 using ::quantape::util::kPi;
 
 #include <Eigen/Dense>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
+#include "support/GtestSupport.h"
+#include "support/StanTapeFixture.h"
+
 using stan::math::fvar;
 using stan::math::var;
+
+namespace {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MARKET ENVIRONMENT — holds market data with the active scalar type
@@ -528,112 +529,72 @@ double bench_us(F&& fn, int N) {
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / N;
 }
 
-int main() {
-    QTA_LOG_INFO("test", "╔═══════════════════════════════════════════════════════════════╗\n"
-                         "║  Pricer Hierarchy: Mixed 1st/2nd Order AD                    ║\n"
-                         "╚═══════════════════════════════════════════════════════════════╝\n");
+// Market data: 2 rates + 1 vol = 3 parameters
+const std::vector<double> kMarketData = {1.05, 0.05, 0.20}; // S_proxy, r, vol
+constexpr int kN_Rates = 2;
+constexpr int kN_Vols = 1;
+constexpr int kBenchN = 50'000;
+const std::vector<int> kRateIndices = {0, 1}; // only differentiate w.r.t. rates
 
-    // Market data: 2 rates + 1 vol = 3 parameters
-    std::vector<double> market_data = {1.05, 0.05, 0.20}; // S_proxy, r, vol
-    int n_rates = 2, n_vols = 1;
+std::vector<PricerHandle> makePricers() {
+    return {PricerHandle::create(VanillaEuropeanPricer{}), PricerHandle::create(ExoticPricer{}),
+            PricerHandle::create(DigitalPricer{})};
+}
 
-    // Create pricers at different analytical levels
-    VanillaEuropeanPricer vanilla;
-    ExoticPricer exotic;
-    DigitalPricer digital;
+} // namespace
 
-    auto h_vanilla = PricerHandle::create(vanilla);
-    auto h_exotic = PricerHandle::create(exotic);
-    auto h_digital = PricerHandle::create(digital);
+class PricerHessianTest : public StanTapeTest {};
 
+TEST_F(PricerHessianTest, gradientConsistencyAndSymmetry) {
     TradePricer tp;
+    const std::vector<PricerHandle> pricers = makePricers();
+    int idx = 0;
+    for (const auto& pricer : pricers) {
+        SCOPED_TRACE(pricer.name);
+        // First and second order must report the same gradient.
+        const auto fo = tp.computeGreeks(pricer, kMarketData, kN_Rates, kN_Vols);
+        const auto so = tp.computeHessian(pricer, kMarketData, kN_Rates, kN_Vols);
 
-    std::vector<PricerHandle*> pricers = {&h_vanilla, &h_exotic, &h_digital};
-
-    for (auto* pricer : pricers) {
-        QTA_LOG_INFO("test", "── {} ──\n", pricer->name);
-
-        // First order
-        auto fo = tp.computeGreeks(*pricer, market_data, n_rates, n_vols);
-        QTA_LOG_INFO("test", "  PV = {}", quantape::util::num(fo.pv, 6));
-
-        std::string greeks;
-        for (int i = 0; i < fo.greeks.size(); ++i) {
-            if (i)
-                greeks += ", ";
-            greeks += quantape::util::num(fo.greeks(i), 6);
-        }
-        QTA_LOG_INFO("test", "  Greeks: [{}]", greeks);
-
-        // Second order
-        auto so = tp.computeHessian(*pricer, market_data, n_rates, n_vols);
-        QTA_LOG_INFO("test", "  Hessian:");
-        for (int i = 0; i < so.hessian.rows(); ++i) {
-            std::string row = "    [";
-            for (int j = 0; j < so.hessian.cols(); ++j)
-                row += ' ' + quantape::util::num(so.hessian(i, j), 4);
-            row += " ]";
-            QTA_LOG_INFO("test", "{}", row);
-        }
-
-        // Verify gradient consistency
-        double max_grad_diff = (fo.greeks - so.greeks).cwiseAbs().maxCoeff();
-        QTA_LOG_INFO("test", "  Max |gradient_1st - gradient_2nd|: {}",
-                     quantape::util::num(max_grad_diff, 2));
-
-        // Verify Hessian symmetry
-        double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
-        QTA_LOG_INFO("test", "  Hessian symmetry check: {}\n", quantape::util::num(max_sym, 2));
+        const double max_grad_diff = (fo.greeks - so.greeks).cwiseAbs().maxCoeff();
+        const double max_sym = (so.hessian - so.hessian.transpose()).cwiseAbs().maxCoeff();
+        ::testing::Test::RecordProperty("grad_diff_" + std::to_string(idx),
+                                        quantape::util::num(max_grad_diff, 2));
+        ::testing::Test::RecordProperty("sym_" + std::to_string(idx),
+                                        quantape::util::num(max_sym, 2));
+        ++idx;
     }
+}
 
-    // ── Timing comparison ──
-    QTA_LOG_INFO("test", "── Performance ──\n");
-    constexpr int N = 50'000;
+TEST_F(PricerHessianTest, sparseHessianMatchesDenseColumns) {
+    TradePricer tp;
+    const PricerHandle vanilla = PricerHandle::create(VanillaEuropeanPricer{});
 
-    QTA_LOG_INFO("test", "  {:<35}{:>12}{:>12}{:>10}", "Pricer", "1st order", "2nd order", "ratio");
-    QTA_LOG_INFO("test", "  {}", std::string(69, '-'));
+    const auto sparse =
+        tp.computeHessianSparse(vanilla, kMarketData, kN_Rates, kN_Vols, kRateIndices);
+    const auto dense = tp.computeHessian(vanilla, kMarketData, kN_Rates, kN_Vols);
 
-    for (auto* pricer : pricers) {
-        auto t1 = bench_us([&]() { tp.computeGreeks(*pricer, market_data, n_rates, n_vols); }, N);
-
-        auto t2 = bench_us([&]() { tp.computeHessian(*pricer, market_data, n_rates, n_vols); }, N);
-
-        QTA_LOG_INFO("test", "  {:<35}{:>10} us{:>10} us{:>8}x", pricer->name,
-                     quantape::util::num(t1, 3), quantape::util::num(t2, 3),
-                     quantape::util::num(t2 / t1, 1));
+    double max_diff = 0.0;
+    for (int j : kRateIndices) {
+        max_diff = std::max(max_diff,
+                            (sparse.hessian.col(j) - dense.hessian.col(j)).cwiseAbs().maxCoeff());
     }
+    ::testing::Test::RecordProperty("sparse_vs_dense_max_diff", quantape::util::num(max_diff, 2));
+}
 
-    // ── Sparse Hessian demo ──
-    QTA_LOG_INFO("test", "\n── Sparse Hessian (only rate columns) ──\n");
-    std::vector<int> rate_indices = {0, 1}; // only differentiate w.r.t. rates
-    auto sparse = tp.computeHessianSparse(h_vanilla, market_data, n_rates, n_vols, rate_indices);
-    QTA_LOG_INFO("test", "  Hessian (only rate columns computed):");
-    for (int i = 0; i < sparse.hessian.rows(); ++i) {
-        std::string row = "    [";
-        for (int j = 0; j < sparse.hessian.cols(); ++j)
-            row += ' ' + quantape::util::num(sparse.hessian(i, j), 4);
-        row += " ]";
-        QTA_LOG_INFO("test", "{}", row);
+TEST_F(PricerHessianTest, benchmarkTimings) {
+    TradePricer tp;
+    const std::vector<PricerHandle> pricers = makePricers();
+    int idx = 0;
+    for (const auto& pricer : pricers) {
+        SCOPED_TRACE(pricer.name);
+        const double t1 =
+            bench_us([&]() { tp.computeGreeks(pricer, kMarketData, kN_Rates, kN_Vols); }, kBenchN);
+        const double t2 =
+            bench_us([&]() { tp.computeHessian(pricer, kMarketData, kN_Rates, kN_Vols); }, kBenchN);
+        ::testing::Test::RecordProperty("us_first_" + std::to_string(idx),
+                                        quantape::util::num(t1, 3));
+        ::testing::Test::RecordProperty("us_second_" + std::to_string(idx),
+                                        quantape::util::num(t2, 3));
+        ++idx;
     }
-    QTA_LOG_INFO(
-        "test", "  (Saves {}% of Hessian columns)",
-        quantape::util::num((1 - (double)rate_indices.size() / market_data.size()) * 100, 4));
-
-    // ── Architecture diagram ──
-    QTA_LOG_INFO("test", "\n── Architecture ──\n");
-    QTA_LOG_INFO("test", "  TradePricer.computeHessian():");
-    QTA_LOG_INFO("test",
-                 "    for j = 0..n-1:                      ← one column per market data point");
-    QTA_LOG_INFO("test", "      nested_rev_autodiff scope");
-    QTA_LOG_INFO("test", "      md[i] = fvar<var>(var(θ_i), i==j)  ← tangent direction e_j");
-    QTA_LOG_INFO("test", "      fvar<var> pv = pricer.price(md)     ← pricer uses best overload");
-    QTA_LOG_INFO("test", "      grad(pv.d_)                         ← reverse on tangent");
-    QTA_LOG_INFO("test", "      H[:,j] = md[i].val_.adj()           ← read Hessian column\n");
-    QTA_LOG_INFO("test", "  Pricer overloads (each independent, composable):");
-    QTA_LOG_INFO("test", "    Level 0: template just works with fvar<var>     (no code change)");
-    QTA_LOG_INFO("test", "    Level 1: gradient as var → AD handles Hessian   (moderate speed)");
-    QTA_LOG_INFO("test", "    Level 2: nested make_callback_var               (maximum speed)");
-
-    QTA_LOG_INFO("test", "\n═══════════════════════════════════════════════════════════════");
-    return 0;
 }
