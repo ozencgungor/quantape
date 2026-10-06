@@ -31,6 +31,22 @@ namespace quantape::markets {
  * leg's blocks carry the quotient-rule term `dA`; the other leg's rows are
  * divided by the quote annuity only.
  *
+ * A resetting-notional (`XccyNotionalMode::MtM`) leg replaces its const
+ * notional term with the telescoped reset value
+ *
+ *   `sum_k adj_k (D_own(t_k) (1 + f_k tau_k) - D_own(t_{k-1}))`,
+ *   `adj_k = D_other(t_{k-1}) / D_own(t_{k-1})`,
+ *
+ * where the resetting leg's own discount curve supplies `D_own`, the opposite
+ * leg's discount curve `D_other` and the leg's forecast curve `f_k`. The rows
+ * follow the product: the own-discount row is
+ * `adj (1 + f tau) D(t2) (t1 w(t1) - t2 w(t2))`, the opposite-discount row is
+ * `adj t1 w(t1) (D(t1) - D(t2) (1 + f tau))`, the forecast row is
+ * `adj D(t2) ratio (-t1 w(t1) + t2 w(t2))` and the annuity rows are
+ * unchanged. Both reset-leg choices are covered: a resetting foreign leg takes
+ * the domestic discount as `D_other`, a resetting domestic leg takes the
+ * foreign discount.
+ *
  * `xccySwapJacobianRowsViewFiniteDifference` rebuilds each block by a bumped
  * view (following forecast parent chains) and central-differences the value
  * function, so it stays available as an independent reference for the
@@ -86,11 +102,14 @@ struct XccyLegRows {
 /// Analytic leg rows: each coupon contributes `df * ratio * (-tprev w(tprev) +
 /// taccrual w(taccrual))` on the forecast native and ancestor blocks and
 /// `tau * forward * dD(tpay)` on the discount block; the notional adds
-/// `dD(tStart) - dD(tEnd)`.
+/// `dD(tStart) - dD(tEnd)`. With `resets` the notional term is replaced by the
+/// telescoped reset value and the reset rows are added on the discount,
+/// `otherDiscount` and forecast blocks; the annuity rows are unchanged.
 XccyLegRows xccyLegNodeRows(const datetime::Schedule& schedule,
                             const datetime::DayCounter& accrualDayCounter,
                             const StackCurveView& discount, const StackCurveView& forecast,
-                            int paymentLag, datetime::BusinessDayConvention businessDayConvention,
+                            const StackCurveView* otherDiscount, bool resets, int paymentLag,
+                            datetime::BusinessDayConvention businessDayConvention,
                             const datetime::Date& referenceDate,
                             const datetime::DayCounter& zeroDayCounter);
 

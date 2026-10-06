@@ -1,5 +1,7 @@
 #include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveConfig.h"
+#include "quantape/markets/Curves/FxSwapBuilder.h"
+#include "quantape/markets/Curves/XccyBasisBuilder.h"
 #include "quantape/util/Check.h"
 
 #include <algorithm>
@@ -503,6 +505,8 @@ void testRoleListInvariant() {
     })";
     expectParseReject(discountWithForecast, "pillars");
 
+    // XccyBasis curves are configurable, but only with cross-currency pillar
+    // kinds (a plain Deposit pillar is refused with the accepted kinds).
     const std::string xccyRole = R"({
         "asOf": "2026-09-29",
         "curves": [{
@@ -511,7 +515,7 @@ void testRoleListInvariant() {
                          "calendar": "NoHolidays"}]
         }]
     })";
-    expectParseReject(xccyRole, "not configurable");
+    expectParseReject(xccyRole, "FxSwap");
 
     const std::string turnRole = R"({
         "asOf": "2026-09-29",
@@ -959,6 +963,158 @@ void testUnifiedPillarSpec() {
     }
 }
 
+/// Configured FX spots and settlement lags feed an XccyBasis mixed ladder
+/// (FX points short end, xccy swaps long end) that builds through `buildStack`
+/// and reprices every configured quote.
+void testFxCurveConfig() {
+    const markets::CurveStackSpec stack = markets::loadCurveStackSpec(FX_CONFIG_FIXTURE);
+    CHECK(stack.asOf == datetime::Date::parse("2026-09-29"));
+    CHECK(stack.spotLag.size() == 2);
+    CHECK(stack.spotLag.at("USD") == 2);
+    CHECK(stack.spotLag.at("EUR") == 2);
+    CHECK(stack.fxSpots.size() == 1);
+    CHECK(stack.fxSpots[0].descriptor.pair() == "EURUSD");
+    util::checkClose("fx config spot", stack.fxSpots[0].spot, 1.10, 1e-15);
+    CHECK(stack.curves.size() == 2);
+
+    const markets::CurveSpec& xccySpec = stack.curves[1];
+    CHECK(xccySpec.key.role == markets::CurveRole::XccyBasis);
+    CHECK(xccySpec.key.collateral == "USD");
+    CHECK(xccySpec.hasParent);
+    CHECK(xccySpec.spotLag == 2);
+    CHECK(xccySpec.xccy.pair == "EURUSD");
+    CHECK(xccySpec.xccy.notional == markets::XccyNotionalMode::Const);
+    CHECK(xccySpec.xccy.basisLeg == "Base");
+    CHECK(!xccySpec.xccy.isFxBaseCollateral);
+    CHECK(xccySpec.pillars.size() == 3);
+    CHECK(xccySpec.pillars[0].kind == markets::PillarSpec::Kind::FxSwap);
+    CHECK(xccySpec.pillars[0].start.serial() == 0); // resolved from spot lags at build
+    CHECK(xccySpec.pillars[0].fxConvention == markets::QuoteConvention::Points);
+    util::checkClose("fx config points", xccySpec.pillars[0].fxPoints, 0.0125, 1e-15);
+    CHECK(xccySpec.pillars[1].kind == markets::PillarSpec::Kind::XccySwap);
+    util::checkClose("xccy config spread", xccySpec.pillars[1].quote, 0.0011, 1e-15);
+
+    const std::vector<markets::BuiltCurve> built = markets::buildStack(stack);
+    CHECK(built.size() == 2);
+    CHECK(built[0].key == stack.curves[0].key);
+    CHECK(built[1].key == xccySpec.key);
+    CHECK(built[1].role == markets::CurveRole::XccyBasis);
+
+    const markets::DiscountCurve<double> usd = markets::buildCurve(stack, stack.curves[0]);
+    // Reconstruct the built foreign curve from its node grid and zeros so the
+    // pillar repricing helpers can consume it.
+    const std::vector<double>& times = built[1].curve->times();
+    std::vector<double> zeros(times.size(), 0.0);
+    for (std::size_t i = 1; i < times.size(); ++i) {
+        zeros[i] = built[1].curve->zero(times[i]);
+    }
+    const markets::DiscountCurve<double> eur(times, zeros, markets::InterpolationSpace::LogDiscount,
+                                             markets::InterpolationScheme::Linear);
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        util::checkClose("fx config rebuilt node", eur.discount(times[i]),
+                         built[1].curve->discount(times[i]), 1e-14);
+    }
+
+    // FX pillar: the built foreign/domestic CIP ratio reprices the configured
+    // points (spot-lag settlement only moves the near date, not the far CIP
+    // node).
+    const markets::PillarSpec& fxSpec = xccySpec.pillars[0];
+    const double tFx = datetime::yearFraction(stack.asOf, fxSpec.maturity, xccySpec.zeroDayCounter);
+    util::checkClose("fx config reprice",
+                     stack.fxSpots[0].spot * eur.discount(tFx) / usd.discount(tFx),
+                     stack.fxSpots[0].spot + fxSpec.fxPoints, 1e-10);
+
+    // Xccy pillars reprice with the built curve as their own floating forecast.
+    for (std::size_t k = 1; k < xccySpec.pillars.size(); ++k) {
+        const markets::PillarSpec& pillar = xccySpec.pillars[k];
+        markets::XccyPillar resolved;
+        resolved.maturity = pillar.maturity;
+        resolved.spread = pillar.quote;
+        resolved.spreadOnForeignLeg = true;
+        resolved.notional = markets::XccyNotionalMode::Const;
+        resolved.foreignTenor = pillar.foreignTenor;
+        resolved.domesticTenor = pillar.domesticTenor;
+        resolved.foreignCalendar = pillar.foreignCalendar;
+        resolved.domesticCalendar = pillar.domesticCalendar;
+        resolved.foreignDayCounter = pillar.foreignDayCounter;
+        resolved.domesticDayCounter = pillar.domesticDayCounter;
+        resolved.foreignBusinessDayConvention = pillar.businessDayConvention;
+        resolved.domesticBusinessDayConvention = pillar.businessDayConvention;
+        util::checkClose("xccy config reprice",
+                         markets::impliedXccyBasisSpread(eur, eur, usd, usd, resolved, stack.asOf,
+                                                         xccySpec.zeroDayCounter),
+                         resolved.spread, 1e-10);
+    }
+}
+
+/// FX/Xccy config error cases: a missing spot is a build error, while a bad
+/// quote convention or collateral leg is refused at parse time; an XccyBasis
+/// curve without a parent is a build error.
+void testFxCurveConfigErrors() {
+    const std::string missingSpot = R"({
+        "asOf": "2026-09-29",
+        "spotLag": { "USD": 2, "EUR": 2 },
+        "curves": [
+            { "key": {"currency": "USD", "role": "Discount"},
+              "pillars": [{"maturity": "2027-09-29", "kind": "Deposit", "quote": 0.04,
+                           "calendar": "NoHolidays"}] },
+            { "key": {"currency": "EUR", "role": "XccyBasis", "collateral": "USD"},
+              "parent": {"currency": "USD", "role": "Discount"},
+              "xccy": {"pair": "EURUSD"},
+              "pillars": [{"maturity": "2027-09-29", "kind": "FxSwap", "points": 0.01}] }
+        ]
+    })";
+    const markets::CurveStackSpec stack = markets::parseCurveStackSpec(missingSpot);
+    bool threw = false;
+    std::string message;
+    try {
+        (void)markets::buildStack(stack);
+    } catch (const std::invalid_argument& error) {
+        threw = true;
+        message = error.what();
+    }
+    CHECK(threw);
+    CHECK(message.find("spot") != std::string::npos);
+
+    expectParseReject(
+        R"({"asOf": "2026-09-29", "curves": [{
+            "key": {"currency": "EUR", "role": "XccyBasis", "collateral": "USD"},
+            "pillars": [{"maturity": "2027-09-29", "kind": "FxSwap", "points": 0.01,
+                         "convention": "Pips"}]}]})",
+        "Points");
+
+    expectParseReject(
+        R"({"asOf": "2026-09-29", "curves": [{
+            "key": {"currency": "EUR", "role": "XccyBasis", "collateral": "USD"},
+            "xccy": {"basisLeg": "Both"},
+            "pillars": [{"maturity": "2027-09-29", "kind": "XccySwap", "spread": 0.001}]}]})",
+        "Base");
+
+    expectParseReject(
+        R"({"asOf": "2026-09-29", "curves": [{
+            "key": {"currency": "EUR", "role": "XccyBasis", "collateral": "USD"},
+            "xccy": {"isFxBaseCollateral": "yes"},
+            "pillars": [{"maturity": "2027-09-29", "kind": "FxSwap", "points": 0.01}]}]})",
+        "boolean");
+
+    const std::string noParent = R"({
+        "asOf": "2026-09-29",
+        "curves": [{
+            "key": {"currency": "EUR", "role": "XccyBasis", "collateral": "USD"},
+            "xccy": {"pair": "EURUSD"},
+            "pillars": [{"maturity": "2027-09-29", "kind": "FxSwap", "points": 0.01}]}]})";
+    const markets::CurveStackSpec parentless = markets::parseCurveStackSpec(noParent);
+    threw = false;
+    try {
+        (void)markets::buildStack(parentless);
+    } catch (const std::invalid_argument& error) {
+        threw = true;
+        message = error.what();
+    }
+    CHECK(threw);
+    CHECK(message.find("missing parent") != std::string::npos);
+}
+
 const markets::BuiltCurve* findBuilt(const std::vector<markets::BuiltCurve>& built,
                                      const markets::CurveKey& key) {
     for (const markets::BuiltCurve& entry : built) {
@@ -1403,6 +1559,8 @@ int main() {
     testReferenceCurveIdentity();
     testForecastFutureConfig();
     testUnifiedPillarSpec();
+    testFxCurveConfig();
+    testFxCurveConfigErrors();
     testStackBuilderDepthTwo();
     testStackBuilderErrors();
     testStackBuilderConvexityReference();

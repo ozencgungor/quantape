@@ -22,6 +22,8 @@ enum class CurveRole {
     IborOisBasis, ///< IBOR-OIS basis curve over a parent
     XccyBasis,    ///< Cross-currency basis curve over a parent
     TurnOverlay,  ///< Turn-of-year risk factor (overlay amplitude or turn quote)
+    FxSpot,       ///< FX spot factor (one solved value per pair)
+    FxVol,        ///< FX volatility factor (delta-space quote per pair)
 };
 
 constexpr std::string_view curveRoleName(CurveRole role) noexcept {
@@ -38,8 +40,18 @@ constexpr std::string_view curveRoleName(CurveRole role) noexcept {
             return "XccyBasis";
         case CurveRole::TurnOverlay:
             return "TurnOverlay";
+        case CurveRole::FxSpot:
+            return "FxSpot";
+        case CurveRole::FxVol:
+            return "FxVol";
     }
     return "Unknown";
+}
+
+/// True for the FX risk roles that report as side factors rather than as
+/// curves of the interest-rate tree.
+constexpr bool isFxRole(CurveRole role) noexcept {
+    return role == CurveRole::FxSpot || role == CurveRole::FxVol;
 }
 
 /// Stable identity of a curve in a `MultiCurveSet`.

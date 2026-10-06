@@ -34,13 +34,18 @@ double xccyBasisSpreadView(const StackCurveView& foreignDiscount,
         xccyScheduleCache().get(referenceDate, pillar.maturity, pillar.domesticTenor,
                                 pillar.domesticCalendar, pillar.domesticBusinessDayConvention);
 
+    const bool foreignResets = pillar.notional == XccyNotionalMode::MtM && pillar.resetForeignLeg;
+    const bool domesticResets = pillar.notional == XccyNotionalMode::MtM && !pillar.resetForeignLeg;
+
     const auto legValue = [&](const datetime::Schedule& schedule,
                               const datetime::DayCounter& accrualDayCounter,
                               const StackCurveView& discount, const StackCurveView& forecast,
-                              int paymentLag, datetime::BusinessDayConvention businessDayConvention,
+                              const StackCurveView& otherDiscount, bool resets, int paymentLag,
+                              datetime::BusinessDayConvention businessDayConvention,
                               double& annuity) {
         const std::vector<datetime::Date>& dates = schedule.dates();
         double coupons = 0.0;
+        double resetValue = 0.0;
         annuity = 0.0;
         for (std::size_t k = 1; k < dates.size(); ++k) {
             const double tau = datetime::yearFraction(dates[k - 1], dates[k], accrualDayCounter);
@@ -59,6 +64,15 @@ double xccyBasisSpreadView(const StackCurveView& foreignDiscount,
                 (forecast.discount(tPrevious) / forecast.discount(tAccrual) - 1.0) / tau;
             coupons += tau * df * forward;
             annuity += tau * df;
+            if (resets) {
+                const double ownStart = discount.discount(tPrevious);
+                const double adjustment = otherDiscount.discount(tPrevious) / ownStart;
+                resetValue +=
+                    adjustment * (discount.discount(tAccrual) * (1.0 + forward * tau) - ownStart);
+            }
+        }
+        if (resets) {
+            return resetValue;
         }
         const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
         const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
@@ -69,11 +83,13 @@ double xccyBasisSpreadView(const StackCurveView& foreignDiscount,
     double foreignAnnuity = 0.0;
     const double foreignValue =
         legValue(foreignSchedule, pillar.foreignDayCounter, foreignDiscount, foreignForecast,
-                 pillar.foreignPaymentLag, pillar.foreignBusinessDayConvention, foreignAnnuity);
+                 domesticDiscount, foreignResets, pillar.foreignPaymentLag,
+                 pillar.foreignBusinessDayConvention, foreignAnnuity);
     double domesticAnnuity = 0.0;
     const double domesticValue =
         legValue(domesticSchedule, pillar.domesticDayCounter, domesticDiscount, domesticForecast,
-                 pillar.domesticPaymentLag, pillar.domesticBusinessDayConvention, domesticAnnuity);
+                 foreignDiscount, domesticResets, pillar.domesticPaymentLag,
+                 pillar.domesticBusinessDayConvention, domesticAnnuity);
     if (!(foreignAnnuity > 0.0) || !(domesticAnnuity > 0.0)) {
         throw std::invalid_argument("xccyBasisSpreadView: non-positive annuity");
     }
@@ -88,10 +104,17 @@ namespace detail {
 namespace {
 
 /// Per-thread scratch for the leg row builder, reused across coupons and legs.
+/// The previous/current weight buffers let each accrual boundary be evaluated
+/// once: the current boundary of one coupon is the previous boundary of the
+/// next.
 struct LegRowScratch {
     std::vector<double> weights;
-    std::vector<double> previous;
-    std::vector<double> current;
+    std::vector<double> discountPrevious;
+    std::vector<double> discountCurrent;
+    std::vector<const StackCurveView*> chainViews;
+    std::vector<std::vector<double>> chainPrevious;
+    std::vector<std::vector<double>> chainCurrent;
+    std::vector<XccyRowBlock*> chainRows;
 };
 
 LegRowScratch& legRowScratch() {
@@ -130,18 +153,51 @@ void xccyRegisterForecastChain(std::vector<XccyRowBlock>& blocks, const StackCur
 XccyLegRows xccyLegNodeRows(const datetime::Schedule& schedule,
                             const datetime::DayCounter& accrualDayCounter,
                             const StackCurveView& discount, const StackCurveView& forecast,
-                            int paymentLag, datetime::BusinessDayConvention businessDayConvention,
+                            const StackCurveView* otherDiscount, bool resets, int paymentLag,
+                            datetime::BusinessDayConvention businessDayConvention,
                             const datetime::Date& referenceDate,
                             const datetime::DayCounter& zeroDayCounter) {
+    if (resets && otherDiscount == nullptr) {
+        throw std::invalid_argument("xccyLegNodeRows: resetting leg without its other discount");
+    }
     XccyLegRows rows;
+    rows.valueRows.reserve(4);
+    rows.annuityRows.reserve(1);
+    // Register every referenced block before taking references into the
+    // vectors, so a later push cannot invalidate an earlier reference.
     xccyRowBlock(rows.valueRows, discount);
     xccyRegisterForecastChain(rows.valueRows, forecast);
+    if (resets) {
+        xccyRowBlock(rows.valueRows, *otherDiscount);
+    }
     xccyRowBlock(rows.annuityRows, discount);
-    const std::vector<datetime::Date>& dates = schedule.dates();
+    XccyRowBlock& discountValue = xccyRowBlock(rows.valueRows, discount);
+    XccyRowBlock& discountAnnuity = xccyRowBlock(rows.annuityRows, discount);
+    XccyRowBlock* otherValue = resets ? &xccyRowBlock(rows.valueRows, *otherDiscount) : nullptr;
+
     LegRowScratch& scratch = legRowScratch();
     std::vector<double>& weights = scratch.weights;
-    std::vector<double>& previous = scratch.previous;
-    std::vector<double>& current = scratch.current;
+    std::vector<double>& discountPrevious = scratch.discountPrevious;
+    std::vector<double>& discountCurrent = scratch.discountCurrent;
+    std::vector<const StackCurveView*>& chainViews = scratch.chainViews;
+    std::vector<std::vector<double>>& chainPrevious = scratch.chainPrevious;
+    std::vector<std::vector<double>>& chainCurrent = scratch.chainCurrent;
+    std::vector<XccyRowBlock*>& chainRows = scratch.chainRows;
+    chainViews.clear();
+    chainViews.push_back(&forecast);
+    for (const StackCurveView* ancestor = forecast.parentView(); ancestor != nullptr;
+         ancestor = ancestor->parentView()) {
+        chainViews.push_back(ancestor);
+    }
+    const std::size_t chainLength = chainViews.size();
+    chainPrevious.resize(chainLength);
+    chainCurrent.resize(chainLength);
+    chainRows.resize(chainLength);
+    for (std::size_t a = 0; a < chainLength; ++a) {
+        chainRows[a] = &xccyRowBlock(rows.valueRows, *chainViews[a]);
+    }
+
+    const std::vector<datetime::Date>& dates = schedule.dates();
     for (std::size_t k = 1; k < dates.size(); ++k) {
         const double tau = datetime::yearFraction(dates[k - 1], dates[k], accrualDayCounter);
         if (!(tau > 0.0)) {
@@ -157,40 +213,68 @@ XccyLegRows xccyLegNodeRows(const datetime::Schedule& schedule,
         const double df = discount.discount(t);
         const double ratio = forecast.discount(tPrevious) / forecast.discount(tAccrual);
         const double forward = (ratio - 1.0) / tau;
-        rows.value += tau * df * forward;
         rows.annuity += tau * df;
         xccyWeightsAt(discount, t, weights);
-        XccyRowBlock& discountValue = xccyRowBlock(rows.valueRows, discount);
-        XccyRowBlock& discountAnnuity = xccyRowBlock(rows.annuityRows, discount);
         for (std::size_t i = 1; i < discount.size(); ++i) {
             const double dDiscount = -t * df * weights[i];
-            discountValue.row[i - 1] += tau * forward * dDiscount;
             discountAnnuity.row[i - 1] += tau * dDiscount;
+        }
+        double forecastScale = df;
+        if (resets) {
+            const double ownStart = discount.discount(tPrevious);
+            const double ownEnd = discount.discount(tAccrual);
+            const double adjustment = otherDiscount->discount(tPrevious) / ownStart;
+            forecastScale = adjustment * ownEnd;
+            rows.value += adjustment * (ownEnd * (1.0 + forward * tau) - ownStart);
+            // Own discount: the reset adjustment's own-curve dependence cancels
+            // against the start-notional discount, leaving the accrual end. The
+            // accrual boundary weights carry into the next coupon as its start
+            // boundary.
+            if (k == 1) {
+                xccyWeightsAt(discount, tPrevious, discountPrevious);
+            }
+            xccyWeightsAt(discount, tAccrual, discountCurrent);
+            for (std::size_t i = 1; i < discount.size(); ++i) {
+                discountValue.row[i - 1] +=
+                    adjustment * (1.0 + forward * tau) * ownEnd *
+                    (tPrevious * discountPrevious[i] - tAccrual * discountCurrent[i]);
+            }
+            discountPrevious.swap(discountCurrent);
+            // Opposite discount: only the reset adjustment D_other/D_own moves.
+            xccyWeightsAt(*otherDiscount, tPrevious, weights);
+            for (std::size_t i = 1; i < otherDiscount->size(); ++i) {
+                otherValue->row[i - 1] += adjustment * tPrevious * weights[i] *
+                                          (ownStart - ownEnd * (1.0 + forward * tau));
+            }
+        } else {
+            rows.value += tau * df * forward;
+            for (std::size_t i = 1; i < discount.size(); ++i) {
+                discountValue.row[i - 1] += tau * forward * (-t * df * weights[i]);
+            }
         }
         // The child forecast's native nodes and every ancestor's nodes shift
         // the child zero curve one-for-one (additive spreads).
-        xccyWeightsAt(forecast, tPrevious, previous);
-        xccyWeightsAt(forecast, tAccrual, current);
-        XccyRowBlock& forecastRow = xccyRowBlock(rows.valueRows, forecast);
-        for (std::size_t i = 1; i < forecast.size(); ++i) {
-            forecastRow.row[i - 1] +=
-                df * ratio * (-tPrevious * previous[i] + tAccrual * current[i]);
-        }
-        for (const StackCurveView* ancestor = forecast.parentView(); ancestor != nullptr;
-             ancestor = ancestor->parentView()) {
-            xccyWeightsAt(*ancestor, tPrevious, previous);
-            xccyWeightsAt(*ancestor, tAccrual, current);
-            XccyRowBlock& ancestorRow = xccyRowBlock(rows.valueRows, *ancestor);
-            for (std::size_t i = 1; i < ancestor->size(); ++i) {
-                ancestorRow.row[i - 1] +=
-                    df * ratio * (-tPrevious * previous[i] + tAccrual * current[i]);
+        for (std::size_t a = 0; a < chainLength; ++a) {
+            const StackCurveView& curve = *chainViews[a];
+            if (k == 1) {
+                xccyWeightsAt(curve, tPrevious, chainPrevious[a]);
             }
+            xccyWeightsAt(curve, tAccrual, chainCurrent[a]);
+            XccyRowBlock& row = *chainRows[a];
+            for (std::size_t i = 1; i < curve.size(); ++i) {
+                row.row[i - 1] +=
+                    forecastScale * ratio *
+                    (-tPrevious * chainPrevious[a][i] + tAccrual * chainCurrent[a][i]);
+            }
+            chainPrevious[a].swap(chainCurrent[a]);
         }
+    }
+    if (resets) {
+        return rows;
     }
     const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
     const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
     rows.value += discount.discount(tStart) - discount.discount(tEnd);
-    XccyRowBlock& discountValue = xccyRowBlock(rows.valueRows, discount);
     xccyWeightsAt(discount, tStart, weights);
     for (std::size_t i = 1; i < discount.size(); ++i) {
         discountValue.row[i - 1] -= tStart * discount.discount(tStart) * weights[i];
@@ -291,19 +375,35 @@ std::vector<XccyRowBlock> xccySwapJacobianRowsView(const StackCurveView& foreign
     const datetime::Schedule& domesticSchedule =
         xccyScheduleCache().get(referenceDate, pillar.maturity, pillar.domesticTenor,
                                 pillar.domesticCalendar, pillar.domesticBusinessDayConvention);
-    detail::XccyLegRows foreign =
-        detail::xccyLegNodeRows(foreignSchedule, pillar.foreignDayCounter, foreignDiscount,
-                                foreignForecast, pillar.foreignPaymentLag,
-                                pillar.foreignBusinessDayConvention, referenceDate, zeroDayCounter);
+    const bool foreignResets = pillar.notional == XccyNotionalMode::MtM && pillar.resetForeignLeg;
+    const bool domesticResets = pillar.notional == XccyNotionalMode::MtM && !pillar.resetForeignLeg;
+    detail::XccyLegRows foreign = detail::xccyLegNodeRows(
+        foreignSchedule, pillar.foreignDayCounter, foreignDiscount, foreignForecast,
+        &domesticDiscount, foreignResets, pillar.foreignPaymentLag,
+        pillar.foreignBusinessDayConvention, referenceDate, zeroDayCounter);
     detail::XccyLegRows domestic = detail::xccyLegNodeRows(
         domesticSchedule, pillar.domesticDayCounter, domesticDiscount, domesticForecast,
-        pillar.domesticPaymentLag, pillar.domesticBusinessDayConvention, referenceDate,
-        zeroDayCounter);
+        &foreignDiscount, domesticResets, pillar.domesticPaymentLag,
+        pillar.domesticBusinessDayConvention, referenceDate, zeroDayCounter);
     if (!(foreign.annuity > 0.0) || !(domestic.annuity > 0.0)) {
         throw std::invalid_argument("xccySwapJacobianRowsView: non-positive annuity");
     }
     std::vector<XccyRowBlock> result;
     result.reserve(foreign.valueRows.size() + domestic.valueRows.size());
+    // A resetting leg references the other leg's discount curve, so the two
+    // legs can contribute rows on the same block. Merge by view identity so
+    // each referenced block appears once in canonical order.
+    const auto appendBlock = [&result](XccyRowBlock&& block) {
+        for (XccyRowBlock& existing : result) {
+            if (existing.curve->identity() == block.curve->identity()) {
+                for (std::size_t i = 0; i < existing.row.size(); ++i) {
+                    existing.row[i] += block.row[i];
+                }
+                return;
+            }
+        }
+        result.push_back(std::move(block));
+    };
     const double foreignDifference = domestic.value - foreign.value;
     const double domesticDifference = foreign.value - domestic.value;
     const double denominator = pillar.spreadOnForeignLeg ? foreign.annuity * foreign.annuity
@@ -324,7 +424,7 @@ std::vector<XccyRowBlock> xccySwapJacobianRowsView(const StackCurveView& foreign
                 row[i] = value * domestic.annuity / denominator;
             }
         }
-        result.push_back(std::move(block));
+        appendBlock(std::move(block));
     }
     for (XccyRowBlock& block : domestic.valueRows) {
         const std::vector<double>* annuityRow =
@@ -339,7 +439,7 @@ std::vector<XccyRowBlock> xccySwapJacobianRowsView(const StackCurveView& foreign
                 row[i] = (-value * domestic.annuity - domesticDifference * annuity) / denominator;
             }
         }
-        result.push_back(std::move(block));
+        appendBlock(std::move(block));
     }
     return result;
 }

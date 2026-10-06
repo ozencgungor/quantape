@@ -13,6 +13,44 @@
 #include <vector>
 
 namespace quantape::markets {
+std::size_t stackFactorNodeCount(const StackCurveInput& input) {
+    if (!input.factor) {
+        throw std::invalid_argument("stackFactorNodeCount: input is not a factor block");
+    }
+    const std::size_t native = input.curve->size() - 1;
+    const std::size_t count = input.factor->nodeCount == 0 ? native : input.factor->nodeCount;
+    if (count == 0 || count > native) {
+        throw std::invalid_argument("stackFactorNodeCount: factor node count out of range");
+    }
+    return count;
+}
+
+StackCurveView::Ptr makeFxFactorAnchorView() {
+    return StackCurveView::makeOwned(
+        DiscountCurve<double>(std::vector<double>{0.0, 1.0}, std::vector<double>{0.0, 0.0},
+                              InterpolationSpace::LogDiscount, InterpolationScheme::Linear));
+}
+
+StackCurveInput makeFxSpotFactorInput(StackCurveView::Ptr anchor, double dVdSpot,
+                                      std::string pair) {
+    if (anchor == nullptr || anchor->size() < 2) {
+        throw std::invalid_argument("makeFxSpotFactorInput: anchor must have two nodes");
+    }
+    StackCurveInput input;
+    input.curve = std::move(anchor);
+    input.role = CurveRole::FxSpot;
+    StackFactorInput factor;
+    factor.labelPrefix = "FxSpot";
+    factor.nodeDayCounter = input.curve->zeroDayCounter();
+    factor.nodeCount = 1;
+    factor.fixedLabel = "FxSpot " + std::move(pair);
+    factor.fixedBucket = "FxSpot";
+    input.factor = std::move(factor);
+    input.dVdNodes.assign(input.curve->size(), 0.0);
+    input.dVdNodes[1] = dVdSpot;
+    return input;
+}
+
 void validateQuotePoints(const std::vector<QuotePoint>& points,
                          std::optional<std::size_t> expected) {
     if (expected.has_value() && points.size() != *expected) {
@@ -181,9 +219,23 @@ void appendXccyQuoteMetadata(const StackCurveInput& input, const datetime::Date&
 
 void appendFactorMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
                           std::vector<QuotePoint>& points) {
+    const std::size_t nodes = stackFactorNodeCount(input);
+    points.reserve(points.size() + nodes);
+    if (!input.factor->fixedLabel.empty()) {
+        const std::string& bucket = input.factor->fixedBucket.empty() ? input.factor->fixedLabel
+                                                                      : input.factor->fixedBucket;
+        for (std::size_t i = 0; i < nodes; ++i) {
+            QuotePoint point;
+            point.bucket = bucket;
+            point.label = input.factor->fixedLabel;
+            point.year = 0;
+            point.role = input.role;
+            points.push_back(std::move(point));
+        }
+        return;
+    }
     const std::vector<double>& times = input.curve->times();
-    points.reserve(points.size() + input.curve->size() - 1);
-    for (std::size_t i = 1; i < input.curve->size(); ++i) {
+    for (std::size_t i = 1; i <= nodes; ++i) {
         const datetime::Date nodeDate =
             forecastNodeDate(input.factor->nodeDayCounter, referenceDate, times[i]);
         std::string bucket = riskMaturityTag(nodeDate, times[i]);
@@ -233,10 +285,11 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
             throw std::invalid_argument(
                 "assembleStackQuoteSystem: exactly one pillar set must be non-empty");
         }
+        const std::size_t factorNodes = hasFactor ? stackFactorNodeCount(input) : 0;
         const std::size_t rows = hasDiscount   ? input.discountPillars.size()
                                  : hasForecast ? input.forecastPillars.size()
                                  : hasXccy     ? input.xccyPillars.size()
-                                               : input.curve->size() - 1;
+                                               : factorNodes;
         if (hasXccy) {
             if (input.xccyPillars.empty() || input.xccyPillars.size() + 1 != input.curve->size()) {
                 throw std::invalid_argument(
@@ -247,7 +300,7 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
                 throw std::invalid_argument(
                     "assembleStackQuoteSystem: malformed xccy row references");
             }
-        } else if (rows + 1 != input.curve->size()) {
+        } else if (!hasFactor && rows + 1 != input.curve->size()) {
             throw std::invalid_argument(
                 "assembleStackQuoteSystem: pillars must match the curve nodes");
         }
@@ -257,7 +310,7 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
         }
         rowCounts[k] = rows;
         system.offsets[k] = system.dim;
-        system.dim += input.curve->size() - 1;
+        system.dim += hasFactor ? factorNodes : input.curve->size() - 1;
     }
     const std::size_t dim = system.dim;
     // Curve matching walks every stack input and fingerprints interpolation
@@ -322,7 +375,7 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
             }
         }
         if (input.factor) {
-            for (std::size_t i = 0; i + 1 < input.curve->size(); ++i) {
+            for (std::size_t i = 0; i < rowCounts[k]; ++i) {
                 system.jacobian[row * dim + system.offsets[k] + i] = 1.0;
                 ++row;
             }
@@ -558,7 +611,9 @@ std::vector<StackRiskEntry> stackQuoteRisk(const std::vector<StackCurveInput>& c
     }
     std::vector<double> g(dim);
     for (std::size_t k = 0; k < curves.size(); ++k) {
-        for (std::size_t i = 1; i < curves[k].curve->size(); ++i) {
+        const std::size_t nodes =
+            curves[k].factor ? stackFactorNodeCount(curves[k]) : curves[k].curve->size() - 1;
+        for (std::size_t i = 1; i <= nodes; ++i) {
             g[offset[k] + i - 1] = curves[k].dVdNodes[i];
         }
     }
@@ -619,7 +674,9 @@ StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curves,
     // Node gradient and quote-space delta x = J^T g.
     std::vector<double> g(dim, 0.0);
     for (std::size_t k = 0; k < curves.size(); ++k) {
-        for (std::size_t i = 1; i < curves[k].curve->size(); ++i) {
+        const std::size_t nodes =
+            curves[k].factor ? stackFactorNodeCount(curves[k]) : curves[k].curve->size() - 1;
+        for (std::size_t i = 1; i <= nodes; ++i) {
             g[offset[k] + i - 1] = curves[k].dVdNodes[i];
         }
     }
@@ -645,7 +702,9 @@ StackQuoteGamma stackQuoteGamma(const std::vector<StackCurveInput>& curves,
     std::unordered_map<const void*, StackCurveView::Ptr> rebuiltViews;
     std::vector<bool> changedRows(curves.size(), false);
     for (std::size_t j = 0; j < curves.size(); ++j) {
-        for (std::size_t i = 1; i < curves[j].curve->size(); ++i) {
+        const std::size_t nodes =
+            curves[j].factor ? stackFactorNodeCount(curves[j]) : curves[j].curve->size() - 1;
+        for (std::size_t i = 1; i <= nodes; ++i) {
             const std::size_t bump = offset[j] + i - 1;
             plusSystem.jacobian = system.jacobian;
             bumpStackInputsInto(curves, j, i, step, bumpedInputs, bumpedViews, rebuiltViews);
@@ -750,6 +809,39 @@ std::vector<RiskBucket> stackYearLadder(const std::vector<StackRiskEntry>& entri
         }
     }
     return buckets;
+}
+
+std::vector<FxRiskPoint> fxRiskTable(const std::vector<StackRiskEntry>& entries,
+                                     const StackQuoteGamma* gamma) {
+    std::size_t total = 0;
+    for (const StackRiskEntry& entry : entries) {
+        total += entry.points.size();
+    }
+    if (gamma != nullptr && gamma->dim != total) {
+        throw std::invalid_argument("fxRiskTable: gamma dimension does not match the table");
+    }
+    std::vector<FxRiskPoint> table;
+    std::size_t index = 0;
+    for (const StackRiskEntry& entry : entries) {
+        for (const QuotePoint& point : entry.points) {
+            if (isFxRole(point.role)) {
+                FxRiskPoint fx;
+                fx.label = point.label;
+                fx.role = point.role;
+                fx.delta = point.delta;
+                fx.gamma = gamma != nullptr ? gamma->at(index, index) : 0.0;
+                const std::size_t space = point.label.find(' ');
+                const std::size_t pairBegin = space == std::string::npos ? 0 : space + 1;
+                const std::size_t pairEnd = point.label.find(' ', pairBegin);
+                fx.pair = point.label.substr(pairBegin, pairEnd == std::string::npos
+                                                            ? std::string::npos
+                                                            : pairEnd - pairBegin);
+                table.push_back(std::move(fx));
+            }
+            ++index;
+        }
+    }
+    return table;
 }
 
 datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,

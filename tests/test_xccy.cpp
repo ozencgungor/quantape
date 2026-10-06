@@ -1,8 +1,11 @@
 #include "quantape/log/Log.h"
 #include "quantape/markets/Curves/CurveRisk.h"
+#include "quantape/markets/Curves/FxSwapBuilder.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
 #include "quantape/markets/Curves/StackRisk.h"
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
+#include "quantape/markets/Data/FXRate.h"
+#include "quantape/markets/Descriptors/FXDescriptor.h"
 #include "quantape/math/LinearAlgebra/DenseSolve.h"
 #include "quantape/util/Check.h"
 
@@ -1386,6 +1389,279 @@ void testXccyCoupledMtM() {
     }
 }
 
+/// FX swap points with the quote currency as collateral recover a synthetic
+/// foreign (base) discount curve and reprice every pillar exactly.
+void testFxSwapPointRecovery() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<datetime::Date> dates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= 5; ++years) {
+            const datetime::Date date = reference.plusYears(years);
+            dates.push_back(date);
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0006);
+    const double spot = 1.10;
+
+    std::vector<markets::FxSwapPillar> pillars;
+    for (int years = 1; years <= 5; ++years) {
+        markets::FxSwapPillar pillar;
+        pillar.start = reference.plusDays(2);
+        pillar.maturity = reference.plusYears(years);
+        pillar.spot = spot;
+        pillar.isFxBaseCollateral = false;
+        pillar.points = markets::impliedFxForwardPoints(foreignTarget, domesticDiscount, spot,
+                                                        pillar, reference, zeroDc);
+        CHECK(std::isfinite(pillar.points));
+        CHECK(std::abs(pillar.points) < 0.5);
+        pillars.push_back(pillar);
+    }
+
+    const DiscountCurve<double> curve = markets::bootstrapFxDiscountCurve(
+        domesticDiscount, reference, zeroDc, InterpolationSpace::LogDiscount,
+        InterpolationScheme::Linear, pillars);
+    CHECK(curve.size() == pillars.size() + 1);
+    for (std::size_t i = 0; i < pillars.size(); ++i) {
+        util::checkClose("fx points recovered zero", curve.zeros()[i + 1],
+                         foreignTarget.zeros()[i + 1], 1e-10);
+        util::checkClose(
+            "fx points reprice",
+            markets::fxPillarImpliedQuote(curve, domesticDiscount, pillars[i], reference, zeroDc),
+            pillars[i].points, 1e-10);
+    }
+
+    bool threw = false;
+    try {
+        const std::vector<markets::FxSwapPillar> unsorted{pillars[2], pillars[1]};
+        (void)markets::bootstrapFxDiscountCurve(domesticDiscount, reference, zeroDc,
+                                                InterpolationSpace::LogDiscount,
+                                                InterpolationScheme::Linear, unsorted);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
+/// Base-currency collateral and outright-quoted pillars solve the mirror CIP
+/// branch, where the unknown foreign (quote) curve sits in the denominator.
+void testFxSwapBaseCollateralOutright() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<datetime::Date> dates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= 5; ++years) {
+            const datetime::Date date = reference.plusYears(years);
+            dates.push_back(date);
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.001, 0.0002);
+    const double spot = 157.25;
+
+    std::vector<markets::FxSwapPillar> pillars;
+    for (int years = 1; years <= 5; ++years) {
+        markets::FxSwapPillar pillar;
+        pillar.start = reference.plusDays(2);
+        pillar.maturity = reference.plusYears(years);
+        pillar.spot = spot;
+        pillar.isFxBaseCollateral = true;
+        pillar.convention = markets::QuoteConvention::Outright;
+        pillar.outright = markets::impliedFxOutright(foreignTarget, domesticDiscount, spot, pillar,
+                                                     reference, zeroDc);
+        CHECK(std::isfinite(pillar.outright));
+        CHECK(pillar.outright > 0.0);
+        pillars.push_back(pillar);
+    }
+
+    const DiscountCurve<double> curve = markets::bootstrapFxDiscountCurve(
+        domesticDiscount, reference, zeroDc, InterpolationSpace::LogDiscount,
+        InterpolationScheme::Linear, pillars);
+    for (std::size_t i = 0; i < pillars.size(); ++i) {
+        util::checkClose("fx outright recovered zero", curve.zeros()[i + 1],
+                         foreignTarget.zeros()[i + 1], 1e-10);
+        util::checkClose(
+            "fx outright reprice",
+            markets::fxPillarImpliedQuote(curve, domesticDiscount, pillars[i], reference, zeroDc),
+            pillars[i].outright, 1e-10);
+    }
+}
+
+/// After the points bootstrap the model forward equals `FXRate::forward`, for
+/// both collateral directions.
+void testFxSwapCipAgainstFXRateForward() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<datetime::Date> dates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= 3; ++years) {
+            const datetime::Date date = reference.plusYears(years);
+            dates.push_back(date);
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0006);
+
+    // Quote-currency collateral (EURUSD): base EUR is the unknown foreign curve.
+    {
+        const double spot = 1.10;
+        std::vector<markets::FxSwapPillar> pillars;
+        for (int years = 1; years <= 3; ++years) {
+            markets::FxSwapPillar pillar;
+            pillar.maturity = reference.plusYears(years);
+            pillar.spot = spot;
+            pillar.points = markets::impliedFxForwardPoints(foreignTarget, domesticDiscount, spot,
+                                                            pillar, reference, zeroDc);
+            pillars.push_back(pillar);
+        }
+        const DiscountCurve<double> foreign = markets::bootstrapFxDiscountCurve(
+            domesticDiscount, reference, zeroDc, InterpolationSpace::LogDiscount,
+            InterpolationScheme::Linear, pillars);
+        const markets::FXRate<double> fx(spot, foreign, domesticDiscount,
+                                         markets::FXDescriptor("EUR", "USD", reference.toIso()));
+        for (const markets::FxSwapPillar& pillar : pillars) {
+            const double t = datetime::yearFraction(reference, pillar.maturity, zeroDc);
+            util::checkClose("fx cip quote collateral", fx.forward(t), spot + pillar.points, 1e-12);
+            util::checkClose("fx cip quote collateral model", fx.forward(t),
+                             markets::impliedFxOutright(foreign, domesticDiscount, spot, pillar,
+                                                        reference, zeroDc),
+                             1e-10);
+        }
+    }
+
+    // Base-currency collateral (USDJPY): base USD is the frozen collateral
+    // curve and the quote JPY is the unknown foreign curve.
+    {
+        const double spot = 157.25;
+        std::vector<markets::FxSwapPillar> pillars;
+        for (int years = 1; years <= 3; ++years) {
+            markets::FxSwapPillar pillar;
+            pillar.maturity = reference.plusYears(years);
+            pillar.spot = spot;
+            pillar.isFxBaseCollateral = true;
+            pillar.convention = markets::QuoteConvention::Outright;
+            pillar.outright = markets::impliedFxOutright(foreignTarget, domesticDiscount, spot,
+                                                         pillar, reference, zeroDc);
+            pillars.push_back(pillar);
+        }
+        const DiscountCurve<double> foreign = markets::bootstrapFxDiscountCurve(
+            domesticDiscount, reference, zeroDc, InterpolationSpace::LogDiscount,
+            InterpolationScheme::Linear, pillars);
+        const markets::FXRate<double> fx(spot, domesticDiscount, foreign,
+                                         markets::FXDescriptor("USD", "JPY", reference.toIso()));
+        for (const markets::FxSwapPillar& pillar : pillars) {
+            const double t = datetime::yearFraction(reference, pillar.maturity, zeroDc);
+            util::checkClose("fx cip base collateral", fx.forward(t), pillar.outright, 1e-10);
+        }
+    }
+}
+
+/// One maturity-ordered ladder mixing FX forward points at the short end with
+/// cross-currency basis swaps long end recovers the synthetic foreign curve at
+/// every node and reprices every quote, with both forecast modes.
+void testMixedFxXccyLadderRecovery() {
+    const datetime::Date reference(2026, 9, 29);
+    const datetime::DayCounter zeroDc(datetime::DayCount::Actual365Fixed);
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const auto buildCurve = [&](double base, double slope) {
+        std::vector<datetime::Date> dates;
+        std::vector<double> zeros;
+        for (int years = 1; years <= 3; ++years) {
+            const datetime::Date date = reference.plusYears(years);
+            dates.push_back(date);
+            zeros.push_back(base + slope * datetime::yearFraction(reference, date, zeroDc));
+        }
+        return DiscountCurve<double>(reference, dates, zeroDc, zeros,
+                                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear);
+    };
+    const DiscountCurve<double> domesticDiscount = buildCurve(0.040, 0.0005);
+    const DiscountCurve<double> domesticForecast = buildCurve(0.043, 0.0004);
+    const DiscountCurve<double> foreignForecast = buildCurve(0.025, 0.0008);
+    const DiscountCurve<double> foreignTarget = buildCurve(0.028, 0.0006);
+    const double spot = 1.10;
+
+    std::vector<markets::XccyMixedPillar> pillars;
+    markets::FxSwapPillar fxPillar;
+    fxPillar.start = reference.plusDays(2);
+    fxPillar.maturity = reference.plusYears(1);
+    fxPillar.spot = spot;
+    fxPillar.points = markets::impliedFxForwardPoints(foreignTarget, domesticDiscount, spot,
+                                                      fxPillar, reference, zeroDc);
+    pillars.emplace_back(fxPillar);
+    std::vector<markets::XccyPillar> xccyPillars;
+    for (int years = 2; years <= 3; ++years) {
+        markets::XccyPillar xccy;
+        xccy.maturity = reference.plusYears(years);
+        xccy.foreignTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        xccy.domesticTenor = datetime::Period(3, datetime::TimeUnit::Months);
+        xccy.foreignCalendar = calendar;
+        xccy.domesticCalendar = calendar;
+        xccy.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        xccy.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+        xccy.spread =
+            markets::impliedXccyBasisSpread(foreignTarget, foreignForecast, domesticDiscount,
+                                            domesticForecast, xccy, reference, zeroDc);
+        CHECK(std::isfinite(xccy.spread));
+        pillars.emplace_back(xccy);
+        xccyPillars.push_back(xccy);
+    }
+
+    const DiscountCurve<double> curve = markets::bootstrapMixedXccyDiscountCurve(
+        domesticDiscount, domesticForecast, foreignForecast, reference, zeroDc,
+        InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars);
+    CHECK(curve.size() == pillars.size() + 1);
+    for (std::size_t i = 0; i < pillars.size(); ++i) {
+        util::checkClose("mixed ladder recovered zero", curve.zeros()[i + 1],
+                         foreignTarget.zeros()[i + 1], 1e-10);
+    }
+    util::checkClose(
+        "mixed ladder fx reprice",
+        markets::fxPillarImpliedQuote(curve, domesticDiscount, fxPillar, reference, zeroDc),
+        fxPillar.points, 1e-10);
+    for (const markets::XccyPillar& xccy : xccyPillars) {
+        util::checkClose("mixed ladder xccy reprice",
+                         markets::impliedXccyBasisSpread(curve, foreignForecast, domesticDiscount,
+                                                         domesticForecast, xccy, reference, zeroDc),
+                         xccy.spread, 1e-10);
+    }
+
+    // Self-forecast mode solves the same residual with the trial curve as the
+    // foreign floating forecast, so its own residuals must vanish too.
+    const DiscountCurve<double> selfCurve = markets::bootstrapMixedXccyDiscountCurve(
+        domesticDiscount, domesticForecast, reference, zeroDc, InterpolationSpace::LogDiscount,
+        InterpolationScheme::Linear, pillars);
+    for (const markets::XccyPillar& xccy : xccyPillars) {
+        util::checkClose("mixed ladder self-forecast reprice",
+                         markets::impliedXccyBasisSpread(selfCurve, selfCurve, domesticDiscount,
+                                                         domesticForecast, xccy, reference, zeroDc),
+                         xccy.spread, 1e-10);
+    }
+
+    bool threw = false;
+    try {
+        const std::vector<markets::XccyMixedPillar> unsorted{pillars[2], pillars[1]};
+        (void)markets::bootstrapMixedXccyDiscountCurve(
+            domesticDiscount, domesticForecast, foreignForecast, reference, zeroDc,
+            InterpolationSpace::LogDiscount, InterpolationScheme::Linear, unsorted);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
 } // namespace
 
 int main() {
@@ -1401,6 +1677,10 @@ int main() {
     testXccyMtMGoldenSpreads();
     testXccyMixedNotionalBootstrap();
     testXccyCoupledMtM();
+    testFxSwapPointRecovery();
+    testFxSwapBaseCollateralOutright();
+    testFxSwapCipAgainstFXRateForward();
+    testMixedFxXccyLadderRecovery();
     QTA_LOG_INFO("test", "test_xccy: ok");
     return 0;
 }

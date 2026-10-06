@@ -7,6 +7,7 @@
 #include "quantape/datetime/TimeConversion.h"
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
+#include "quantape/markets/Curves/FxSwapBuilder.h"
 #include "quantape/math/Optimization/LevenbergMarquardt.h"
 #include "quantape/math/Solvers/BrentSolver.h"
 #include "quantape/math/Solvers/FixedPointIterator.h"
@@ -17,6 +18,8 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace quantape::markets {
@@ -104,6 +107,145 @@ struct XccyPillar {
         datetime::BusinessDayConvention::ModifiedFollowing;
 };
 
+namespace detail {
+
+/// Schedule-fixed coupon data of one cross-currency leg: accrual, the accrual
+/// boundaries and the payment time, all on the zero clock.
+struct XccyCouponTimes {
+    double tau = 0.0;
+    double tPrevious = 0.0;
+    double tAccrual = 0.0;
+    double tPay = 0.0;
+};
+
+/// Schedule-fixed data of one cross-currency leg, resolved once per pillar.
+struct XccyLegTimes {
+    std::vector<XccyCouponTimes> coupons;
+    double tStart = 0.0;
+    double tEnd = 0.0;
+};
+
+/// Resolve one leg's schedule and coupon times. The accrual check matches the
+/// inline evaluation it replaces.
+inline XccyLegTimes makeXccyLegTimes(const datetime::Schedule& schedule,
+                                     const datetime::DayCounter& accrualDayCounter, int paymentLag,
+                                     datetime::BusinessDayConvention businessDayConvention,
+                                     const datetime::Date& referenceDate,
+                                     const datetime::DayCounter& zeroDayCounter) {
+    XccyLegTimes times;
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    times.coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        XccyCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], accrualDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedXccyBasisSpread: non-positive accrual");
+        }
+        coupon.tPrevious = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+        coupon.tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+        const datetime::Date payDate = schedule.calendar().advance(
+            dates[k], datetime::Period(paymentLag, datetime::TimeUnit::Days),
+            businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        times.coupons.push_back(coupon);
+    }
+    times.tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
+    times.tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
+    return times;
+}
+
+/// Value and annuity of one leg from precomputed coupon times. The arithmetic
+/// follows the original inline loop step for step.
+template <typename DiscountT, typename ForecastT, typename OtherDiscountT>
+double evaluateXccyLegTimes(const XccyLegTimes& times, const DiscountT& discount,
+                            const ForecastT& forecast, const OtherDiscountT& otherDiscount,
+                            bool resets, double& annuity) {
+    double coupons = 0.0;
+    double resetValue = 0.0;
+    annuity = 0.0;
+    for (const XccyCouponTimes& coupon : times.coupons) {
+        const double df = discount.discount(coupon.tPay);
+        const double forward =
+            (forecast.discount(coupon.tPrevious) / forecast.discount(coupon.tAccrual) - 1.0) /
+            coupon.tau;
+        coupons += coupon.tau * df * forward;
+        annuity += coupon.tau * df;
+        if (resets) {
+            const double ownStart = discount.discount(coupon.tPrevious);
+            const double adjustment = otherDiscount.discount(coupon.tPrevious) / ownStart;
+            resetValue +=
+                adjustment *
+                (discount.discount(coupon.tAccrual) * (1.0 + forward * coupon.tau) - ownStart);
+        }
+    }
+    if (resets) {
+        return resetValue;
+    }
+    const double notional = discount.discount(times.tStart) - discount.discount(times.tEnd);
+    return coupons + notional;
+}
+
+/// Two resolved leg schedules of one pillar plus its notional flags.
+struct XccyPillarTimes {
+    XccyLegTimes foreign;
+    XccyLegTimes domestic;
+    bool foreignResets = false;
+    bool domesticResets = false;
+};
+
+/// Resolve both leg schedules and coupon times of `pillar` on the reference
+/// date's zero clock.
+inline XccyPillarTimes makeXccyPillarTimes(const XccyPillar& pillar,
+                                           const datetime::Date& referenceDate,
+                                           const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Schedule foreignSchedule(
+        referenceDate, pillar.maturity, pillar.foreignTenor, pillar.foreignCalendar,
+        pillar.foreignBusinessDayConvention, datetime::DateGeneration::Forward, false,
+        datetime::BusinessDayConvention::Unadjusted);
+    const datetime::Schedule domesticSchedule(
+        referenceDate, pillar.maturity, pillar.domesticTenor, pillar.domesticCalendar,
+        pillar.domesticBusinessDayConvention, datetime::DateGeneration::Forward, false,
+        datetime::BusinessDayConvention::Unadjusted);
+    XccyPillarTimes times;
+    times.foreign =
+        makeXccyLegTimes(foreignSchedule, pillar.foreignDayCounter, pillar.foreignPaymentLag,
+                         pillar.foreignBusinessDayConvention, referenceDate, zeroDayCounter);
+    times.domestic =
+        makeXccyLegTimes(domesticSchedule, pillar.domesticDayCounter, pillar.domesticPaymentLag,
+                         pillar.domesticBusinessDayConvention, referenceDate, zeroDayCounter);
+    times.foreignResets = pillar.notional == XccyNotionalMode::MtM && pillar.resetForeignLeg;
+    times.domesticResets = pillar.notional == XccyNotionalMode::MtM && !pillar.resetForeignLeg;
+    return times;
+}
+
+/// Model basis spread from precomputed pillar times: both leg values and the
+/// quote-leg par division.
+template <typename ForeignDiscountT, typename ForeignForecastT, typename DomesticDiscountT,
+          typename DomesticForecastT>
+double evaluateXccyPillarTimes(const XccyPillarTimes& times, const XccyPillar& pillar,
+                               const ForeignDiscountT& foreignDiscount,
+                               const ForeignForecastT& foreignForecast,
+                               const DomesticDiscountT& domesticDiscount,
+                               const DomesticForecastT& domesticForecast) {
+    double foreignAnnuity = 0.0;
+    const double foreignValue =
+        evaluateXccyLegTimes(times.foreign, foreignDiscount, foreignForecast, domesticDiscount,
+                             times.foreignResets, foreignAnnuity);
+    double domesticAnnuity = 0.0;
+    const double domesticValue =
+        evaluateXccyLegTimes(times.domestic, domesticDiscount, domesticForecast, foreignDiscount,
+                             times.domesticResets, domesticAnnuity);
+    if (!(foreignAnnuity > 0.0) || !(domesticAnnuity > 0.0)) {
+        throw std::invalid_argument("impliedXccyBasisSpread: non-positive annuity");
+    }
+    if (pillar.spreadOnForeignLeg) {
+        return (domesticValue - foreignValue) / foreignAnnuity;
+    }
+    return (foreignValue - domesticValue) / domesticAnnuity;
+}
+
+} // namespace detail
+
 /// Model-implied basis spread (foreign leg spread) against a foreign discount
 /// curve, with both forecast curves given. Handles constant and resetting
 /// notionals; the spread annuity is always `sum tau D(pay)` on the quoted leg.
@@ -114,78 +256,10 @@ double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
                               const DomesticForecastT& domesticForecast, const XccyPillar& pillar,
                               const datetime::Date& referenceDate,
                               const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Schedule foreignSchedule(
-        referenceDate, pillar.maturity, pillar.foreignTenor, pillar.foreignCalendar,
-        pillar.foreignBusinessDayConvention, datetime::DateGeneration::Forward, false,
-        datetime::BusinessDayConvention::Unadjusted);
-    const datetime::Schedule domesticSchedule(
-        referenceDate, pillar.maturity, pillar.domesticTenor, pillar.domesticCalendar,
-        pillar.domesticBusinessDayConvention, datetime::DateGeneration::Forward, false,
-        datetime::BusinessDayConvention::Unadjusted);
-
-    const bool foreignResets = pillar.notional == XccyNotionalMode::MtM && pillar.resetForeignLeg;
-    const bool domesticResets = pillar.notional == XccyNotionalMode::MtM && !pillar.resetForeignLeg;
-
-    const auto legValue = [&](const datetime::Schedule& schedule,
-                              const datetime::DayCounter& accrualDayCounter,
-                              const DiscountCurve<double>& discount, const auto& forecast,
-                              const DiscountCurve<double>& otherDiscount, bool resets,
-                              int paymentLag, datetime::BusinessDayConvention businessDayConvention,
-                              double& annuity) {
-        const std::vector<datetime::Date>& dates = schedule.dates();
-        double coupons = 0.0;
-        double resetValue = 0.0;
-        annuity = 0.0;
-        for (std::size_t k = 1; k < dates.size(); ++k) {
-            const double tau = datetime::yearFraction(dates[k - 1], dates[k], accrualDayCounter);
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument("impliedXccyBasisSpread: non-positive accrual");
-            }
-            const double tPrevious =
-                datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-            const double tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-            const datetime::Date payDate = schedule.calendar().advance(
-                dates[k], datetime::Period(paymentLag, datetime::TimeUnit::Days),
-                businessDayConvention);
-            const double t = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-            const double df = discount.discount(t);
-            const double forward =
-                (forecast.discount(tPrevious) / forecast.discount(tAccrual) - 1.0) / tau;
-            coupons += tau * df * forward;
-            annuity += tau * df;
-            if (resets) {
-                const double ownStart = discount.discount(tPrevious);
-                const double adjustment = otherDiscount.discount(tPrevious) / ownStart;
-                resetValue +=
-                    adjustment * (discount.discount(tAccrual) * (1.0 + forward * tau) - ownStart);
-            }
-        }
-        if (resets) {
-            return resetValue;
-        }
-        const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
-        const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
-        const double notional = discount.discount(tStart) - discount.discount(tEnd);
-        return coupons + notional;
-    };
-
-    double foreignAnnuity = 0.0;
-    const double foreignValue =
-        legValue(foreignSchedule, pillar.foreignDayCounter, foreignDiscount, foreignForecast,
-                 domesticDiscount, foreignResets, pillar.foreignPaymentLag,
-                 pillar.foreignBusinessDayConvention, foreignAnnuity);
-    double domesticAnnuity = 0.0;
-    const double domesticValue =
-        legValue(domesticSchedule, pillar.domesticDayCounter, domesticDiscount, domesticForecast,
-                 foreignDiscount, domesticResets, pillar.domesticPaymentLag,
-                 pillar.domesticBusinessDayConvention, domesticAnnuity);
-    if (!(foreignAnnuity > 0.0) || !(domesticAnnuity > 0.0)) {
-        throw std::invalid_argument("impliedXccyBasisSpread: non-positive annuity");
-    }
-    if (pillar.spreadOnForeignLeg) {
-        return (domesticValue - foreignValue) / foreignAnnuity;
-    }
-    return (foreignValue - domesticValue) / domesticAnnuity;
+    const detail::XccyPillarTimes times =
+        detail::makeXccyPillarTimes(pillar, referenceDate, zeroDayCounter);
+    return detail::evaluateXccyPillarTimes(times, pillar, foreignDiscount, foreignForecast,
+                                           domesticDiscount, domesticForecast);
 }
 
 /// Sequential exact-fit bootstrap of the foreign discount curve (USD-collateral)
@@ -215,85 +289,150 @@ DiscountCurve<double> bootstrapXccyDiscountCurve(
         maturityDates[i] = maturity;
     }
 
-    const quantape::math::BrentSolver<double> solver;
-    std::vector<double> zeros(count, 0.0);
-    const auto solveNodes = [&](bool multiPass) {
-        for (int pass = 0; pass < (multiPass ? 50 : 1); ++pass) {
-            const std::vector<double> previous = zeros;
-            double lastMove = 0.0;
-            for (std::size_t i = 0; i < count; ++i) {
-                const XccyPillar& pillar = pillars[i];
-                const std::size_t lastNode = multiPass && pass == 0 ? i : count - 1;
-                const auto residual = [&](double trialZero) {
-                    std::vector<double> trialTimes{0.0};
-                    std::vector<double> trialZeros{0.0};
-                    for (std::size_t j = 0; j <= lastNode; ++j) {
-                        trialTimes.push_back(nodeTimes[j]);
-                        trialZeros.push_back(j == i ? trialZero : zeros[j]);
-                    }
-                    const DiscountCurve<double> trial(trialTimes, trialZeros, space, scheme,
-                                                      tension, switchIndex);
-                    return impliedXccyBasisSpread(trial, foreignForecast, domesticDiscount,
-                                                  domesticForecast, pillar, referenceDate,
-                                                  zeroDayCounter) -
-                           pillar.spread;
-                };
-                const double guess = i == 0 ? 0.0 : zeros[i - 1];
-                double lower = guess - 0.5;
-                double upper = guess + 0.5;
-                double fLower = residual(lower);
-                double fUpper = residual(upper);
-                int widen = 0;
-                while (fLower * fUpper > 0.0 && widen < 12) {
-                    lower -= 0.5;
-                    upper += 0.5;
-                    fLower = residual(lower);
-                    fUpper = residual(upper);
-                    ++widen;
-                }
-                if (!(fLower * fUpper <= 0.0) || !std::isfinite(fLower) || !std::isfinite(fUpper)) {
-                    throw std::runtime_error(
-                        "bootstrapXccyDiscountCurve: failed to bracket pillar " +
-                        std::to_string(i));
-                }
-                const double root = solver.solve(residual, accuracy, guess, lower, upper);
-                const double move = std::abs(root - previous[i]);
-                if (move > lastMove) {
-                    lastMove = move;
-                }
-                zeros[i] = root;
-            }
-            if (!multiPass || lastMove < 1e-15) {
-                break;
-            }
-        }
-    };
-    const auto worstResidual = [&]() {
-        const DiscountCurve<double> curve(referenceDate, maturityDates, zeroDayCounter, zeros,
-                                          space, scheme, tension, switchIndex);
-        double worst = 0.0;
-        for (std::size_t i = 0; i < count; ++i) {
-            const double check =
-                impliedXccyBasisSpread(curve, foreignForecast, domesticDiscount, domesticForecast,
-                                       pillars[i], referenceDate, zeroDayCounter) -
-                pillars[i].spread;
-            if (!std::isfinite(check)) {
-                worst = 1e300;
-            } else if (std::abs(check) > worst) {
-                worst = std::abs(check);
-            }
-        }
-        return worst;
-    };
-    solveNodes(false);
-    if (!(worstResidual() < 1e-9)) {
-        solveNodes(true);
+    // The schedules and day counts are schedule-fixed, so resolve them once
+    // per pillar instead of rebuilding them at every Brent step.
+    std::vector<detail::XccyPillarTimes> pillarTimes(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        pillarTimes[i] = detail::makeXccyPillarTimes(pillars[i], referenceDate, zeroDayCounter);
     }
-    if (!(worstResidual() < 1e-9)) {
-        throw std::runtime_error("bootstrapXccyDiscountCurve: fixed point did not converge");
-    }
+    const auto residual = [&](std::size_t i, const DiscountCurve<double>& trial) {
+        return detail::evaluateXccyPillarTimes(pillarTimes[i], pillars[i], trial, foreignForecast,
+                                               domesticDiscount, domesticForecast) -
+               pillars[i].spread;
+    };
+    const std::vector<double> zeros =
+        detail::bootstrapNodesByBrent(space, scheme, tension, switchIndex, accuracy, nodeTimes,
+                                      residual, "bootstrapXccyDiscountCurve");
     return DiscountCurve<double>(referenceDate, maturityDates, zeroDayCounter, zeros, space, scheme,
                                  tension, switchIndex);
+}
+
+/// One pillar of a mixed `XccyBasis`-role ladder: FX forward points at the
+/// short end and cross-currency basis swaps at the long end.
+using XccyMixedPillar = std::variant<FxSwapPillar, XccyPillar>;
+
+namespace detail {
+
+/// Node date of a mixed pillar: the FX far date or the xccy maturity adjusted
+/// on the foreign leg's calendar.
+inline datetime::Date mixedPillarMaturity(const XccyMixedPillar& pillar) {
+    return std::visit(
+        [](const auto& value) -> datetime::Date {
+            using PillarT = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<PillarT, FxSwapPillar>) {
+                return value.maturity;
+            } else {
+                return value.foreignCalendar.adjust(value.maturity,
+                                                    value.foreignBusinessDayConvention);
+            }
+        },
+        pillar);
+}
+
+/// Shared body of the mixed-ladder bootstraps. `foreignForecastAt(trial)`
+/// returns the foreign floating-leg forecast to use for xccy pillars, either
+/// the trial curve itself or a frozen forecast curve.
+template <typename ForeignForecastProvider, typename DomesticForecastT>
+DiscountCurve<double> bootstrapMixedXccyDiscountCurveImpl(
+    const DiscountCurve<double>& domesticDiscount, const DomesticForecastT& domesticForecast,
+    const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+    InterpolationSpace space, InterpolationScheme scheme,
+    const std::vector<XccyMixedPillar>& pillars, const ForeignForecastProvider& foreignForecastAt,
+    double accuracy, double tension, int switchIndex) {
+    if (pillars.empty()) {
+        throw std::invalid_argument("bootstrapMixedXccyDiscountCurve: no pillars");
+    }
+    const std::size_t count = pillars.size();
+    std::vector<double> nodeTimes(count);
+    std::vector<datetime::Date> maturityDates(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        maturityDates[i] = mixedPillarMaturity(pillars[i]);
+        nodeTimes[i] = datetime::yearFraction(referenceDate, maturityDates[i], zeroDayCounter);
+        if (!(nodeTimes[i] > (i == 0 ? 0.0 : nodeTimes[i - 1]))) {
+            throw std::invalid_argument(
+                "bootstrapMixedXccyDiscountCurve: maturities must be strictly increasing");
+        }
+    }
+    // Resolve the xccy leg schedules once per pillar; the FX pillars are
+    // closed-form on their precomputed node time.
+    std::vector<detail::XccyPillarTimes> xccyTimes(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        std::visit(
+            [&](const auto& value) {
+                using PillarT = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<PillarT, XccyPillar>) {
+                    xccyTimes[i] =
+                        detail::makeXccyPillarTimes(value, referenceDate, zeroDayCounter);
+                }
+            },
+            pillars[i]);
+    }
+    const auto residual = [&](std::size_t i, const DiscountCurve<double>& foreignDiscount) {
+        return std::visit(
+            [&](const auto& value) -> double {
+                using PillarT = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<PillarT, FxSwapPillar>) {
+                    const double t = nodeTimes[i];
+                    const double model = value.isFxBaseCollateral
+                                             ? value.spot * domesticDiscount.discount(t) /
+                                                   foreignDiscount.discount(t)
+                                             : value.spot * foreignDiscount.discount(t) /
+                                                   domesticDiscount.discount(t);
+                    const double implied =
+                        value.convention == QuoteConvention::Points ? model - value.spot : model;
+                    return implied - fxPillarTargetQuote(value);
+                } else {
+                    return detail::evaluateXccyPillarTimes(xccyTimes[i], value, foreignDiscount,
+                                                           foreignForecastAt(foreignDiscount),
+                                                           domesticDiscount, domesticForecast) -
+                           value.spread;
+                }
+            },
+            pillars[i]);
+    };
+    const std::vector<double> zeros =
+        detail::bootstrapNodesByBrent(space, scheme, tension, switchIndex, accuracy, nodeTimes,
+                                      residual, "bootstrapMixedXccyDiscountCurve");
+    return DiscountCurve<double>(referenceDate, maturityDates, zeroDayCounter, zeros, space, scheme,
+                                 tension, switchIndex);
+}
+
+} // namespace detail
+
+/// Self-forecast mixed bootstrap: xccy pillars forecast their floating legs on
+/// the trial foreign discount curve (OIS-style swaps), while FX swap pillars
+/// use the trial curve as the foreign side of the CIP ratio.
+template <XccyForecastCurve DomesticForecastT>
+DiscountCurve<double> bootstrapMixedXccyDiscountCurve(
+    const DiscountCurve<double>& domesticDiscount, const DomesticForecastT& domesticForecast,
+    const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter,
+    InterpolationSpace space, InterpolationScheme scheme,
+    const std::vector<XccyMixedPillar>& pillars, double accuracy = 1e-14, double tension = 0.0,
+    int switchIndex = 1) {
+    const auto foreignForecastAt =
+        [](const DiscountCurve<double>& trial) -> const DiscountCurve<double>& { return trial; };
+    return detail::bootstrapMixedXccyDiscountCurveImpl(
+        domesticDiscount, domesticForecast, referenceDate, zeroDayCounter, space, scheme, pillars,
+        foreignForecastAt, accuracy, tension, switchIndex);
+}
+
+/// Explicit-forecast mixed bootstrap: xccy pillars use `foreignForecast` for
+/// their foreign floating leg, while FX swap pillars still reference the trial
+/// foreign discount curve through the CIP ratio.
+template <XccyForecastCurve ForeignForecastT, XccyForecastCurve DomesticForecastT>
+DiscountCurve<double> bootstrapMixedXccyDiscountCurve(
+    const DiscountCurve<double>& domesticDiscount, const DomesticForecastT& domesticForecast,
+    const ForeignForecastT& foreignForecast, const datetime::Date& referenceDate,
+    const datetime::DayCounter& zeroDayCounter, InterpolationSpace space,
+    InterpolationScheme scheme, const std::vector<XccyMixedPillar>& pillars,
+    double accuracy = 1e-14, double tension = 0.0, int switchIndex = 1) {
+    const auto foreignForecastAt =
+        [&foreignForecast](const DiscountCurve<double>&) -> const ForeignForecastT& {
+        return foreignForecast;
+    };
+    return detail::bootstrapMixedXccyDiscountCurveImpl(
+        domesticDiscount, domesticForecast, referenceDate, zeroDayCounter, space, scheme, pillars,
+        foreignForecastAt, accuracy, tension, switchIndex);
 }
 
 /// One coupled pillar: the foreign par basis quote (discounted on the xccy

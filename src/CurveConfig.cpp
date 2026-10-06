@@ -1,8 +1,11 @@
 #include "quantape/markets/Curves/CurveConfig.h"
 
 #include "quantape/markets/Curves/FraConvexity.h"
+#include "quantape/markets/Curves/FxSwapBuilder.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
+#include "quantape/markets/Curves/XccyBasisBuilder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -125,8 +128,19 @@ CurveKey asKey(const Json& node, const std::string& where) {
 
 /// Shared kind map for both curve sides; `forecast` selects the forecast-only
 /// kinds and the error text, while the shared names always map the same way.
-PillarSpec::Kind pillarKindFromName(std::string_view name, bool forecast,
+/// `xccy` selects the cross-currency kinds for `XccyBasis`-role curves.
+PillarSpec::Kind pillarKindFromName(std::string_view name, bool forecast, bool xccy,
                                     const std::string& where) {
+    if (xccy) {
+        if (name == "FxSwap") {
+            return PillarSpec::Kind::FxSwap;
+        }
+        if (name == "XccySwap") {
+            return PillarSpec::Kind::XccySwap;
+        }
+        fail(where, "unknown cross-currency pillar kind '" + std::string(name) +
+                        "' (expected FxSwap or XccySwap)");
+    }
     if (name == "Deposit") {
         return PillarSpec::Kind::Deposit;
     }
@@ -156,6 +170,33 @@ PillarSpec::Kind pillarKindFromName(std::string_view name, bool forecast,
                     "' (expected Deposit, Repo, Fra, Future or OisSwap)");
 }
 
+QuoteConvention quoteConventionFromName(const std::string& name, const std::string& where) {
+    if (name == "Points") {
+        return QuoteConvention::Points;
+    }
+    if (name == "Outright") {
+        return QuoteConvention::Outright;
+    }
+    fail(where, "unknown quote convention '" + name + "' (expected Points or Outright)");
+}
+
+XccyNotionalMode notionalModeFromName(const std::string& name, const std::string& where) {
+    if (name == "Const") {
+        return XccyNotionalMode::Const;
+    }
+    if (name == "MtM") {
+        return XccyNotionalMode::MtM;
+    }
+    fail(where, "unknown notional mode '" + name + "' (expected Const or MtM)");
+}
+
+std::string legFromName(const std::string& name, const std::string& where) {
+    if (name == "Base" || name == "Quote") {
+        return name;
+    }
+    fail(where, "unknown leg '" + name + "' (expected Base or Quote)");
+}
+
 FutureStyle futureStyleFromName(const std::string& style, const std::string& where) {
     if (style == "Simple") {
         return FutureStyle::Simple;
@@ -181,15 +222,99 @@ AveragingStyle averagingStyleFromName(const std::string& name, const std::string
 
 /// Parse one pillar object shared by the `pillars` and `forecastPillars`
 /// arrays; `forecast` selects the accepted kinds, field aliases and
-/// kind-specific checks of the forecast side.
-PillarSpec parsePillarSpec(const Json& node, const std::string& where, bool forecast) {
+/// kind-specific checks of the forecast side; `xccy` selects the
+/// cross-currency kinds of an `XccyBasis`-role curve.
+PillarSpec parsePillarSpec(const Json& node, const std::string& where, bool forecast, bool xccy) {
     PillarSpec pillar;
     pillar.maturity = asDate(node, "maturity", where);
     if (node.contains("start")) {
         pillar.start = asDate(node, "start", where);
     }
-    pillar.kind = pillarKindFromName(asString(node, "kind", where), forecast, where);
+    pillar.kind = pillarKindFromName(asString(node, "kind", where), forecast, xccy, where);
     const PillarSpec::Kind kind = pillar.kind;
+    if (kind == PillarSpec::Kind::FxSwap) {
+        if (node.contains("convention")) {
+            pillar.fxConvention =
+                quoteConventionFromName(asString(node, "convention", where), where);
+        } else if (node.contains("outright") && !node.contains("points")) {
+            pillar.fxConvention = QuoteConvention::Outright;
+        }
+        if (pillar.fxConvention == QuoteConvention::Points) {
+            pillar.fxPoints = asDouble(node, "points", where);
+        } else {
+            pillar.fxOutright = asDouble(node, "outright", where);
+        }
+        if (node.contains("pair")) {
+            pillar.fxPair = asString(node, "pair", where);
+            if (pillar.fxPair.size() != 6) {
+                fail(where, "'pair' must be a six-letter base+quote string (e.g. \"EURUSD\")");
+            }
+        }
+        if (node.contains("isFxBaseCollateral")) {
+            pillar.isFxBaseCollateral = asBool(node, "isFxBaseCollateral", where);
+            pillar.isFxBaseCollateralSet = true;
+        }
+        if (node.contains("quoteDayCounter")) {
+            pillar.quoteDayCounter = dayCounterFromName(asString(node, "quoteDayCounter", where));
+        } else if (node.contains("dayCounter")) {
+            pillar.quoteDayCounter = dayCounterFromName(asString(node, "dayCounter", where));
+        }
+        return pillar;
+    }
+    if (kind == PillarSpec::Kind::XccySwap) {
+        if (node.contains("quote")) {
+            pillar.quote = asDouble(node, "quote", where);
+        } else if (node.contains("spread")) {
+            pillar.quote = asDouble(node, "spread", where);
+        } else {
+            fail(where, "missing field 'spread'");
+        }
+        if (node.contains("notional")) {
+            pillar.xccyNotional = notionalModeFromName(asString(node, "notional", where), where);
+            pillar.xccyNotionalSet = true;
+        }
+        if (node.contains("isFxBaseCollateral")) {
+            pillar.isFxBaseCollateral = asBool(node, "isFxBaseCollateral", where);
+            pillar.isFxBaseCollateralSet = true;
+        }
+        if (node.contains("foreignTenor")) {
+            pillar.foreignTenor = asPeriod(node.at("foreignTenor"), where + ".foreignTenor");
+        }
+        if (node.contains("domesticTenor")) {
+            pillar.domesticTenor = asPeriod(node.at("domesticTenor"), where + ".domesticTenor");
+        }
+        if (node.contains("foreignCalendar")) {
+            pillar.foreignCalendar = calendarFromName(asString(node, "foreignCalendar", where));
+        }
+        if (node.contains("domesticCalendar")) {
+            pillar.domesticCalendar = calendarFromName(asString(node, "domesticCalendar", where));
+        }
+        if (node.contains("foreignDayCounter")) {
+            pillar.foreignDayCounter =
+                dayCounterFromName(asString(node, "foreignDayCounter", where));
+        }
+        if (node.contains("domesticDayCounter")) {
+            pillar.domesticDayCounter =
+                dayCounterFromName(asString(node, "domesticDayCounter", where));
+        }
+        if (node.contains("businessDayConvention")) {
+            pillar.businessDayConvention =
+                conventionFromName(asString(node, "businessDayConvention", where));
+        }
+        if (node.contains("foreignPaymentLag")) {
+            pillar.foreignPaymentLag = asInt(node, "foreignPaymentLag", where);
+            if (pillar.foreignPaymentLag < 0) {
+                fail(where, "'foreignPaymentLag' must be non-negative");
+            }
+        }
+        if (node.contains("domesticPaymentLag")) {
+            pillar.domesticPaymentLag = asInt(node, "domesticPaymentLag", where);
+            if (pillar.domesticPaymentLag < 0) {
+                fail(where, "'domesticPaymentLag' must be non-negative");
+            }
+        }
+        return pillar;
+    }
     if (!forecast && (kind == PillarSpec::Kind::Fra || kind == PillarSpec::Kind::Future) &&
         !node.contains("start")) {
         fail(where, "Fra/Future pillars require a 'start' date");
@@ -507,6 +632,68 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
 
     CurveStackSpec stack;
     stack.asOf = asDate(document, "asOf", "root");
+    if (document.contains("spotLag")) {
+        const Json& lags = document.at("spotLag");
+        if (!lags.is_object()) {
+            fail("root.spotLag", "must be an object mapping currency to a settlement lag");
+        }
+        for (auto it = lags.begin(); it != lags.end(); ++it) {
+            if (!it.value().is_number_integer()) {
+                fail("root.spotLag." + it.key(), "settlement lag must be an integer");
+            }
+            const int lag = it.value().get<int>();
+            if (lag < 0) {
+                fail("root.spotLag." + it.key(), "settlement lag must be non-negative");
+            }
+            stack.spotLag[it.key()] = lag;
+        }
+    }
+    if (document.contains("fx")) {
+        const Json& fx = document.at("fx");
+        if (!fx.is_object()) {
+            fail("root.fx", "must be an object with a 'spots' array");
+        }
+        if (fx.contains("spots")) {
+            const Json& spots = fx.at("spots");
+            if (!spots.is_array()) {
+                fail("root.fx.spots", "must be an array");
+            }
+            for (std::size_t i = 0; i < spots.size(); ++i) {
+                const std::string where = "root.fx.spots[" + std::to_string(i) + "]";
+                const Json& spotNode = spots[i];
+                if (!spotNode.is_object()) {
+                    fail(where, "spot must be an object");
+                }
+                std::string base;
+                std::string quote;
+                if (spotNode.contains("base") || spotNode.contains("quote")) {
+                    base = asString(spotNode, "base", where);
+                    quote = asString(spotNode, "quote", where);
+                } else {
+                    const std::string pair = asString(spotNode, "pair", where);
+                    if (pair.size() != 6) {
+                        fail(where, "'pair' must be a six-letter base+quote string");
+                    }
+                    base = pair.substr(0, 3);
+                    quote = pair.substr(3, 3);
+                }
+                FXDescriptor descriptor(base, quote, stack.asOf.toIso());
+                if (!descriptor.hasKnownCurrencies()) {
+                    fail(where, "unknown base or quote currency '" + descriptor.pair() + "'");
+                }
+                const double spot = asDouble(spotNode, "spot", where);
+                if (!(spot > 0.0)) {
+                    fail(where, "'spot' must be positive");
+                }
+                for (const FxSpotSpec& existing : stack.fxSpots) {
+                    if (existing.descriptor.pair() == descriptor.pair()) {
+                        fail(where, "duplicate FX spot for pair '" + descriptor.pair() + "'");
+                    }
+                }
+                stack.fxSpots.push_back(FxSpotSpec{std::move(descriptor), spot});
+            }
+        }
+    }
     const Json& curves = require(document, "curves", "root");
     if (!curves.is_array() || curves.empty()) {
         fail("root", "field 'curves' must be a non-empty array");
@@ -521,8 +708,45 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
         spec.key = asKey(require(node, "key", where), where + ".key");
         const std::string roleName = std::string(curveRoleToName(spec.key.role));
         if (spec.key.role != CurveRole::Discount && spec.key.role != CurveRole::Forecast &&
-            spec.key.role != CurveRole::TenorBasis && spec.key.role != CurveRole::IborOisBasis) {
+            spec.key.role != CurveRole::TenorBasis && spec.key.role != CurveRole::IborOisBasis &&
+            spec.key.role != CurveRole::XccyBasis) {
             fail(where, "curve role '" + roleName + "' is not configurable");
+        }
+        const auto spotLagIt = stack.spotLag.find(spec.key.currency);
+        if (spotLagIt != stack.spotLag.end()) {
+            spec.spotLag = spotLagIt->second;
+        }
+        if (node.contains("xccy")) {
+            if (spec.key.role != CurveRole::XccyBasis) {
+                fail(where, "'xccy' is only valid for XccyBasis curves");
+            }
+            const Json& xccyNode = node.at("xccy");
+            if (!xccyNode.is_object()) {
+                fail(where, "'xccy' must be an object");
+            }
+            if (xccyNode.contains("pair")) {
+                spec.xccy.pair = asString(xccyNode, "pair", where + ".xccy");
+                if (spec.xccy.pair.size() != 6) {
+                    fail(where + ".xccy",
+                         "'pair' must be a six-letter base+quote string (e.g. \"EURUSD\")");
+                }
+            }
+            if (xccyNode.contains("notional")) {
+                spec.xccy.notional = notionalModeFromName(
+                    asString(xccyNode, "notional", where + ".xccy"), where + ".xccy");
+            }
+            if (xccyNode.contains("basisLeg")) {
+                spec.xccy.basisLeg =
+                    legFromName(asString(xccyNode, "basisLeg", where + ".xccy"), where + ".xccy");
+            }
+            if (xccyNode.contains("resetLeg")) {
+                spec.xccy.resetLeg =
+                    legFromName(asString(xccyNode, "resetLeg", where + ".xccy"), where + ".xccy");
+            }
+            if (xccyNode.contains("isFxBaseCollateral")) {
+                spec.xccy.isFxBaseCollateral =
+                    asBool(xccyNode, "isFxBaseCollateral", where + ".xccy");
+            }
         }
         if (node.contains("parent")) {
             spec.hasParent = true;
@@ -664,6 +888,7 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
             fail(where, "unsupported bootstrap method '" + spec.bootstrapMethod + "'");
         }
         const bool forecast = spec.key.role == CurveRole::Forecast;
+        const bool xccy = spec.key.role == CurveRole::XccyBasis;
         const char* listName = forecast ? "forecastPillars" : "pillars";
         const Json& pillarNodes = require(node, listName, where);
         if (!pillarNodes.is_array() || pillarNodes.empty()) {
@@ -671,7 +896,7 @@ CurveStackSpec parseCurveStackSpec(const std::string& jsonText) {
         }
         for (std::size_t k = 0; k < pillarNodes.size(); ++k) {
             const std::string pillarWhere = where + "." + listName + "[" + std::to_string(k) + "]";
-            PillarSpec pillar = parsePillarSpec(pillarNodes[k], pillarWhere, forecast);
+            PillarSpec pillar = parsePillarSpec(pillarNodes[k], pillarWhere, forecast, xccy);
             if (forecast) {
                 spec.forecastPillars.push_back(std::move(pillar));
             } else {
@@ -728,6 +953,8 @@ PillarKind toDiscountKind(PillarSpec::Kind kind) {
             return PillarKind::OisSwap;
         case PillarSpec::Kind::Irs:
         case PillarSpec::Kind::BasisSwap:
+        case PillarSpec::Kind::FxSwap:
+        case PillarSpec::Kind::XccySwap:
             break;
     }
     throw std::invalid_argument(
@@ -748,6 +975,8 @@ ForecastPillar::Kind toForecastKind(PillarSpec::Kind kind) {
             return ForecastPillar::Kind::BasisSwap;
         case PillarSpec::Kind::Repo:
         case PillarSpec::Kind::OisSwap:
+        case PillarSpec::Kind::FxSwap:
+        case PillarSpec::Kind::XccySwap:
             break;
     }
     throw std::invalid_argument(
@@ -823,6 +1052,78 @@ ForecastPillar toForecastPillar(const PillarSpec& pillar) {
             out.basis.businessDayConvention = pillar.businessDayConvention;
             break;
     }
+    return out;
+}
+
+/// Settlement lag of a currency, defaulting to the T+2 majors convention.
+int currencySpotLag(const CurveStackSpec& stack, const std::string& currency) {
+    const auto it = stack.spotLag.find(currency);
+    return it != stack.spotLag.end() ? it->second : 2;
+}
+
+/// FX-side mapping: resolves the pair spot and both currencies' settlement
+/// lags; an omitted near date settles at the joint spot date.
+FxSwapPillar toFxSwapPillar(const CurveStackSpec& stack, const PillarSpec& pillar,
+                            const XccyCurveSpec& xccy, const std::string& where) {
+    FxSwapPillar out;
+    out.start = pillar.start;
+    out.maturity = pillar.maturity;
+    out.points = pillar.fxPoints;
+    out.outright = pillar.fxOutright;
+    out.convention = pillar.fxConvention;
+    out.dayCounter = pillar.quoteDayCounter;
+    out.isFxBaseCollateral =
+        pillar.isFxBaseCollateralSet ? pillar.isFxBaseCollateral : xccy.isFxBaseCollateral;
+    const std::string pair = pillar.fxPair.empty() ? xccy.pair : pillar.fxPair;
+    if (pair.size() != 6) {
+        fail(where, "FxSwap pillars require a 'pair' or a curve-level 'xccy.pair'");
+    }
+    const std::string base = pair.substr(0, 3);
+    const std::string quote = pair.substr(3, 3);
+    for (const FxSpotSpec& spot : stack.fxSpots) {
+        if (spot.descriptor.pair() == pair) {
+            out.spot = spot.spot;
+            break;
+        }
+    }
+    if (!(out.spot > 0.0)) {
+        fail(where, "missing FX spot for pair '" + pair + "'");
+    }
+    if (out.start.serial() == 0) {
+        const int baseLag = currencySpotLag(stack, base);
+        const int quoteLag = currencySpotLag(stack, quote);
+        out.start =
+            datetime::spotDate(stack.asOf, datetime::Calendar::weekendsOnly(), baseLag, quoteLag);
+    }
+    if (!(out.start < out.maturity)) {
+        fail(where, "FxSwap pillar maturity must be after the near date");
+    }
+    return out;
+}
+
+/// Xccy-side mapping: curve-level pair conventions plus the per-pillar leg
+/// tenor, calendar, day count and payment lag.
+XccyPillar toXccyPillar(const PillarSpec& pillar, const XccyCurveSpec& xccy) {
+    XccyPillar out;
+    out.maturity = pillar.maturity;
+    out.spread = pillar.quote;
+    const bool baseCollateral =
+        pillar.isFxBaseCollateralSet ? pillar.isFxBaseCollateral : xccy.isFxBaseCollateral;
+    const bool basisOnBase = xccy.basisLeg == "Base";
+    out.spreadOnForeignLeg = basisOnBase ? !baseCollateral : baseCollateral;
+    const bool resetOnBase = xccy.resetLeg == "Base";
+    out.resetForeignLeg = resetOnBase ? !baseCollateral : baseCollateral;
+    out.notional = pillar.xccyNotionalSet ? pillar.xccyNotional : xccy.notional;
+    out.foreignTenor = pillar.foreignTenor;
+    out.domesticTenor = pillar.domesticTenor;
+    out.foreignCalendar = pillar.foreignCalendar;
+    out.domesticCalendar = pillar.domesticCalendar;
+    out.foreignDayCounter = pillar.foreignDayCounter;
+    out.domesticDayCounter = pillar.domesticDayCounter;
+    out.foreignPaymentLag = pillar.foreignPaymentLag;
+    out.domesticPaymentLag = pillar.domesticPaymentLag;
+    out.foreignBusinessDayConvention = pillar.businessDayConvention;
+    out.domesticBusinessDayConvention = pillar.businessDayConvention;
     return out;
 }
 
@@ -1149,12 +1450,19 @@ std::vector<BuiltCurve> buildStack(const CurveStackSpec& stack) {
         const CurveSpec& spec = stack.curves[i];
         const std::string where = "buildStack: curve '" + keyLabel(spec.key) + "'";
         const bool forecast = spec.key.role == CurveRole::Forecast;
+        const bool xccyBasis = spec.key.role == CurveRole::XccyBasis;
+        const bool usesParent = forecast || xccyBasis;
         if (forecast && !spec.hasParent) {
             throw std::invalid_argument("CurveConfig: " + where +
                                         " is missing parent: forecast curves must declare a "
                                         "'parent' curve");
         }
-        if (!forecast && spec.hasParent) {
+        if (xccyBasis && !spec.hasParent) {
+            throw std::invalid_argument("CurveConfig: " + where +
+                                        " is missing parent: XccyBasis curves must declare a "
+                                        "'parent' discount curve");
+        }
+        if (!usesParent && spec.hasParent) {
             throw std::invalid_argument("CurveConfig: " + where +
                                         " is not a forecast curve and must not declare a parent");
         }
@@ -1168,9 +1476,14 @@ std::vector<BuiltCurve> buildStack(const CurveStackSpec& stack) {
                 throw std::invalid_argument("CurveConfig: " + where +
                                             " cannot be its own parent (self-reference)");
             }
+            if (xccyBasis && stack.curves[parentIndex[i]].key.role != CurveRole::Discount) {
+                throw std::invalid_argument("CurveConfig: " + where + " references parent curve '" +
+                                            keyLabel(spec.parent) +
+                                            "' that is not a discount curve");
+            }
         }
         if (spec.hasDiscount) {
-            if (!forecast) {
+            if (!usesParent) {
                 throw std::invalid_argument(
                     "CurveConfig: " + where +
                     " is not a forecast curve and must not declare a discount curve");
@@ -1257,6 +1570,32 @@ std::vector<BuiltCurve> buildStack(const CurveStackSpec& stack) {
                 buildForecastCurve(stack, spec, parentHandle, discount, references);
             handles[index] = CurveHandle::make(
                 std::make_shared<const SpreadCurve<double, CurveHandle>>(std::move(forecast)));
+        } else if (spec.key.role == CurveRole::XccyBasis) {
+            const std::string where = "buildStack: curve '" + keyLabel(spec.key) + "'";
+            const DiscountCurve<double>* domesticDiscount =
+                discountCurves[parentIndex[index]].get();
+            const DiscountCurve<double>* domesticForecast =
+                discountIndex[index] != kNoCurve ? discountCurves[discountIndex[index]].get()
+                                                 : domesticDiscount;
+            std::vector<XccyMixedPillar> pillars;
+            pillars.reserve(spec.pillars.size());
+            for (const PillarSpec& pillar : spec.pillars) {
+                if (pillar.kind == PillarSpec::Kind::FxSwap) {
+                    pillars.emplace_back(toFxSwapPillar(stack, pillar, spec.xccy, where));
+                } else if (pillar.kind == PillarSpec::Kind::XccySwap) {
+                    pillars.emplace_back(toXccyPillar(pillar, spec.xccy));
+                } else {
+                    throw std::invalid_argument("CurveConfig: " + where +
+                                                " pillars must be FxSwap or XccySwap");
+                }
+            }
+            auto discountCurve =
+                std::make_shared<const DiscountCurve<double>>(bootstrapMixedXccyDiscountCurve(
+                    *domesticDiscount, *domesticForecast, stack.asOf, spec.zeroDayCounter,
+                    spec.space, spec.scheme, pillars, spec.accuracy, spec.tension,
+                    spec.switchIndex));
+            discountCurves[index] = discountCurve;
+            handles[index] = CurveHandle::make(std::move(discountCurve));
         } else {
             auto discountCurve =
                 std::make_shared<const DiscountCurve<double>>(buildCurve(stack, spec, references));

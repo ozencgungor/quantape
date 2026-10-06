@@ -58,7 +58,8 @@ quantape_register_test(test_curve)
 add_executable(test_curve_config test_curve_config.cpp)
 target_link_libraries(test_curve_config PRIVATE quantape)
 target_compile_definitions(test_curve_config PRIVATE
-    CURVE_CONFIG_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/data/usd_ois_config.json")
+    CURVE_CONFIG_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/data/usd_ois_config.json"
+    FX_CONFIG_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/data/fx_config.json")
 quantape_set_warnings(test_curve_config)
 quantape_register_test(test_curve_config)
 
@@ -143,6 +144,14 @@ add_executable(test_fx_quote test_fx_quote.cpp)
 target_link_libraries(test_fx_quote PRIVATE quantape)
 quantape_set_warnings(test_fx_quote)
 quantape_register_test(test_fx_quote)
+
+# FX pricing, reset-aware cross-currency risk rows and FX stack risk; the
+# double/var/fvar<var> gates instantiate Stan scalars.
+add_executable(test_fx_pricing test_fx_pricing.cpp)
+target_link_libraries(test_fx_pricing PRIVATE quantape)
+quantape_enable_stan(test_fx_pricing)
+quantape_set_warnings(test_fx_pricing)
+quantape_register_test(test_fx_pricing)
 
 # --- AD and Stan-backed ------------------------------------------------------
 add_executable(test_ad test_ad.cpp)

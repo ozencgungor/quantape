@@ -8,9 +8,13 @@
 #include "quantape/markets/Curves/CurveBuilder.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
+#include "quantape/markets/Curves/XccyBasisBuilder.h"
+#include "quantape/markets/Data/FxQuote.h"
+#include "quantape/markets/Descriptors/FXDescriptor.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -31,15 +35,22 @@ namespace quantape::markets {
 /// One configured bootstrap instrument for either curve side. `kind` selects
 /// the concrete instrument and which convention fields apply: discount curves
 /// use `Deposit`, `Repo`, `Fra`, `Future` and `OisSwap`; forecast curves use
-/// `Deposit`, `Fra`, `Future`, `Irs` and `BasisSwap`. Simple money-market
-/// quotes (`Deposit`, `Fra`, `Future`) use `calendar` and `quoteDayCounter`;
-/// `Irs` uses the float/fixed conventions; `BasisSwap` uses `floatTenor`,
-/// `calendar` and `quoteDayCounter`, with `quote` carrying the basis spread;
-/// `OisSwap` uses `calendar`, `quoteDayCounter`, `fixedTenor` and `paymentLag`.
-/// `start` is required for discount `Fra`/`Future` and forecast `Future`.
-/// `convexityAdjustmentSet` and `fraConvexityExponentSet` record whether the
-/// optional fields were present, since an explicit zero adjustment differs
-/// from an omitted one.
+/// `Deposit`, `Fra`, `Future`, `Irs` and `BasisSwap`; cross-currency curves
+/// use `FxSwap` and `XccySwap`. Simple money-market quotes (`Deposit`, `Fra`,
+/// `Future`) use `calendar` and `quoteDayCounter`; `Irs` uses the float/fixed
+/// conventions; `BasisSwap` uses `floatTenor`, `calendar` and
+/// `quoteDayCounter`, with `quote` carrying the basis spread; `OisSwap` uses
+/// `calendar`, `quoteDayCounter`, `fixedTenor` and `paymentLag`. `start` is
+/// required for discount `Fra`/`Future` and forecast `Future`. `convexityAdjustmentSet`
+/// and `fraConvexityExponentSet` record whether the optional fields were
+/// present, since an explicit zero adjustment differs from an omitted one.
+///
+/// `FxSwap` pillars read `fxPoints` or `fxOutright` per `fxConvention` and
+/// reference the pair from `fxPair` or the curve-level `xccy.pair`; spot lag
+/// settlement resolves their `start` when omitted. `XccySwap` pillars read
+/// `quote` (or the `spread` alias) and the foreign/domestic leg conventions,
+/// with the curve-level `xccy` spec supplying notional, basis leg and
+/// collateral direction unless the pillar overrides them.
 struct PillarSpec {
     enum class Kind : std::uint8_t {
         Deposit,
@@ -49,11 +60,13 @@ struct PillarSpec {
         OisSwap,
         Irs,
         BasisSwap,
+        FxSwap,
+        XccySwap,
     };
 
     Kind kind = Kind::Deposit;
     datetime::Date maturity;
-    datetime::Date start; ///< FRA start / future fixing / OIS effective date
+    datetime::Date start; ///< FRA start / future fixing / OIS effective / FxSwap near date
     double quote = 0.0;   ///< Simple rate, par swap rate, basis spread or futures rate (decimal)
     double convexityAdjustment = 0.0;              ///< Futures: added to the fitted forward rate
     bool convexityAdjustmentSet = false;           ///< Futures: explicit adjustment present
@@ -75,6 +88,37 @@ struct PillarSpec {
     datetime::DayCounter floatDayCounter{datetime::DayCount::Actual360};
     datetime::DayCounter fixedDayCounter{datetime::DayCount::Thirty360BondBasis};
     bool spreadOnParentLeg = true;
+
+    double fxPoints = 0.0;   ///< FxSwap: quoted forward points (price difference from spot)
+    double fxOutright = 0.0; ///< FxSwap: quoted far outright
+    QuoteConvention fxConvention = QuoteConvention::Points; ///< FxSwap: quote convention
+    std::string fxPair;                 ///< FxSwap: base+quote pair ("EURUSD") override
+    bool isFxBaseCollateral = false;    ///< FxSwap/XccySwap: base leg is the collateral leg
+    bool isFxBaseCollateralSet = false; ///< XccySwap: explicit per-pillar collateral override
+    XccyNotionalMode xccyNotional = XccyNotionalMode::Const; ///< XccySwap: notional override
+    bool xccyNotionalSet = false; ///< XccySwap: explicit per-pillar notional override
+    datetime::Period foreignTenor{3, datetime::TimeUnit::Months};  ///< XccySwap: foreign leg tenor
+    datetime::Period domesticTenor{3, datetime::TimeUnit::Months}; ///< XccySwap: domestic leg tenor
+    datetime::Calendar foreignCalendar{};  ///< XccySwap: foreign leg calendar
+    datetime::Calendar domesticCalendar{}; ///< XccySwap: domestic leg calendar
+    datetime::DayCounter foreignDayCounter{datetime::DayCount::Actual360};
+    datetime::DayCounter domesticDayCounter{datetime::DayCount::Actual360};
+    int foreignPaymentLag = 0;  ///< XccySwap: foreign coupon payment lag in business days
+    int domesticPaymentLag = 0; ///< XccySwap: domestic coupon payment lag in business days
+};
+
+/// Cross-currency defaults shared by the pillars of one `XccyBasis` curve:
+/// the base+quote pair FxSwap pillars reference, the notional convention, the
+/// leg carrying the quoted basis and the collateral direction
+/// (`isFxBaseCollateral`). `basisLeg`/`resetLeg` name the leg as `Base` or
+/// `Quote`; the spread/reset then lands on the non-collateral foreign leg when
+/// the named leg is the base and the base is not collateral, and vice versa.
+struct XccyCurveSpec {
+    std::string pair; ///< Default base+quote pair for FxSwap pillars ("EURUSD")
+    XccyNotionalMode notional = XccyNotionalMode::Const;
+    std::string basisLeg = "Base";   ///< Leg carrying the quoted basis: "Base" or "Quote"
+    std::string resetLeg = "Base";   ///< MtM resetting leg: "Base" or "Quote"
+    bool isFxBaseCollateral = false; ///< Base currency is the collateral currency
 };
 
 /// Curve-level shifted-lognormal FRA convexity (optional).
@@ -106,6 +150,7 @@ struct CurveSpec {
     CurveKey discount;
     bool hasParent = false;
     bool hasDiscount = false;
+    int spotLag = 2; ///< Settlement lag of the curve currency (resolved from the stack)
     datetime::DayCounter zeroDayCounter{datetime::DayCount::Actual365Fixed};
     InterpolationSpace space = InterpolationSpace::LogDiscount;
     InterpolationScheme scheme = InterpolationScheme::Linear;
@@ -117,11 +162,22 @@ struct CurveSpec {
     std::vector<PillarSpec> forecastPillars;
     ConvexitySpec convexity;
     FraConvexitySpec fraConvexity;
+    XccyCurveSpec xccy;
 };
 
-/// Whole stack snapshot (as-of date plus curve specs).
+/// One configured FX spot: the corrected base/quote descriptor plus the spot
+/// rate (quote units per base unit).
+struct FxSpotSpec {
+    FXDescriptor descriptor;
+    double spot = 0.0;
+};
+
+/// Whole stack snapshot (as-of date, per-currency settlement lags, configured
+/// FX spots and curve specs).
 struct CurveStackSpec {
     datetime::Date asOf;
+    std::map<std::string, int> spotLag; ///< Currency -> settlement lag in business days
+    std::vector<FxSpotSpec> fxSpots;    ///< Spot per base+quote pair
     std::vector<CurveSpec> curves;
 };
 

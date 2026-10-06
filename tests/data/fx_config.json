@@ -1,0 +1,46 @@
+{
+  "asOf": "2026-09-29",
+  "spotLag": { "USD": 2, "EUR": 2 },
+  "fx": {
+    "spots": [
+      { "pair": "EURUSD", "spot": 1.10 }
+    ]
+  },
+  "curves": [
+    {
+      "key": { "currency": "USD", "role": "Discount", "collateral": "USD" },
+      "zeroDayCounter": "ACT/365F",
+      "interpolation": { "space": "LogDiscount", "scheme": "Linear" },
+      "pillars": [
+        { "maturity": "2027-03-29", "kind": "Deposit", "quote": 0.0432,
+          "quoteDayCounter": "ACT/360", "calendar": "NoHolidays" },
+        { "maturity": "2027-09-29", "kind": "OisSwap", "quote": 0.0405,
+          "quoteDayCounter": "ACT/365F", "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" } },
+        { "maturity": "2028-09-29", "kind": "OisSwap", "quote": 0.0395,
+          "quoteDayCounter": "ACT/365F", "calendar": "NoHolidays",
+          "fixedTenor": { "length": 1, "unit": "Years" } }
+      ]
+    },
+    {
+      "key": { "currency": "EUR", "role": "XccyBasis", "collateral": "USD" },
+      "parent": { "currency": "USD", "role": "Discount", "collateral": "USD" },
+      "zeroDayCounter": "ACT/365F",
+      "interpolation": { "space": "LogDiscount", "scheme": "Linear" },
+      "xccy": { "pair": "EURUSD", "notional": "Const", "basisLeg": "Base",
+                "isFxBaseCollateral": false },
+      "pillars": [
+        { "maturity": "2027-03-29", "kind": "FxSwap", "points": 0.0125,
+          "convention": "Points" },
+        { "maturity": "2027-09-29", "kind": "XccySwap", "spread": 0.0011,
+          "foreignTenor": { "length": 3, "unit": "Months" },
+          "domesticTenor": { "length": 3, "unit": "Months" },
+          "foreignCalendar": "NoHolidays", "domesticCalendar": "NoHolidays" },
+        { "maturity": "2028-09-29", "kind": "XccySwap", "spread": 0.0013,
+          "foreignTenor": { "length": 3, "unit": "Months" },
+          "domesticTenor": { "length": 3, "unit": "Months" },
+          "foreignCalendar": "NoHolidays", "domesticCalendar": "NoHolidays" }
+      ]
+    }
+  ]
+}

@@ -58,9 +58,17 @@ namespace quantape::markets {
 /// Its output entry is the node-space hedge residual after every quote row, so
 /// a forecast curve whose own quotes are not in the stack is reported without
 /// dropping its sensitivity. `labelPrefix` heads the emitted point labels.
+/// `nodeCount` pins the solved nodes explicitly: `0` keeps the curve-native
+/// count, while a positive value lets a factor publish fewer values than its
+/// anchor view exposes (an FX spot block solves one value on a two-node
+/// anchor). When `fixedLabel` is set the factor has no dated node grid and
+/// every solved node reports under that label and `fixedBucket`.
 struct StackFactorInput {
     std::string labelPrefix;
     datetime::DayCounter nodeDayCounter; ///< Clock of the native node grid
+    std::size_t nodeCount = 0;           ///< Solved nodes; 0 = curve->size() - 1
+    std::string fixedLabel;              ///< Fixed point label (dated grid absent)
+    std::string fixedBucket;             ///< Fixed maturity bucket for the fixed label
 };
 
 /// One curve of a general stack tree: native quotes, node sensitivities and
@@ -80,6 +88,21 @@ struct StackCurveInput {
     std::vector<double> dVdNodes; ///< dV/d(zeta_i); size == curve->size(), node 0 unused
     StackCurveView::Ptr discount; ///< Exogenous discounting; null uses the parent view
 };
+
+/// Solved node count of a factor block: the explicit `nodeCount` when set,
+/// otherwise the anchor view's native count (its size minus the t = 0 node).
+std::size_t stackFactorNodeCount(const StackCurveInput& input);
+
+/// Two-node anchor view for a factor with no natural curve grid (an FX spot
+/// value). The identity instrument rows ignore the curve values, so the anchor
+/// only supplies block identity and scratch storage.
+StackCurveView::Ptr makeFxFactorAnchorView();
+
+/// One-node FX spot factor block: a two-node anchor whose single solved node
+/// carries `dVdSpot`, reported as `FxSpot <pair>` under the `FxSpot` bucket and
+/// the `CurveRole::FxSpot` role. The node vector keeps the engine layout with
+/// node 0 unused, i.e. `dVdNodes = {0, dV/dS}`.
+StackCurveInput makeFxSpotFactorInput(StackCurveView::Ptr anchor, double dVdSpot, std::string pair);
 
 /// Assembled stack quote system over native node coordinates: per-curve block
 /// offsets and the row-major instrument Jacobian `F = d r / d zeta`.
@@ -161,6 +184,23 @@ struct StackQuoteGamma {
     }
 };
 
+/// One FX risk point of the side table: the pair, the reporting role, the
+/// quote-space spot delta and the diagonal gamma when a Hessian is supplied.
+struct FxRiskPoint {
+    std::string pair;
+    std::string label;
+    CurveRole role = CurveRole::FxSpot;
+    double delta = 0.0;
+    double gamma = 0.0;
+};
+
+/// FX greeks side table over the solved risk entries: every `FxSpot`/`FxVol`
+/// point of the stack table becomes one entry keyed by pair (parsed from the
+/// fixed `FxSpot <pair>` / `FxVol <pair> ...` label). When `gamma` is supplied
+/// its matching quote diagonal fills the second derivative.
+std::vector<FxRiskPoint> fxRiskTable(const std::vector<StackRiskEntry>& entries,
+                                     const StackQuoteGamma* gamma = nullptr);
+
 struct StackChildInput {
     CurveRole role = CurveRole::Forecast;
     const SpreadCurve<double>* curve = nullptr;
@@ -197,7 +237,9 @@ datetime::Date forecastNodeDate(const datetime::DayCounter& zeroDayCounter,
                                 const datetime::Date& referenceDate, double t);
 
 /// Quote points of a factor block: one `<prefix> <tag>` point per solved node,
-/// aged on the factor's own node clock. The caller fills each point's `delta`.
+/// aged on the factor's own node clock. A factor with a fixed label reports
+/// every solved node under that label and `fixedBucket` instead. The caller
+/// fills each point's `delta`.
 void appendFactorMetadata(const StackCurveInput& input, const datetime::Date& referenceDate,
                           std::vector<QuotePoint>& points);
 
@@ -442,7 +484,10 @@ stackQuoteRiskXccy(const DiscountCurve<double>& root, const std::vector<CurvePil
         StackCurveInput input;
         input.curve = view;
         input.role = role;
-        input.factor = StackFactorInput{std::string(labelPrefix), nodeDayCounter};
+        StackFactorInput factor;
+        factor.labelPrefix = std::string(labelPrefix);
+        factor.nodeDayCounter = nodeDayCounter;
+        input.factor = std::move(factor);
         input.dVdNodes.assign(view->size(), 0.0);
         if (direct != nullptr) {
             if (direct->size() != view->size()) {
