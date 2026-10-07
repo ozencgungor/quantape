@@ -7,6 +7,7 @@
 #include "quantape/datetime/Schedule.h"
 #include "quantape/datetime/TimeConversion.h"
 #include "quantape/instruments/IrInstruments.h"
+#include "quantape/instruments/PillarVariants.h"
 #include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/SpreadCurve.h"
@@ -91,17 +92,8 @@ struct CurvePillar {
 
 /// One par basis-swap pillar (IBOR vs OIS or IBOR vs IBOR, spread on the
 /// parent or child leg per `spreadOnParentLeg`) for building a spread curve
-/// over a parent.
-struct BasisPillar {
-    datetime::Date maturity;
-    double spread = 0.0;           ///< Quoted basis spread (decimal)
-    bool spreadOnParentLeg = true; ///< Quote convention: spread on the OIS parent leg
-    datetime::Period floatTenor{3, datetime::TimeUnit::Months};
-    datetime::DayCounter quoteDayCounter{datetime::DayCount::Actual360};
-    datetime::Calendar calendar{};
-    datetime::BusinessDayConvention businessDayConvention =
-        datetime::BusinessDayConvention::ModifiedFollowing;
-};
+/// over a parent; the instrument type carries the quote algebra.
+using BasisPillar = instruments::BasisSwap;
 
 /// Consecutive business-day fixing dates over `[effective, maturity]`, used by
 /// averaged overnight futures; re-exported from the scalar math header.
@@ -110,23 +102,9 @@ using pricing::businessDayFixings;
 /// One par fixed-vs-floating IRS pillar on a forecast curve: the floating leg
 /// fixes on the forecast curve, the fixed leg and all discounting use the
 /// exogenous discount curve (the parent in a standard stack). Fixed and
-/// floating schedules may differ.
-struct IrsPillar {
-    datetime::Date maturity;
-    datetime::Date start;          ///< Effective date (past for seasoned swaps)
-    bool firstCouponFixed = false; ///< First floating coupon already fixed
-    double firstCouponRate = 0.0;  ///< Known first floating coupon rate
-    double quote = 0.0;            ///< Par rate (decimal)
-    datetime::Period floatTenor{3, datetime::TimeUnit::Months};
-    datetime::Calendar floatCalendar{};
-    datetime::DayCounter floatDayCounter{datetime::DayCount::Actual360};
-    datetime::Period fixedTenor{1, datetime::TimeUnit::Years};
-    datetime::Calendar fixedCalendar{};
-    datetime::DayCounter fixedDayCounter{datetime::DayCount::Thirty360BondBasis};
-    datetime::BusinessDayConvention businessDayConvention =
-        datetime::BusinessDayConvention::ModifiedFollowing;
-    int paymentLag = 0; ///< Calendar-day payment lag, then business-day adjusted
-};
+/// floating schedules may differ; the instrument type carries the quote
+/// algebra.
+using IrsPillar = instruments::Irs;
 
 /// Pillar maturity adjusted on its calendar and business-day convention.
 inline datetime::Date adjustedMaturity(const CurvePillar& pillar) {
@@ -187,39 +165,6 @@ inline std::string riskMaturityTag(const datetime::Date& adjustedMaturity, doubl
     return std::to_string(std::lround(t * 12.0)) + "M";
 }
 
-namespace detail {
-
-/// Adapter that presents one OIS pillar as a plain bootstrap instrument: risk
-/// maturity and target from the pillar, the par rate from its prepared coupon
-/// times through the shared money-market algebra. OIS keeps its tagged-pillar
-/// adapter until it lands as a plain instrument.
-class OisPillarInstrument {
-public:
-    OisPillarInstrument(datetime::Date date, double target,
-                        std::vector<pricing::OisCouponTimes> coupons)
-        : m_date(date), m_target(target), m_coupons(std::move(coupons)) {}
-
-    datetime::Date date() const { return m_date; }
-    double target() const { return m_target; }
-
-    template <typename ScalarT, typename CurveSetT>
-    ScalarT impliedQuote(const CurveSetT& curves) const {
-        return pricing::impliedOisParRate<ScalarT>(m_coupons, curves);
-    }
-
-private:
-    datetime::Date m_date;
-    double m_target = 0.0;
-    std::vector<pricing::OisCouponTimes> m_coupons;
-};
-
-} // namespace detail
-
-/// Closed-set discount-curve bootstrap instrument: the four money-market
-/// families as plain-data instruments plus the OIS adapter.
-using DiscountInstrument = Ladder<instruments::Deposit, instruments::Repo, instruments::Fra,
-                                  instruments::Future, detail::OisPillarInstrument>;
-
 /// Adapter from the tagged `CurvePillar` POD to the concept instrument: quote
 /// times are prepared once per instrument (never per Brent step) with the
 /// caller's zero clock, and `date()` is the instrument's risk maturity.
@@ -231,6 +176,7 @@ inline DiscountInstrument toInstrument(const CurvePillar& pillar,
         case PillarKind::Deposit: {
             instruments::Deposit out;
             out.maturity = pillar.maturity;
+            out.start = pillar.start;
             out.calendar = pillar.calendar;
             out.businessDayConvention = pillar.businessDayConvention;
             out.quoteDayCounter = pillar.quoteDayCounter;
@@ -241,6 +187,7 @@ inline DiscountInstrument toInstrument(const CurvePillar& pillar,
         case PillarKind::Repo: {
             instruments::Repo out;
             out.maturity = pillar.maturity;
+            out.start = pillar.start;
             out.calendar = pillar.calendar;
             out.businessDayConvention = pillar.businessDayConvention;
             out.quoteDayCounter = pillar.quoteDayCounter;
@@ -280,8 +227,18 @@ inline DiscountInstrument toInstrument(const CurvePillar& pillar,
                 effective, pillar.maturity, pillar.fixedTenor, pillar.calendar,
                 pillar.businessDayConvention, pillar.paymentLag, pillar.quoteDayCounter,
                 pillar.firstCouponFixed, pillar.firstCouponRate, referenceDate, zeroDayCounter);
-            return DiscountInstrument{Instrument{detail::OisPillarInstrument(
-                pillarRiskMaturity(pillar), pillar.quote, std::move(coupons))}};
+            detail::OisPillarInstrument ois(pillarRiskMaturity(pillar), pillar.quote,
+                                            std::move(coupons));
+            ois.maturity = pillar.maturity;
+            ois.start = pillar.start;
+            ois.quoteDayCounter = pillar.quoteDayCounter;
+            ois.calendar = pillar.calendar;
+            ois.fixedTenor = pillar.fixedTenor;
+            ois.paymentLag = pillar.paymentLag;
+            ois.firstCouponFixed = pillar.firstCouponFixed;
+            ois.firstCouponRate = pillar.firstCouponRate;
+            ois.businessDayConvention = pillar.businessDayConvention;
+            return DiscountInstrument{Instrument{std::move(ois)}};
         }
     }
     throw std::invalid_argument("impliedQuote: unknown pillar kind");
@@ -309,32 +266,8 @@ inline double legAnnuity(const DiscountT& discount, const datetime::Date& effect
                          const datetime::DayCounter& dayCounter,
                          datetime::BusinessDayConvention businessDayConvention, int paymentLag,
                          const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Schedule schedule(effective, maturity, tenor, calendar, businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    double annuity = 0.0;
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        const double tau = datetime::yearFraction(dates[k - 1], dates[k], dayCounter);
-        const datetime::Date payDate =
-            calendar.advance(dates[k], datetime::Period(paymentLag, datetime::TimeUnit::Days),
-                             businessDayConvention);
-        const double tPay = datetime::yearFraction(valuationDate, payDate, zeroDayCounter);
-        annuity += tau * discount.discount(tPay);
-    }
-    return annuity;
-}
-
-/// Fixed-leg annuity of an IRS pillar over the discount curve.
-template <typename DiscountT>
-    requires CurveProvider<DiscountT, double>
-inline double fixedAnnuity(const DiscountT& discount, const IrsPillar& pillar,
-                           const datetime::Date& referenceDate,
-                           const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    return legAnnuity(discount, effective, referenceDate, pillar.maturity, pillar.fixedTenor,
-                      pillar.fixedCalendar, pillar.fixedDayCounter, pillar.businessDayConvention,
-                      pillar.paymentLag, zeroDayCounter);
+    return pricing::legAnnuity(discount, effective, valuationDate, maturity, tenor, calendar,
+                               dayCounter, businessDayConvention, paymentLag, zeroDayCounter);
 }
 
 /// Par rate of a fixed-vs-floating IRS: the floating forwards come from
@@ -345,63 +278,9 @@ template <typename ForecastT, typename DiscountT>
 inline double impliedIrsRate(const ForecastT& forecast, const DiscountT& discount,
                              const IrsPillar& pillar, const datetime::Date& referenceDate,
                              const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule floatSchedule(effective, pillar.maturity, pillar.floatTenor,
-                                           pillar.floatCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = floatSchedule.dates();
-    double floatPv = 0.0;
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        const double tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.floatDayCounter);
-        if (!(tau > 0.0)) {
-            throw std::invalid_argument("impliedIrsRate: non-positive float accrual");
-        }
-        const datetime::Date payDate = pillar.floatCalendar.advance(
-            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        const double tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        const double discountPay = discount.discount(tPay);
-        if (k == 1 && pillar.firstCouponFixed) {
-            floatPv += tau * discountPay * pillar.firstCouponRate;
-            continue;
-        }
-        const double tPrevious =
-            datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-        const double tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-        if (!(tPrevious >= 0.0) || !(tAccrual > 0.0)) {
-            throw std::invalid_argument(
-                "impliedIrsRate: coupons before the reference date must be fixed");
-        }
-        const double forward =
-            (forecast.discount(tPrevious) / forecast.discount(tAccrual) - 1.0) / tau;
-        floatPv += tau * discountPay * forward;
-    }
-    const double annuity = fixedAnnuity(discount, pillar, referenceDate, zeroDayCounter);
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("impliedIrsRate: non-positive fixed annuity");
-    }
-    return floatPv / annuity;
-}
-
-/// Two-IRS convention: the basis spread is the difference of two par IRS
-/// rates sharing the same fixed schedule.
-inline double basisSpreadAsIrsRateDifference(double firstIrsRate, double secondIrsRate) {
-    return firstIrsRate - secondIrsRate;
-}
-
-/// Convert a single-IRS basis spread into the two-IRS convention:
-/// `Delta_twoIrs = Delta_singleIrs * annuitySecondLeg / annuityFixedSchedule`.
-inline double basisSpreadConventionSwitch(double singleSpread, double secondLegAnnuity,
-                                          double fixedScheduleAnnuity) {
-    if (!(fixedScheduleAnnuity > 0.0)) {
-        throw std::invalid_argument(
-            "basisSpreadConventionSwitch: non-positive fixed schedule annuity");
-    }
-    if (!(secondLegAnnuity > 0.0)) {
-        throw std::invalid_argument("basisSpreadConventionSwitch: non-positive second leg annuity");
-    }
-    return singleSpread * secondLegAnnuity / fixedScheduleAnnuity;
+    const pricing::IrsQuoteTimes times =
+        pricing::makeIrsQuoteTimes(pillar, referenceDate, zeroDayCounter);
+    return pricing::impliedIrsParRate<double>(times, forecast, discount);
 }
 
 /// Implied par basis spread of `pillar` against a child spread curve: the
@@ -415,41 +294,13 @@ inline double impliedBasisSpread(const SpreadCurve<double, ParentT>& child,
                                  const datetime::Date& referenceDate,
                                  const datetime::DayCounter& zeroDayCounter,
                                  const DiscountT* discountCurve = nullptr) {
-    const datetime::Schedule schedule(referenceDate, pillar.maturity, pillar.floatTenor,
-                                      pillar.calendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
+    const pricing::BasisQuoteTimes times =
+        pricing::makeBasisQuoteTimes(pillar, referenceDate, zeroDayCounter);
     const auto discountAt = [&](double t) -> double {
         return discountCurve != nullptr ? discountCurve->discount(t) : child.parent().discount(t);
     };
-    double weightedChild = 0.0;
-    double weightedParent = 0.0;
-    double annuity = 0.0;
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        const double tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
-        if (!(tau > 0.0)) {
-            throw std::invalid_argument("impliedBasisSpread: non-positive float accrual");
-        }
-        const double tPrev = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-        const double t = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-        if (!(tPrev >= 0.0) || !(t > 0.0)) {
-            throw std::invalid_argument(
-                "impliedBasisSpread: coupons before the reference date must be fixed");
-        }
-        const double df = discountAt(t);
-        const double forwardChild = (child.discount(tPrev) / child.discount(t) - 1.0) / tau;
-        const double forwardParent =
-            (parentForecast.discount(tPrev) / parentForecast.discount(t) - 1.0) / tau;
-        weightedChild += tau * df * forwardChild;
-        weightedParent += tau * df * forwardParent;
-        annuity += tau * df;
-    }
-    if (!(annuity > 0.0)) {
-        throw std::invalid_argument("impliedBasisSpread: non-positive annuity");
-    }
-    const double level = (weightedChild - weightedParent) / annuity;
-    return pillar.spreadOnParentLeg ? level : -level;
+    return pricing::impliedBasisSpread<double>(times, child, parentForecast, discountAt,
+                                               pillar.spreadOnParentLeg);
 }
 
 /// Overload using the child's own parent for the parent forecast.
@@ -615,40 +466,6 @@ struct PillarQuoteTimes {
     std::vector<pricing::OisCouponTimes> oisCoupons;
 };
 
-/// Precomputed quote inputs of one IRS float coupon.
-struct IrsFloatCouponTimes {
-    double tau = 0.0;
-    double tPay = 0.0;
-    double tPrevious = 0.0;
-    double tAccrual = 0.0;
-    bool firstFixed = false;
-    double firstRate = 0.0;
-};
-
-/// Precomputed quote inputs of one fixed-leg annuity coupon.
-struct IrsAnnuityCouponTimes {
-    double tau = 0.0;
-    double tPay = 0.0;
-};
-
-/// Precomputed quote inputs of one basis-swap coupon.
-struct BasisCouponTimes {
-    double tau = 0.0;
-    double tPrev = 0.0;
-    double t = 0.0;
-};
-
-/// Everything a forecast-curve bootstrap residual needs for one pillar.
-struct ForecastQuoteTimes {
-    ForecastPillar::Kind kind = ForecastPillar::Kind::Deposit;
-    SimpleForwardQuoteTimes simple;
-    FutureQuoteTimes future;
-    std::vector<IrsFloatCouponTimes> floatCoupons;
-    std::vector<IrsAnnuityCouponTimes> annuityCoupons;
-    std::vector<BasisCouponTimes> basisCoupons;
-    bool spreadOnParentLeg = true;
-};
-
 inline PillarQuoteTimes makePillarQuoteTimes(const CurvePillar& pillar,
                                              const datetime::Date& referenceDate,
                                              const datetime::DayCounter& zeroDayCounter) {
@@ -703,276 +520,6 @@ inline DoubleT evaluatePillarQuote(const PillarQuoteTimes& times,
     throw std::invalid_argument("impliedQuote: unknown pillar kind");
 }
 
-inline SimpleForwardQuoteTimes
-makeSimpleForwardQuoteTimes(const ForecastPillar& pillar, const datetime::Date& referenceDate,
-                            const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date start = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Date maturity =
-        pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention);
-    return pricing::prepareSimpleForwardTimes(start, maturity, referenceDate,
-                                              pillar.quoteDayCounter, zeroDayCounter);
-}
-
-inline std::vector<IrsFloatCouponTimes>
-makeIrsFloatCouponTimes(const IrsPillar& pillar, const datetime::Date& referenceDate,
-                        const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule floatSchedule(effective, pillar.maturity, pillar.floatTenor,
-                                           pillar.floatCalendar, pillar.businessDayConvention,
-                                           datetime::DateGeneration::Forward, false,
-                                           datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = floatSchedule.dates();
-    std::vector<IrsFloatCouponTimes> coupons;
-    coupons.reserve(dates.size() - 1);
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        IrsFloatCouponTimes coupon;
-        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.floatDayCounter);
-        if (!(coupon.tau > 0.0)) {
-            throw std::invalid_argument("impliedIrsRate: non-positive float accrual");
-        }
-        const datetime::Date payDate = pillar.floatCalendar.advance(
-            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        if (k == 1 && pillar.firstCouponFixed) {
-            coupon.firstFixed = true;
-            coupon.firstRate = pillar.firstCouponRate;
-        } else {
-            coupon.tPrevious = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-            coupon.tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-            if (!(coupon.tPrevious >= 0.0) || !(coupon.tAccrual > 0.0)) {
-                throw std::invalid_argument(
-                    "impliedIrsRate: coupons before the reference date must be fixed");
-            }
-        }
-        coupons.push_back(coupon);
-    }
-    return coupons;
-}
-
-inline std::vector<IrsAnnuityCouponTimes>
-makeIrsAnnuityCouponTimes(const IrsPillar& pillar, const datetime::Date& referenceDate,
-                          const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
-    const datetime::Schedule schedule(effective, pillar.maturity, pillar.fixedTenor,
-                                      pillar.fixedCalendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    std::vector<IrsAnnuityCouponTimes> coupons;
-    coupons.reserve(dates.size() - 1);
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        IrsAnnuityCouponTimes coupon;
-        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.fixedDayCounter);
-        const datetime::Date payDate = pillar.fixedCalendar.advance(
-            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
-            pillar.businessDayConvention);
-        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
-        coupons.push_back(coupon);
-    }
-    return coupons;
-}
-
-inline std::vector<BasisCouponTimes>
-makeBasisCouponTimes(const BasisPillar& pillar, const datetime::Date& referenceDate,
-                     const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Schedule schedule(referenceDate, pillar.maturity, pillar.floatTenor,
-                                      pillar.calendar, pillar.businessDayConvention,
-                                      datetime::DateGeneration::Forward, false,
-                                      datetime::BusinessDayConvention::Unadjusted);
-    const std::vector<datetime::Date>& dates = schedule.dates();
-    std::vector<BasisCouponTimes> coupons;
-    coupons.reserve(dates.size() - 1);
-    for (std::size_t k = 1; k < dates.size(); ++k) {
-        BasisCouponTimes coupon;
-        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
-        if (!(coupon.tau > 0.0)) {
-            throw std::invalid_argument("impliedBasisSpread: non-positive float accrual");
-        }
-        coupon.tPrev = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
-        coupon.t = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
-        if (!(coupon.tPrev >= 0.0) || !(coupon.t > 0.0)) {
-            throw std::invalid_argument(
-                "impliedBasisSpread: coupons before the reference date must be fixed");
-        }
-        coupons.push_back(coupon);
-    }
-    return coupons;
-}
-
-inline ForecastQuoteTimes makeForecastQuoteTimes(const ForecastPillar& pillar,
-                                                 const datetime::Date& referenceDate,
-                                                 const datetime::DayCounter& zeroDayCounter) {
-    ForecastQuoteTimes times;
-    times.kind = pillar.kind;
-    switch (pillar.kind) {
-        case ForecastPillar::Kind::Deposit:
-        case ForecastPillar::Kind::Fra:
-            times.simple = makeSimpleForwardQuoteTimes(pillar, referenceDate, zeroDayCounter);
-            break;
-        case ForecastPillar::Kind::Future:
-            times.future = pricing::prepareFutureTimes(
-                pillar.start, pillar.maturity, pillar.calendar, pillar.quoteDayCounter,
-                pillar.futureStyle, pillar.averagingStyle, pillar.convexityAdjustment,
-                referenceDate, zeroDayCounter, "impliedForecastFuture");
-            break;
-        case ForecastPillar::Kind::Irs:
-            times.floatCoupons = makeIrsFloatCouponTimes(pillar.irs, referenceDate, zeroDayCounter);
-            times.annuityCoupons =
-                makeIrsAnnuityCouponTimes(pillar.irs, referenceDate, zeroDayCounter);
-            break;
-        case ForecastPillar::Kind::BasisSwap:
-            times.basisCoupons = makeBasisCouponTimes(pillar.basis, referenceDate, zeroDayCounter);
-            times.spreadOnParentLeg = pillar.basis.spreadOnParentLeg;
-            break;
-    }
-    return times;
-}
-
-/// Forecast-curve quote from precomputed times; the arithmetic mirrors
-/// `impliedForecastQuote` and its swap helpers exactly.
-template <typename ForecastT, typename DiscountT>
-inline double evaluateForecastQuote(const ForecastQuoteTimes& times, const ForecastT& forecast,
-                                    const DiscountT& discounting) {
-    switch (times.kind) {
-        case ForecastPillar::Kind::Deposit:
-        case ForecastPillar::Kind::Fra: {
-            const SimpleForwardQuoteTimes& simple = times.simple;
-            return (forecast.discount(simple.t1) / forecast.discount(simple.t2) - 1.0) / simple.tau;
-        }
-        case ForecastPillar::Kind::Future: {
-            const FutureQuoteTimes& future = times.future;
-            if (future.style == FutureQuoteTimes::Style::AveragedCompounded) {
-                double accumulated = 1.0;
-                double previousDiscount = 0.0;
-                bool hasPrevious = false;
-                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
-                    if (!hasPrevious) {
-                        previousDiscount = forecast.discount(future.previousTimes[k]);
-                    }
-                    const double currentDiscount = forecast.discount(future.currentTimes[k]);
-                    accumulated *= previousDiscount / currentDiscount;
-                    previousDiscount = currentDiscount;
-                    hasPrevious = true;
-                }
-                return (accumulated - 1.0) / future.tau + future.convexity;
-            }
-            if (future.style == FutureQuoteTimes::Style::AveragedArithmetic) {
-                double sum = 0.0;
-                double previousDiscount = 0.0;
-                bool hasPrevious = false;
-                for (std::size_t k = 0; k < future.previousTimes.size(); ++k) {
-                    if (!hasPrevious) {
-                        previousDiscount = forecast.discount(future.previousTimes[k]);
-                    }
-                    const double currentDiscount = forecast.discount(future.currentTimes[k]);
-                    sum += (previousDiscount / currentDiscount - 1.0) / future.accrualTaus[k];
-                    previousDiscount = currentDiscount;
-                    hasPrevious = true;
-                }
-                return sum / static_cast<double>(future.previousTimes.size()) + future.convexity;
-            }
-            return (forecast.discount(future.t1) / forecast.discount(future.t2) - 1.0) /
-                       future.tau +
-                   future.convexity;
-        }
-        case ForecastPillar::Kind::Irs: {
-            double floatPv = 0.0;
-            double previousAccrualDiscount = 0.0;
-            bool hasPrevious = false;
-            for (const IrsFloatCouponTimes& coupon : times.floatCoupons) {
-                const double discountPay = discounting.discount(coupon.tPay);
-                if (coupon.firstFixed) {
-                    floatPv += coupon.tau * discountPay * coupon.firstRate;
-                    hasPrevious = false;
-                    continue;
-                }
-                const double previousDiscount =
-                    hasPrevious ? previousAccrualDiscount : forecast.discount(coupon.tPrevious);
-                const double accrualDiscount = forecast.discount(coupon.tAccrual);
-                const double forward = (previousDiscount / accrualDiscount - 1.0) / coupon.tau;
-                floatPv += coupon.tau * discountPay * forward;
-                previousAccrualDiscount = accrualDiscount;
-                hasPrevious = true;
-            }
-            double annuity = 0.0;
-            for (const IrsAnnuityCouponTimes& coupon : times.annuityCoupons) {
-                annuity += coupon.tau * discounting.discount(coupon.tPay);
-            }
-            if (!(annuity > 0.0)) {
-                throw std::invalid_argument("impliedIrsRate: non-positive fixed annuity");
-            }
-            return floatPv / annuity;
-        }
-        case ForecastPillar::Kind::BasisSwap: {
-            const auto& parentForecast = forecast.parent();
-            double weightedChild = 0.0;
-            double weightedParent = 0.0;
-            double annuity = 0.0;
-            double previousChild = 0.0;
-            double previousParent = 0.0;
-            bool hasPrevious = false;
-            for (const BasisCouponTimes& coupon : times.basisCoupons) {
-                const double df = discounting.discount(coupon.t);
-                const double childAtPrevious =
-                    hasPrevious ? previousChild : forecast.discount(coupon.tPrev);
-                const double childAtCoupon = forecast.discount(coupon.t);
-                const double parentAtPrevious =
-                    hasPrevious ? previousParent : parentForecast.discount(coupon.tPrev);
-                const double parentAtCoupon = parentForecast.discount(coupon.t);
-                const double forwardChild = (childAtPrevious / childAtCoupon - 1.0) / coupon.tau;
-                const double forwardParent = (parentAtPrevious / parentAtCoupon - 1.0) / coupon.tau;
-                weightedChild += coupon.tau * df * forwardChild;
-                weightedParent += coupon.tau * df * forwardParent;
-                annuity += coupon.tau * df;
-                previousChild = childAtCoupon;
-                previousParent = parentAtCoupon;
-                hasPrevious = true;
-            }
-            if (!(annuity > 0.0)) {
-                throw std::invalid_argument("impliedBasisSpread: non-positive annuity");
-            }
-            const double level = (weightedChild - weightedParent) / annuity;
-            return times.spreadOnParentLeg ? level : -level;
-        }
-    }
-    throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
-}
-
-/// Adapter that presents an IRS or basis-swap forecast pillar as a bootstrap
-/// instrument; the swap legs still need a double forecast curve.
-class ForecastSwapInstrument {
-public:
-    ForecastSwapInstrument(const ForecastPillar& pillar, const datetime::Date& referenceDate,
-                           const datetime::DayCounter& zeroDayCounter)
-        : m_date(forecastPillarRiskMaturity(pillar)), m_target(forecastPillarTarget(pillar)),
-          m_times(makeForecastQuoteTimes(pillar, referenceDate, zeroDayCounter)) {}
-
-    datetime::Date date() const { return m_date; }
-    double target() const { return m_target; }
-
-    template <typename ScalarT, typename CurveSetT>
-    ScalarT impliedQuote(const CurveSetT& curves) const {
-        if constexpr (std::is_same_v<ScalarT, double>) {
-            return evaluateForecastQuote(m_times, curves.forecastCurve, curves.discountCurve);
-        } else {
-            (void)curves;
-            throw std::invalid_argument(
-                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
-        }
-    }
-
-private:
-    datetime::Date m_date;
-    double m_target = 0.0;
-    ForecastQuoteTimes m_times;
-};
-
-/// Forecast-curve bootstrap instrument: money-market pillars evaluate through
-/// the plain-data instruments; IRS and basis pillars keep the swap adapter.
-using ForecastInstrument =
-    Ladder<instruments::Deposit, instruments::Fra, instruments::Future, ForecastSwapInstrument>;
-
 /// Adapter from the tagged `ForecastPillar` POD to the concept instrument:
 /// quote times are prepared once per instrument with the caller's zero clock.
 inline ForecastInstrument forecastToInstrument(const ForecastPillar& pillar,
@@ -983,6 +530,7 @@ inline ForecastInstrument forecastToInstrument(const ForecastPillar& pillar,
         case ForecastPillar::Kind::Deposit: {
             instruments::Deposit out;
             out.maturity = pillar.maturity;
+            out.start = pillar.start;
             out.calendar = pillar.calendar;
             out.businessDayConvention = pillar.businessDayConvention;
             out.quoteDayCounter = pillar.quoteDayCounter;
@@ -1016,10 +564,18 @@ inline ForecastInstrument forecastToInstrument(const ForecastPillar& pillar,
             out.prepare(referenceDate, zeroDayCounter, "impliedForecastFuture");
             return ForecastInstrument{Instrument{std::move(out)}};
         }
-        case ForecastPillar::Kind::Irs:
-        case ForecastPillar::Kind::BasisSwap:
-            return ForecastInstrument{
-                Instrument{ForecastSwapInstrument(pillar, referenceDate, zeroDayCounter)}};
+        case ForecastPillar::Kind::Irs: {
+            (void)forecastPillarTarget(pillar);
+            instruments::Irs out = pillar.irs;
+            out.prepareForecast(referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case ForecastPillar::Kind::BasisSwap: {
+            (void)forecastPillarTarget(pillar);
+            instruments::BasisSwap out = pillar.basis;
+            out.prepareForecast(referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
     }
     throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
 }
@@ -1157,9 +713,11 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
     }
     std::vector<detail::ForecastInstrument> instruments;
     instruments.reserve(count);
+    std::vector<double> targets(count);
     for (std::size_t i = 0; i < count; ++i) {
         instruments.push_back(
             detail::forecastToInstrument(pillars[i], referenceDate, zeroDayCounter));
+        targets[i] = instruments.back().target();
     }
     const auto quoteTrial = [&](const auto& trial, std::size_t i) {
         using ForecastT = std::decay_t<decltype(trial)>;
@@ -1200,7 +758,7 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
                     }
                     const SpreadCurve<double, ParentT> trial(parent, trialTimes, trialSpreads,
                                                              scheme, tension);
-                    cachedF = quoteTrial(trial, i) - instruments[i].target();
+                    cachedF = quoteTrial(trial, i) - targets[i];
                     cachedX = trialSpread;
                     cacheValid = true;
                     return cachedF;
@@ -1248,7 +806,7 @@ inline SpreadCurve<double, ParentT> bootstrapForecastCurve(
         const SpreadCurve<double, ParentT> curve(parent, times, values, scheme, tension);
         double worst = 0.0;
         for (std::size_t i = 0; i < count; ++i) {
-            const double check = quoteTrial(curve, i) - instruments[i].target();
+            const double check = quoteTrial(curve, i) - targets[i];
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {
@@ -1359,9 +917,13 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
     std::vector<DiscountInstrument> checkInstruments;
     solveInstruments.reserve(count);
     checkInstruments.reserve(count);
+    std::vector<double> solveTargets(count);
+    std::vector<double> checkTargets(count);
     for (std::size_t i = 0; i < count; ++i) {
         solveInstruments.push_back(toInstrument(pillars[i], referenceDate, trialZeroDayCounter));
+        solveTargets[i] = solveInstruments.back().target();
         checkInstruments.push_back(toInstrument(pillars[i], referenceDate, zeroDayCounter));
+        checkTargets[i] = checkInstruments.back().target();
     }
 
     const quantape::math::BrentSolver<double> solver;
@@ -1400,7 +962,7 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
                     detail::CurveTrialUpdater::setNode(*trialCurve, i + 1, trialZero);
                     cachedF = solveInstruments[i].template impliedQuote<double>(
                                   DiscountSet<DiscountCurve<double>>{*trialCurve}) -
-                              solveInstruments[i].target();
+                              solveTargets[i];
                     cachedX = trialZero;
                     cacheValid = true;
                     return cachedF;
@@ -1443,7 +1005,7 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
         for (std::size_t i = 0; i < count; ++i) {
             const double check = checkInstruments[i].template impliedQuote<double>(
                                      DiscountSet<DiscountCurve<double>>{curve}) -
-                                 checkInstruments[i].target();
+                                 checkTargets[i];
             if (!std::isfinite(check)) {
                 worst = 1e300;
             } else if (std::abs(check) > worst) {

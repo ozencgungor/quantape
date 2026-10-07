@@ -11,12 +11,15 @@
  */
 
 #include "quantape/markets/Curves/CurveBuilder.h"
+#include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/StackRisk.h"
 
 #include <cmath>
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "support/GtestSupport.h"
@@ -129,7 +132,7 @@ TEST(ForecastIrs, irsParRateSingleCurve) {
     // fixed annuity.
     CHECK_CLOSE("irs zero-spread identity", rate,
                 (1.0 - parent->discount(t)) /
-                    markets::fixedAnnuity(*parent, pillar, kReference, kZeroDc),
+                    pricing::fixedAnnuity(*parent, pillar, kReference, kZeroDc),
                 1e-12);
 }
 
@@ -212,17 +215,17 @@ TEST(ForecastIrs, irbsConventions) {
     // Two-IRS convention: difference of the two par rates, R_x - R_y.
     const double rateX = markets::impliedIrsRate(*childX, *parent, irs, kReference, kZeroDc);
     const double rateY = markets::impliedIrsRate(*childY, *parent, irs, kReference, kZeroDc);
-    const double two = markets::basisSpreadAsIrsRateDifference(rateX, rateY);
+    const double two = pricing::basisSpreadAsIrsRateDifference(rateX, rateY);
 
     // Convention switch: Delta_two = Delta_single * A_y / A_fixed.
     const double annuityY = markets::legAnnuity(
         *parent, kReference, kReference, maturity, basis.floatTenor, basis.calendar,
         basis.quoteDayCounter, basis.businessDayConvention, 0, kZeroDc);
-    const double annuityFixed = markets::fixedAnnuity(*parent, irs, kReference, kZeroDc);
+    const double annuityFixed = pricing::fixedAnnuity(*parent, irs, kReference, kZeroDc);
     CHECK_CLOSE("irbs convention switch", two,
-                markets::basisSpreadConventionSwitch(single, annuityY, annuityFixed), 1e-12);
+                pricing::basisSpreadConventionSwitch(single, annuityY, annuityFixed), 1e-12);
 
-    EXPECT_THROW((void)markets::basisSpreadConventionSwitch(single, annuityY, 0.0),
+    EXPECT_THROW((void)pricing::basisSpreadConventionSwitch(single, annuityY, 0.0),
                  std::invalid_argument);
 }
 
@@ -277,8 +280,10 @@ TEST(ForecastRisk, irsRiskRowsVsFiniteDifference) {
     std::vector<double> fRow;
     std::vector<double> parentRow;
     std::vector<double> discountRow;
-    markets::irsSwapJacobianRows(*child, *parent, *parent, pillar, kReference, kZeroDc, fRow,
-                                 parentRow, discountRow);
+    const auto childView = markets::StackCurveView::make(*child);
+    const auto parentView = markets::StackCurveView::make(*parent);
+    pricing::jacobianRow(pillar, *childView, *parentView, *parentView, kReference, kZeroDc, fRow,
+                         parentRow, discountRow);
 
     const double epsilon = 1e-6;
     const auto& spreadNodes = child->spreadNodes();
@@ -328,8 +333,9 @@ TEST(ForecastRisk, irsRiskRowsVsFiniteDifference) {
     const auto discountCopy = std::make_shared<DiscountCurve<double>>(*parent);
     std::vector<double> splitParentRow;
     std::vector<double> splitDiscountRow;
-    markets::irsSwapJacobianRows(*child, *parent, *discountCopy, pillar, kReference, kZeroDc, fRow,
-                                 splitParentRow, splitDiscountRow);
+    const auto discountView = markets::StackCurveView::make(*discountCopy);
+    pricing::jacobianRow(pillar, *childView, *parentView, *discountView, kReference, kZeroDc, fRow,
+                         splitParentRow, splitDiscountRow);
     for (std::size_t i = 1; i < parent->size(); ++i) {
         const auto bumpedParent = [&](double delta) {
             std::vector<double> zeros = parent->zeros();
@@ -458,9 +464,18 @@ TEST(ForecastRisk, simpleForecastStartGuard) {
         {
             const auto childView = markets::StackCurveView::make(*child);
             const auto parentView = markets::StackCurveView::make(*parent);
-            (void)markets::forecastSimpleJacobianRowsView(*childView, *parentView, *parentView,
-                                                          deposit, kReference, fRow, parentRow,
-                                                          discountRow);
+            const markets::ForecastInstrument instrument = markets::detail::riskInstrument(deposit);
+            std::visit(
+                [&](const auto& value) {
+                    using InstrumentT = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<InstrumentT, instruments::Irs>) {
+                        throw std::invalid_argument("swap row is not a simple quote");
+                    } else {
+                        pricing::jacobianRow(value, *childView, *parentView, *parentView,
+                                             kReference, fRow, parentRow, discountRow);
+                    }
+                },
+                instrument.instrument());
         },
         std::invalid_argument);
 }
@@ -701,8 +716,18 @@ TEST(ForecastFuture, futureRiskRowsVsFiniteDifference) {
         std::vector<double> viewOwn;
         std::vector<double> viewParent;
         std::vector<double> viewDiscount;
-        markets::forecastFutureJacobianRowsView(*childView, *parentView, *parentView, pillar,
-                                                kReference, viewOwn, viewParent, viewDiscount);
+        const markets::ForecastInstrument instrument = markets::detail::riskInstrument(pillar);
+        std::visit(
+            [&](const auto& value) {
+                using InstrumentT = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<InstrumentT, instruments::Irs>) {
+                    throw std::invalid_argument("swap row needs its zero clock");
+                } else {
+                    pricing::jacobianRow(value, *childView, *parentView, *parentView, kReference,
+                                         viewOwn, viewParent, viewDiscount);
+                }
+            },
+            instrument.instrument());
         CHECK_CLOSE_SEQ(styleCase.tag, viewOwn, fRow, 1e-15);
         CHECK_CLOSE_SEQ(styleCase.tag, viewParent, parentRow, 1e-15);
         EXPECT_TRUE(viewDiscount.size() == parent->size() - 1);
@@ -794,6 +819,10 @@ TEST(ForecastPillarValidation, pillarTargetValidation) {
     misplacedQuote.irs = irsPillar(kReference.plusYears(3));
     misplacedQuote.quote = 0.03;
     EXPECT_THROW((void)markets::forecastPillarTarget(misplacedQuote), std::invalid_argument);
+    EXPECT_THROW((void)markets::bootstrapForecastCurve(parent, nullptr, kReference, kZeroDc,
+                                                       InterpolationScheme::Linear,
+                                                       std::vector<ForecastPillar>{misplacedQuote}),
+                 std::invalid_argument);
 
     // Zero leg tenor is rejected for swap kinds.
     ForecastPillar noFixedTenor;
@@ -802,17 +831,29 @@ TEST(ForecastPillarValidation, pillarTargetValidation) {
     noFixedTenor.irs.quote = 0.03;
     noFixedTenor.irs.fixedTenor = datetime::Period(0, datetime::TimeUnit::Months);
     EXPECT_THROW((void)markets::forecastPillarTarget(noFixedTenor), std::invalid_argument);
+    EXPECT_THROW((void)markets::bootstrapForecastCurve(parent, nullptr, kReference, kZeroDc,
+                                                       InterpolationScheme::Linear,
+                                                       std::vector<ForecastPillar>{noFixedTenor}),
+                 std::invalid_argument);
 
     ForecastPillar topLevelBasis;
     topLevelBasis.kind = ForecastPillar::Kind::BasisSwap;
     topLevelBasis.maturity = kReference.plusYears(2);
     EXPECT_THROW((void)markets::forecastPillarTarget(topLevelBasis), std::invalid_argument);
+    EXPECT_THROW((void)markets::bootstrapForecastCurve(parent, nullptr, kReference, kZeroDc,
+                                                       InterpolationScheme::Linear,
+                                                       std::vector<ForecastPillar>{topLevelBasis}),
+                 std::invalid_argument);
 
     ForecastPillar noFloatTenor;
     noFloatTenor.kind = ForecastPillar::Kind::BasisSwap;
     noFloatTenor.basis = basisPillar(kReference.plusYears(2));
     noFloatTenor.basis.floatTenor = datetime::Period(0, datetime::TimeUnit::Months);
     EXPECT_THROW((void)markets::forecastPillarTarget(noFloatTenor), std::invalid_argument);
+    EXPECT_THROW((void)markets::bootstrapForecastCurve(parent, nullptr, kReference, kZeroDc,
+                                                       InterpolationScheme::Linear,
+                                                       std::vector<ForecastPillar>{noFloatTenor}),
+                 std::invalid_argument);
 
     // A money-market pillar without a maturity is rejected by the node helper.
     ForecastPillar missingMaturity;

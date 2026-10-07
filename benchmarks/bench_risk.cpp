@@ -410,6 +410,25 @@ void benchStack(const StackFixture& fixture, int reps) {
             markets::assembleStackQuoteSystem(fixture.inputs, fixture.reference);
         return system.jacobian.back();
     });
+    std::vector<double> ownRow;
+    std::vector<double> forecastParentRow;
+    std::vector<double> forecastDiscountRow;
+    bench("forecastPillarJacobianRows " + suffix, reps, [&] {
+        double sink = 0.0;
+        for (const ForecastPillar& pillar : fixture.childPillars) {
+            markets::forecastPillarJacobianRows(*fixture.child, pillar, fixture.reference, nullptr,
+                                                ownRow, forecastParentRow, forecastDiscountRow);
+            sink += ownRow.back();
+        }
+        return sink;
+    });
+    bench("assembleForecastJacobian " + suffix, reps, [&] {
+        std::vector<double> f;
+        std::vector<double> c;
+        markets::assembleForecastJacobian(*fixture.child, fixture.childPillars, fixture.reference,
+                                          nullptr, f, c);
+        return f.back() + c.back();
+    });
     bench("bumpStackInputs " + suffix, reps, [&] {
         const std::vector<markets::StackCurveInput> bumped =
             markets::bumpStackInputs(fixture.inputs, 0, 1, 1e-6);
@@ -563,6 +582,17 @@ void benchSingleCurve(int reps) {
     const std::vector<double> dVdZeros = fixture.dVdZerosAt(10.0);
     const std::vector<double> HZeta = fixture.nodeHessianAt(10.0);
     const std::string suffix = std::to_string(dim) + " pillars";
+    std::vector<double> row;
+    bench("pillarJacobianRow " + suffix, reps, [&] {
+        double sink = 0.0;
+        for (const CurvePillar& pillar : fixture.pillars) {
+            if (!markets::pillarJacobianRow(pillar, fixture.reference, *fixture.curve, row)) {
+                return 0.0;
+            }
+            sink += row.back();
+        }
+        return sink;
+    });
     bench("transformQuoteRisk " + suffix, reps, [&] {
         const markets::QuoteRisk risk = markets::transformQuoteRisk(*fixture.curve, fixture.pillars,
                                                                     fixture.reference, dVdZeros);
@@ -599,6 +629,21 @@ void benchAggregations(int reps) {
     });
 }
 
+void benchQuoteMetadata(int reps) {
+    StackFixture fixture(6, 6);
+    std::vector<markets::QuotePoint> points;
+    bench("appendStackQuoteMetadata discount", reps, [&] {
+        points.clear();
+        markets::appendStackQuoteMetadata(fixture.inputs[0], fixture.reference, points);
+        return points.back().delta + static_cast<double>(points.size());
+    });
+    bench("appendStackQuoteMetadata forecast", reps, [&] {
+        points.clear();
+        markets::appendStackQuoteMetadata(fixture.inputs[1], fixture.reference, points);
+        return points.back().delta + static_cast<double>(points.size());
+    });
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -615,6 +660,7 @@ int main(int argc, char** argv) {
     }
     benchSingleCurve(reps);
     benchAggregations(reps);
+    benchQuoteMetadata(reps);
     const XccyFixture xccyFixture(5);
     benchXccy(xccyFixture, reps);
     benchXccyStack(reps);

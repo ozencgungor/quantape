@@ -104,8 +104,17 @@ inline std::size_t locateSegment(const std::vector<double>& times, double t) {
     if (t >= times.back()) {
         return times.size() - 2;
     }
-    const auto it = std::upper_bound(times.begin(), times.end(), t);
-    return static_cast<std::size_t>(it - times.begin()) - 1;
+    std::size_t low = 0;
+    std::size_t high = times.size() - 1;
+    while (low + 1 < high) {
+        const std::size_t mid = low + (high - low) / 2;
+        if (times[mid] <= t) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
 }
 
 template <typename DoubleT>
@@ -439,6 +448,9 @@ public:
     /// continues its edge segments).
     DoubleT valueAt(const std::vector<double>& times, const std::vector<DoubleT>& values,
                     double t) const {
+        if (const auto* linear = std::get_if<LinearSchemeState<DoubleT>>(&m_storage)) {
+            return schemeValueOnSegment(*linear, times, values, locateSegment(times, t), t);
+        }
         return std::visit(
             [&](const auto& state) -> DoubleT {
                 using State = std::decay_t<decltype(state)>;
@@ -541,6 +553,10 @@ public:
             throw std::invalid_argument("DiscountCurve::spaceValueWeights: t outside node range");
         }
         const std::size_t i = locateSegment(times, t);
+        if (std::holds_alternative<LinearSchemeState<DoubleT>>(m_storage)) {
+            linearSpaceWeights(times, i, t, weights);
+            return;
+        }
         std::visit(
             [&](const auto& state) {
                 using State = std::decay_t<decltype(state)>;

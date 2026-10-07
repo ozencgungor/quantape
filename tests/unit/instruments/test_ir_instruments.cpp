@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -384,4 +385,84 @@ TEST_F(IrInstrumentsTest, cashflowsUseCurrencyAndFixedFlows) {
     ASSERT_EQ(futureFlows.size(), 1u);
     const double futureTau = kIndexDc.yearFraction(future.start, future.maturity);
     CHECK_CLOSE("future cashflow amount", futureFlows[0].amount, 1.0e6 * 0.04 * futureTau, 1e-9);
+}
+
+/// IRS and basis-swap instruments: metadata, prepared quote algebra and the
+/// double-only runtime contract that keeps the swap legs off the AD path.
+TEST_F(IrInstrumentsTest, irsAndBasisSwapMetadataAndDoubleOnlyContract) {
+    const mk::DiscountCurve<double> parent = makeCurve({0.0, 0.03, 0.032});
+    const auto parentPtr = std::make_shared<mk::DiscountCurve<double>>(parent);
+    const std::vector<double> spreadTimes{0.0, 1.0, 2.0};
+    const std::vector<double> spreads{0.0, 0.0008, 0.0010};
+    const mk::SpreadCurve<double> child(parentPtr, spreadTimes, spreads,
+                                        mk::InterpolationScheme::Linear);
+    const mk::ForecastSet<mk::SpreadCurve<double>, mk::DiscountCurve<double>> curves{child, parent};
+
+    inst::Irs irs;
+    irs.maturity = kReference.plusYears(2);
+    irs.floatTenor = dt::Period(3, dt::TimeUnit::Months);
+    irs.floatCalendar = kCalendar;
+    irs.floatDayCounter = kIndexDc;
+    irs.fixedTenor = dt::Period(1, dt::TimeUnit::Years);
+    irs.fixedCalendar = kCalendar;
+    irs.quote = mk::impliedIrsRate(child, parent, irs, kReference, kZeroDc);
+
+    EXPECT_EQ(inst::Irs::kindName(), "Irs");
+    EXPECT_TRUE(irs.date() == kCalendar.adjust(irs.maturity, irs.businessDayConvention));
+    EXPECT_EQ(irs.target(), irs.quote);
+
+    const inst::Irs preparedIrs = irs.prepareForecast(kReference, kZeroDc);
+    CHECK_CLOSE("irs member quote", preparedIrs.template impliedQuote<double>(curves), irs.quote,
+                1e-15);
+    CHECK_CLOSE("irs overload quote", pr::impliedIrsParRate<double>(preparedIrs, curves), irs.quote,
+                1e-15);
+
+    inst::BasisSwap basis;
+    basis.maturity = kReference.plusYears(2);
+    basis.floatTenor = dt::Period(3, dt::TimeUnit::Months);
+    basis.quoteDayCounter = kIndexDc;
+    basis.calendar = kCalendar;
+    basis.spread = mk::impliedBasisSpread(child, basis, kReference, kZeroDc);
+
+    EXPECT_EQ(inst::BasisSwap::kindName(), "Basis");
+    EXPECT_TRUE(basis.date() == kCalendar.adjust(basis.maturity, basis.businessDayConvention));
+    EXPECT_EQ(basis.target(), basis.spread);
+
+    const inst::BasisSwap preparedBasis = basis.prepareForecast(kReference, kZeroDc);
+    CHECK_CLOSE("basis member quote", preparedBasis.template impliedQuote<double>(curves),
+                basis.spread, 1e-15);
+    CHECK_CLOSE("basis overload quote", pr::impliedBasisSpread<double>(preparedBasis, curves),
+                basis.spread, 1e-15);
+
+    // The swap quotes are double-only: the runtime message is frozen.
+    try {
+        (void)preparedIrs.template impliedQuote<stan::math::var>(curves);
+        FAIL() << "irs var quote did not throw";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_STREQ(error.what(),
+                     "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+    }
+    try {
+        (void)preparedBasis.template impliedQuote<stan::math::var>(curves);
+        FAIL() << "basis var quote did not throw";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_STREQ(error.what(),
+                     "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+    }
+
+    // A matured accrual is rejected with the frozen per-instrument text.
+    inst::Irs matured = irs;
+    matured.start = kReference.plusMonths(-9);
+    matured.maturity = kReference.plusMonths(-3);
+    EXPECT_THROW((void)matured.prepareForecast(kReference, kZeroDc), std::invalid_argument);
+
+    // The known fixed leg materializes at the quoted rate.
+    const std::vector<inst::Cashflow> flows =
+        pr::irCashflows(irs, kReference, 1.0e6, inst::currencyFromCode("EUR"));
+    ASSERT_EQ(flows.size(), 2u);
+    const double firstTau =
+        datetime::yearFraction(kReference, kReference.plusYears(1), irs.fixedDayCounter);
+    CHECK_CLOSE("irs first fixed cashflow", flows[0].amount, 1.0e6 * irs.quote * firstTau, 1e-9);
+    EXPECT_EQ(inst::currencyCode(flows[0].currency), "EUR");
+    EXPECT_TRUE(flows[0].payDate > kReference);
 }

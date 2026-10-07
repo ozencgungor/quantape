@@ -109,6 +109,9 @@ public:
     /// Stored instrument alternative.
     const Instrument& instrument() const { return m_instrument; }
 
+    /// Stored instrument alternative (mutable).
+    Instrument& instrument() { return m_instrument; }
+
     /// Risk date of the stored alternative.
     datetime::Date date() const {
         return std::visit([](const auto& instrument) { return instrument.date(); }, m_instrument);

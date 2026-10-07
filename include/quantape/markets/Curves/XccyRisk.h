@@ -2,9 +2,9 @@
 
 #include "quantape/markets/Curves/StackCurveView.h"
 #include "quantape/markets/Curves/XccyBasisBuilder.h"
+#include "quantape/pricing/Xccy.h"
 
 #include <cstddef>
-#include <stdexcept>
 #include <vector>
 
 namespace quantape::markets {
@@ -26,31 +26,10 @@ namespace quantape::markets {
  * the same expression on an ancestor's node weights produces the ancestor
  * block row.
  *
- * Rows are returned per block, keyed by the view whose native nodes they are
- * expressed on, so the engine places each row by view identity. The quote
- * leg's blocks carry the quotient-rule term `dA`; the other leg's rows are
- * divided by the quote annuity only.
- *
- * A resetting-notional (`XccyNotionalMode::MtM`) leg replaces its const
- * notional term with the telescoped reset value
- *
- *   `sum_k adj_k (D_own(t_k) (1 + f_k tau_k) - D_own(t_{k-1}))`,
- *   `adj_k = D_other(t_{k-1}) / D_own(t_{k-1})`,
- *
- * where the resetting leg's own discount curve supplies `D_own`, the opposite
- * leg's discount curve `D_other` and the leg's forecast curve `f_k`. The rows
- * follow the product: the own-discount row is
- * `adj (1 + f tau) D(t2) (t1 w(t1) - t2 w(t2))`, the opposite-discount row is
- * `adj t1 w(t1) (D(t1) - D(t2) (1 + f tau))`, the forecast row is
- * `adj D(t2) ratio (-t1 w(t1) + t2 w(t2))` and the annuity rows are
- * unchanged. Both reset-leg choices are covered: a resetting foreign leg takes
- * the domestic discount as `D_other`, a resetting domestic leg takes the
- * foreign discount.
- *
- * `xccySwapJacobianRowsViewFiniteDifference` rebuilds each block by a bumped
- * view (following forecast parent chains) and central-differences the value
- * function, so it stays available as an independent reference for the
- * analytic rows and for the gamma curvature.
+ * The row algebra lives in `quantape/pricing/Xccy.h` over a templated view;
+ * this header keeps the view plumbing: the block keyed by view identity, the
+ * bumped-view reconstruction, the row-to-native-block map and the
+ * finite-difference reference.
  */
 
 /// Blocks a cross-currency child row references, by view identity. A reference
@@ -65,10 +44,7 @@ struct XccyRowInput {
 /// One row of the analytic cross-currency Jacobian, expressed on a stack
 /// block's native nodes. The engine places `row` into the block matched by
 /// `curve`'s view identity.
-struct XccyRowBlock {
-    const StackCurveView* curve = nullptr; ///< Block the row belongs to
-    std::vector<double> row;               ///< d r / d zeta over the block's nodes
-};
+using XccyRowBlock = pricing::XccyRowBlockT<StackCurveView>;
 
 /// Model-implied const-notional basis spread with the coupons discounted on
 /// the type-erased views. Mirrors the par condition of
@@ -81,41 +57,6 @@ double xccyBasisSpreadView(const StackCurveView& foreignDiscount,
                            const datetime::DayCounter& zeroDayCounter);
 
 namespace detail {
-
-/// Zero-node weights of `curve` at `t`; the fixed t = 0 node carries no risk.
-void xccyWeightsAt(const StackCurveView& curve, double t, std::vector<double>& out);
-
-/// Existing block of `curve`, or a new zero row in canonical order.
-XccyRowBlock& xccyRowBlock(std::vector<XccyRowBlock>& blocks, const StackCurveView& curve);
-
-/// Register a forecast curve and every ancestor of its parent chain.
-void xccyRegisterForecastChain(std::vector<XccyRowBlock>& blocks, const StackCurveView& forecast);
-
-/// Value, annuity and per-block node rows of one const-notional leg.
-struct XccyLegRows {
-    double value = 0.0;
-    double annuity = 0.0;
-    std::vector<XccyRowBlock> valueRows;   ///< dV/d zeta per block
-    std::vector<XccyRowBlock> annuityRows; ///< dA/d zeta per block
-};
-
-/// Analytic leg rows: each coupon contributes `df * ratio * (-tprev w(tprev) +
-/// taccrual w(taccrual))` on the forecast native and ancestor blocks and
-/// `tau * forward * dD(tpay)` on the discount block; the notional adds
-/// `dD(tStart) - dD(tEnd)`. With `resets` the notional term is replaced by the
-/// telescoped reset value and the reset rows are added on the discount,
-/// `otherDiscount` and forecast blocks; the annuity rows are unchanged.
-XccyLegRows xccyLegNodeRows(const datetime::Schedule& schedule,
-                            const datetime::DayCounter& accrualDayCounter,
-                            const StackCurveView& discount, const StackCurveView& forecast,
-                            const StackCurveView* otherDiscount, bool resets, int paymentLag,
-                            datetime::BusinessDayConvention businessDayConvention,
-                            const datetime::Date& referenceDate,
-                            const datetime::DayCounter& zeroDayCounter);
-
-/// The annuity row of `curve` if the leg references it, else null.
-const std::vector<double>* xccyAnnuityRow(const std::vector<XccyRowBlock>& blocks,
-                                          const StackCurveView& curve);
 
 /// A copy of `curve` (or of its parent chain) with `bumpedBase` replaced by
 /// `bumped`; null when `bumpedBase` is not `curve` or one of its ancestors.

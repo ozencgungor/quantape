@@ -3,13 +3,16 @@
 #include "quantape/markets/Curves/CurveRisk.h"
 #include "quantape/markets/Curves/StackRiskRows.h"
 #include "quantape/math/LinearAlgebra/DenseSolve.h"
+#include "quantape/pricing/Ir.h"
 
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace quantape::markets {
@@ -400,7 +403,7 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
         }
         if (!input.discountPillars.empty()) {
             for (const CurvePillar& pillar : input.discountPillars) {
-                if (!discountPillarJacobianRow(pillar, referenceDate, *input.curve, scratch)) {
+                if (!pillarJacobianRow(pillar, referenceDate, *input.curve, scratch)) {
                     throw std::invalid_argument("assembleStackQuoteSystem: degenerate pillar");
                 }
                 for (std::size_t i = 0; i < scratch.size(); ++i) {
@@ -417,30 +420,25 @@ void assembleStackQuoteSystemInto(const std::vector<StackCurveInput>& curves,
                                       const StackCurveView* discountWeights,
                                       std::vector<double>& ownRow, std::vector<double>& parentRow,
                                       std::vector<double>& discountRow) {
-            switch (pillar.kind) {
-                case ForecastPillar::Kind::Irs:
-                    irsSwapJacobianRowsView(*input.curve, parent, discount, pillar.irs,
-                                            referenceDate, ownRow, parentRow, discountRow,
-                                            parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::Deposit:
-                case ForecastPillar::Kind::Fra:
-                    forecastSimpleJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                   referenceDate, ownRow, parentRow, discountRow,
-                                                   parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::Future:
-                    forecastFutureJacobianRowsView(*input.curve, parent, discount, pillar,
-                                                   referenceDate, ownRow, parentRow, discountRow,
-                                                   parentWeights, discountWeights);
-                    return;
-                case ForecastPillar::Kind::BasisSwap:
-                    basisSwapJacobianRowsView(*input.curve, parent, discount, pillar.basis,
-                                              referenceDate, ownRow, parentRow, discountRow,
-                                              parentWeights, discountWeights);
-                    return;
-            }
-            throw std::invalid_argument("assembleStackQuoteSystem: unknown forecast pillar kind");
+            const ForecastInstrument instrument = detail::riskInstrument(pillar);
+            std::visit(
+                [&](const auto& value) {
+                    using InstrumentT = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<InstrumentT, instruments::Irs>) {
+                        pricing::jacobianRow(value, *input.curve, parent, discount, referenceDate,
+                                             discount.zeroDayCounter(), ownRow, parentRow,
+                                             discountRow, parentWeights, discountWeights);
+                    } else if constexpr (std::is_same_v<InstrumentT, instruments::BasisSwap>) {
+                        pricing::jacobianRow(value, *input.curve, parent, discount, referenceDate,
+                                             ownRow, parentRow, discountRow, parentWeights,
+                                             discountWeights);
+                    } else {
+                        pricing::jacobianRow(value, *input.curve, parent, discount, referenceDate,
+                                             ownRow, parentRow, discountRow, parentWeights,
+                                             discountWeights);
+                    }
+                },
+                instrument.instrument());
         };
         std::vector<double>& ownRow = ownRowScratch;
         std::vector<double>& parentRow = parentRowScratch;

@@ -17,7 +17,9 @@ CurveRiskReport
 curveRiskReport(const DiscountCurve<double>& curve, const std::vector<CurvePillar>& pillars,
                 const datetime::Date& referenceDate, const std::vector<double>& dVdZeros,
                 const CurveRiskReportOptions& options, const std::vector<double>* HVdZeros) {
-    const QuoteRisk risk = transformQuoteRisk(curve, pillars, referenceDate, dVdZeros);
+    std::vector<double> f;
+    const QuoteRisk risk =
+        detail::transformQuoteRiskAndJacobian(curve, pillars, referenceDate, dVdZeros, f);
     CurveRiskReport report;
     report.quoteDeltas = risk.quoteDeltas;
     report.quoteLabels.reserve(pillars.size());
@@ -54,7 +56,8 @@ curveRiskReport(const DiscountCurve<double>& curve, const std::vector<CurvePilla
         if (HVdZeros->size() != curve.size() * curve.size()) {
             throw std::invalid_argument("curveRiskReport: HVdZeros size mismatch");
         }
-        const QuoteGamma gamma = transformQuoteGamma(curve, pillars, referenceDate, *HVdZeros);
+        const QuoteGamma gamma =
+            detail::transformQuoteGammaFromJacobian(std::move(f), pillars.size(), *HVdZeros);
         report.gammaDiagonal.resize(pillars.size());
         for (std::size_t j = 0; j < pillars.size(); ++j) {
             report.gammaDiagonal[j] = gamma.at(j, j);

@@ -235,6 +235,20 @@ public:
             extrapolatedZeroWeights(t, weights);
             return;
         }
+        if (m_scheme == InterpolationScheme::Linear) {
+            // Only the segment's two boundary nodes carry weight; scaling the
+            // two nonzeros avoids the dense pass over the node grid.
+            weights.assign(m_times.size(), 0.0);
+            const std::size_t segment = detail::locateSegment(m_times, t);
+            detail::linearSpaceWeights(m_times, segment, t, weights);
+            if (m_space == InterpolationSpace::LogDiscount) {
+                const double invT = 1.0 / t;
+                weights[segment] *= m_times[segment] * invT;
+                weights[segment + 1] *= m_times[segment + 1] * invT;
+            }
+            weights.front() = 0.0;
+            return;
+        }
         spaceValueWeights(t, weights);
         if (m_space == InterpolationSpace::LogDiscount) {
             const double invT = 1.0 / t;

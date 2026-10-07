@@ -1,5 +1,6 @@
 #include "quantape/markets/Curves/CurveRisk.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -84,6 +85,81 @@ std::vector<double> solveDenseLu(const DenseLu& factors, const std::vector<doubl
     std::vector<double> x;
     solveDenseLuInto(factors, rhs, x);
     return x;
+}
+
+QuoteRisk transformQuoteRiskFromJacobian(const std::vector<double>& f, std::size_t m,
+                                         const std::vector<double>& dVdZeros) {
+    if (f.size() != m * m || dVdZeros.size() != m + 1) {
+        throw std::invalid_argument("transformQuoteRisk: size mismatch");
+    }
+    std::vector<double> fTranspose(m * m);
+    for (std::size_t j = 0; j < m; ++j) {
+        for (std::size_t i = 0; i < m; ++i) {
+            fTranspose[i * m + j] = f[j * m + i];
+        }
+    }
+    std::vector<double> g(m);
+    for (std::size_t i = 0; i < m; ++i) {
+        g[i] = dVdZeros[i + 1];
+    }
+    QuoteRisk result;
+    result.quoteDeltas = quantape::math::solveDense(std::move(fTranspose), m, g);
+    return result;
+}
+
+QuoteGamma transformQuoteGammaFromJacobian(std::vector<double> f, std::size_t m,
+                                           const std::vector<double>& HVdZeros) {
+    const std::size_t n = m + 1;
+    if (f.size() != m * m || HVdZeros.size() != n * n) {
+        throw std::invalid_argument("transformQuoteGamma: size mismatch");
+    }
+    // J = F^{-1} by one partial-pivoted LU factorization plus m
+    // back-substitutions, instead of m independent dense solves.
+    const DenseLu factors = factorDenseLu(std::move(f), m);
+    std::vector<double> jacobianInverse(m * m, 0.0);
+    std::vector<double> unit(m, 0.0);
+    std::vector<double> solution;
+    for (std::size_t column = 0; column < m; ++column) {
+        std::fill(unit.begin(), unit.end(), 0.0);
+        unit[column] = 1.0;
+        solveDenseLuInto(factors, unit, solution);
+        for (std::size_t k = 0; k < m; ++k) {
+            jacobianInverse[k * m + column] = solution[k];
+        }
+    }
+    // H_r = J^T H_zeta J, restricting H_zeta to the solved nodes.
+    std::vector<double> tmp(m * m, 0.0);
+    for (std::size_t i = 0; i < m; ++i) {
+        for (std::size_t b = 0; b < m; ++b) {
+            double sum = 0.0;
+            for (std::size_t a = 0; a < m; ++a) {
+                sum += HVdZeros[(i + 1) * n + (a + 1)] * jacobianInverse[a * m + b];
+            }
+            tmp[i * m + b] = sum;
+        }
+    }
+    QuoteGamma result;
+    result.dim = m;
+    result.hessian.assign(m * m, 0.0);
+    for (std::size_t i = 0; i < m; ++i) {
+        for (std::size_t j = 0; j < m; ++j) {
+            double sum = 0.0;
+            for (std::size_t a = 0; a < m; ++a) {
+                sum += jacobianInverse[a * m + i] * tmp[a * m + j];
+            }
+            result.hessian[i * m + j] = sum;
+        }
+    }
+    // Symmetrize: round-off in the two matrix products can leave an
+    // asymmetric residual even though the analytic transform is symmetric.
+    for (std::size_t i = 0; i < m; ++i) {
+        for (std::size_t j = i + 1; j < m; ++j) {
+            const double symmetric = 0.5 * (result.hessian[i * m + j] + result.hessian[j * m + i]);
+            result.hessian[i * m + j] = symmetric;
+            result.hessian[j * m + i] = symmetric;
+        }
+    }
+    return result;
 }
 
 } // namespace detail

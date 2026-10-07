@@ -285,8 +285,10 @@ TEST(SeasonedIrs, pricingAndRows) {
     std::vector<double> fRow;
     std::vector<double> parentRow;
     std::vector<double> discountRow;
-    markets::irsSwapJacobianRows(child, parent, parent, irs, kReference, kZeroDc, fRow, parentRow,
-                                 discountRow);
+    const auto childView = markets::StackCurveView::make(child);
+    const auto parentView = markets::StackCurveView::make(parent);
+    pricing::jacobianRow(irs, *childView, *parentView, *parentView, kReference, kZeroDc, fRow,
+                         parentRow, discountRow);
     const double epsilon = 1e-6;
     const auto& spreadNodes = child.spreadNodes();
     for (std::size_t k = 1; k < spreadNodes.zeros().size(); ++k) {
@@ -333,8 +335,9 @@ TEST(SeasonedIrs, pricingAndRows) {
     const auto discountCopy = std::make_shared<DiscountCurve<double>>(parent);
     std::vector<double> splitParentRow;
     std::vector<double> splitDiscountRow;
-    markets::irsSwapJacobianRows(child, parent, *discountCopy, irs, kReference, kZeroDc, fRow,
-                                 splitParentRow, splitDiscountRow);
+    const auto discountView = markets::StackCurveView::make(*discountCopy);
+    pricing::jacobianRow(irs, *childView, *parentView, *discountView, kReference, kZeroDc, fRow,
+                         splitParentRow, splitDiscountRow);
     for (std::size_t i = 1; i < parent.size(); ++i) {
         const auto bumpedParent = [&](double delta) {
             std::vector<double> zeros = parent.zeros();

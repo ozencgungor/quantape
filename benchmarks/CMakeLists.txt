@@ -13,6 +13,17 @@ add_executable(bench_curve bench_curve.cpp)
 target_link_libraries(bench_curve PRIVATE quantape)
 quantape_set_warnings(bench_curve)
 
+add_executable(bench_instruments bench_instruments.cpp)
+target_link_libraries(bench_instruments PRIVATE quantape)
+quantape_set_warnings(bench_instruments)
+
+# Allocation-tracking build of the instruments harness: same malloc shim as
+# bench_fx_alloc; use it for allocation counts, bench_instruments for timings.
+add_executable(bench_instruments_alloc bench_instruments.cpp)
+target_compile_definitions(bench_instruments_alloc PRIVATE QUANTAPE_INSTRUMENTS_ALLOC_COUNTS=1)
+target_link_libraries(bench_instruments_alloc PRIVATE quantape)
+quantape_set_warnings(bench_instruments_alloc)
+
 add_executable(bench_sde bench_sde.cpp)
 target_link_libraries(bench_sde PRIVATE quantape TBB::tbb)
 quantape_enable_stan_defs(bench_sde)

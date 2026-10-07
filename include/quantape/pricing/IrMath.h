@@ -8,8 +8,10 @@
 #include "quantape/datetime/TimeConversion.h"
 
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -90,11 +92,117 @@ struct ForecastDiscountProxy {
     decltype(auto) discount(double t) const { return curves.forecast(t); }
 };
 
+/// Cache key of a generated schedule: the constructor arguments that
+/// determine the dates, with the calendar identified by the address of its
+/// rule-set name (stable for each rule set, distinct between them).
+struct ScheduleKey {
+    std::int32_t effective = 0;
+    std::int32_t maturity = 0;
+    int tenorLength = 0;
+    datetime::TimeUnit tenorUnit = datetime::TimeUnit::Days;
+    const std::string* calendarName = nullptr;
+    datetime::BusinessDayConvention convention = datetime::BusinessDayConvention::Following;
+};
+
+/// Per-thread cache of generated forward schedules. Quote-time preparation and
+/// the risk-row builders rebuild the same schedule for a pillar on every
+/// materialization; the cache keeps one generated schedule per distinct key, so
+/// repeated preparations reuse the dates.
+class ScheduleCache {
+public:
+    const datetime::Schedule& get(const datetime::Date& effective, const datetime::Date& maturity,
+                                  const datetime::Period& tenor, const datetime::Calendar& calendar,
+                                  datetime::BusinessDayConvention convention) {
+        // A bootstrap run cycles through a bounded set of schedules, so the cap
+        // only trips for a long-lived caller that keeps inventing new reference
+        // dates; dropping the entries then bounds the footprint.
+        if (m_entries.size() >= kMaxEntries) {
+            m_entries.clear();
+        }
+        const ScheduleKey key{effective.serial(), maturity.serial(), tenor.length(),
+                              tenor.unit(),       &calendar.name(),  convention};
+        const auto generate = [&] {
+            return datetime::Schedule(effective, maturity, tenor, calendar, convention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+        };
+        for (CachedSchedule& entry : m_entries) {
+            if (entry.key.effective != key.effective || entry.key.maturity != key.maturity ||
+                entry.key.tenorLength != key.tenorLength || entry.key.tenorUnit != key.tenorUnit ||
+                entry.key.calendarName != key.calendarName ||
+                entry.key.convention != key.convention) {
+                continue;
+            }
+            if (entry.calendarAddress == &calendar) {
+                return entry.schedule;
+            }
+            if (sameRolledDates(entry, calendar)) {
+                entry.calendarAddress = &calendar;
+                return entry.schedule;
+            }
+            entry.schedule = generate();
+            entry.calendar = calendar;
+            entry.calendarAddress = &calendar;
+            return entry.schedule;
+        }
+        CachedSchedule entry;
+        entry.key = key;
+        entry.calendar = calendar;
+        entry.calendarAddress = &calendar;
+        entry.schedule = generate();
+        m_entries.push_back(std::move(entry));
+        return m_entries.back().schedule;
+    }
+
+private:
+    static constexpr std::size_t kMaxEntries = 1024;
+
+    struct CachedSchedule {
+        ScheduleKey key;
+        datetime::Calendar calendar;
+        const datetime::Calendar* calendarAddress = nullptr;
+        datetime::Schedule schedule;
+    };
+
+    static bool sameRolledDates(const CachedSchedule& entry, const datetime::Calendar& calendar) {
+        const datetime::Schedule& schedule = entry.schedule;
+        const std::vector<datetime::Date>& unadjusted = schedule.unadjustedDates();
+        for (std::size_t i = 0; i < unadjusted.size(); ++i) {
+            const datetime::BusinessDayConvention convention =
+                i == 0 ? schedule.effectiveConvention()
+                       : (i + 1 == unadjusted.size() ? schedule.terminationConvention()
+                                                     : schedule.businessDayConvention());
+            if (entry.calendar.adjust(unadjusted[i], convention) !=
+                calendar.adjust(unadjusted[i], convention)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // A deque keeps references to cached schedules stable while it grows, so
+    // two lookups in one row cannot dangle each other.
+    std::deque<CachedSchedule> m_entries;
+};
+
+/// Per-thread schedule cache of the quote-time builders.
+inline ScheduleCache& quoteScheduleCache() {
+    static thread_local ScheduleCache cache;
+    return cache;
+}
+
 } // namespace detail
 
 /// True when the curve set exposes a forecast provider (`ForecastSet`).
 template <typename CurveSetT>
 concept HasForecastProvider = requires(const CurveSetT& curves, double t) { curves.forecast(t); };
+
+/// True when the provider returns a `double` discount factor at a time: the
+/// curve-side constraint used by the annuity and par-rate algebra.
+template <typename ProviderT>
+concept DiscountProvider = requires(const ProviderT& provider, double t) {
+    { provider.discount(t) } -> std::convertible_to<double>;
+};
 
 /// Routes `curves` to the forecast side when present and to the discount side
 /// otherwise, so one instrument type serves both bootstrap entry points.
@@ -130,6 +238,40 @@ struct OisCouponTimes {
     double tEnd = 0.0;
     bool firstFixed = false;
     double firstRate = 0.0;
+};
+
+/// Precomputed quote inputs of one IRS float coupon.
+struct IrsFloatCouponTimes {
+    double tau = 0.0;
+    double tPay = 0.0;
+    double tPrevious = 0.0;
+    double tAccrual = 0.0;
+    bool firstFixed = false;
+    double firstRate = 0.0;
+};
+
+/// Precomputed quote inputs of one fixed-leg annuity coupon.
+struct IrsAnnuityCouponTimes {
+    double tau = 0.0;
+    double tPay = 0.0;
+};
+
+/// Precomputed quote inputs of one basis-swap coupon.
+struct BasisCouponTimes {
+    double tau = 0.0;
+    double tPrev = 0.0;
+    double t = 0.0;
+};
+
+/// Prepared coupon grids of one IRS quote.
+struct IrsQuoteTimes {
+    std::vector<IrsFloatCouponTimes> floatCoupons;
+    std::vector<IrsAnnuityCouponTimes> annuityCoupons;
+};
+
+/// Prepared coupon grid of one basis-swap quote.
+struct BasisQuoteTimes {
+    std::vector<BasisCouponTimes> coupons;
 };
 
 /// Averaged arithmetic overnight future quote: the mean of the daily simple
@@ -311,9 +453,8 @@ prepareOisCouponTimes(const datetime::Date& effective, const datetime::Date& mat
                       const datetime::DayCounter& quoteDayCounter, bool firstCouponFixed,
                       double firstCouponRate, const datetime::Date& referenceDate,
                       const datetime::DayCounter& zeroDayCounter) {
-    const datetime::Schedule schedule(effective, maturity, fixedTenor, calendar,
-                                      businessDayConvention, datetime::DateGeneration::Forward,
-                                      false, datetime::BusinessDayConvention::Unadjusted);
+    const datetime::Schedule& schedule = detail::quoteScheduleCache().get(
+        effective, maturity, fixedTenor, calendar, businessDayConvention);
     const std::vector<datetime::Date>& dates = schedule.dates();
     std::vector<OisCouponTimes> coupons;
     coupons.reserve(dates.size() - 1);
@@ -440,6 +581,247 @@ ScalarT impliedOisParRate(const std::vector<OisCouponTimes>& coupons, const Curv
         throw std::invalid_argument("impliedQuote: non-positive OIS annuity");
     }
     return floating / annuity;
+}
+
+/// Precomputes an IRS floating leg's coupon times over its own schedule:
+/// `start` is the effective date when set and the reference date otherwise.
+template <typename IrsLike>
+inline std::vector<IrsFloatCouponTimes>
+makeIrsFloatCouponTimes(const IrsLike& pillar, const datetime::Date& referenceDate,
+                        const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Schedule& floatSchedule =
+        detail::quoteScheduleCache().get(effective, pillar.maturity, pillar.floatTenor,
+                                         pillar.floatCalendar, pillar.businessDayConvention);
+    const std::vector<datetime::Date>& dates = floatSchedule.dates();
+    std::vector<IrsFloatCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        IrsFloatCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.floatDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedIrsRate: non-positive float accrual");
+        }
+        const datetime::Date payDate = pillar.floatCalendar.advance(
+            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
+            pillar.businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        if (k == 1 && pillar.firstCouponFixed) {
+            coupon.firstFixed = true;
+            coupon.firstRate = pillar.firstCouponRate;
+        } else {
+            coupon.tPrevious = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+            coupon.tAccrual = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+            if (!(coupon.tPrevious >= 0.0) || !(coupon.tAccrual > 0.0)) {
+                throw std::invalid_argument(
+                    "impliedIrsRate: coupons before the reference date must be fixed");
+            }
+        }
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+/// Precomputes an IRS fixed leg's annuity coupon times over its own schedule.
+template <typename IrsLike>
+inline std::vector<IrsAnnuityCouponTimes>
+makeIrsAnnuityCouponTimes(const IrsLike& pillar, const datetime::Date& referenceDate,
+                          const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    const datetime::Schedule& schedule =
+        detail::quoteScheduleCache().get(effective, pillar.maturity, pillar.fixedTenor,
+                                         pillar.fixedCalendar, pillar.businessDayConvention);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    std::vector<IrsAnnuityCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        IrsAnnuityCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.fixedDayCounter);
+        const datetime::Date payDate = pillar.fixedCalendar.advance(
+            dates[k], datetime::Period(pillar.paymentLag, datetime::TimeUnit::Days),
+            pillar.businessDayConvention);
+        coupon.tPay = datetime::yearFraction(referenceDate, payDate, zeroDayCounter);
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+/// Precomputes a basis swap's coupon times; the schedule anchors at the
+/// reference date (basis pillars quote spot-starting).
+template <typename BasisLike>
+inline std::vector<BasisCouponTimes>
+makeBasisCouponTimes(const BasisLike& pillar, const datetime::Date& referenceDate,
+                     const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Schedule& schedule =
+        detail::quoteScheduleCache().get(referenceDate, pillar.maturity, pillar.floatTenor,
+                                         pillar.calendar, pillar.businessDayConvention);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    std::vector<BasisCouponTimes> coupons;
+    coupons.reserve(dates.size() - 1);
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        BasisCouponTimes coupon;
+        coupon.tau = datetime::yearFraction(dates[k - 1], dates[k], pillar.quoteDayCounter);
+        if (!(coupon.tau > 0.0)) {
+            throw std::invalid_argument("impliedBasisSpread: non-positive float accrual");
+        }
+        coupon.tPrev = datetime::yearFraction(referenceDate, dates[k - 1], zeroDayCounter);
+        coupon.t = datetime::yearFraction(referenceDate, dates[k], zeroDayCounter);
+        if (!(coupon.tPrev >= 0.0) || !(coupon.t > 0.0)) {
+            throw std::invalid_argument(
+                "impliedBasisSpread: coupons before the reference date must be fixed");
+        }
+        coupons.push_back(coupon);
+    }
+    return coupons;
+}
+
+/// Both prepared legs of one IRS quote.
+template <typename IrsLike>
+inline IrsQuoteTimes makeIrsQuoteTimes(const IrsLike& pillar, const datetime::Date& referenceDate,
+                                       const datetime::DayCounter& zeroDayCounter) {
+    IrsQuoteTimes times;
+    times.floatCoupons = makeIrsFloatCouponTimes(pillar, referenceDate, zeroDayCounter);
+    times.annuityCoupons = makeIrsAnnuityCouponTimes(pillar, referenceDate, zeroDayCounter);
+    return times;
+}
+
+/// Prepared coupons of one basis quote.
+template <typename BasisLike>
+inline BasisQuoteTimes makeBasisQuoteTimes(const BasisLike& pillar,
+                                           const datetime::Date& referenceDate,
+                                           const datetime::DayCounter& zeroDayCounter) {
+    BasisQuoteTimes times;
+    times.coupons = makeBasisCouponTimes(pillar, referenceDate, zeroDayCounter);
+    return times;
+}
+
+/// Annuity of one leg schedule over the discount curve at its payment dates:
+/// the schedule starts at `effective` while discount times are measured from
+/// `valuationDate` (they differ for seasoned instruments).
+template <typename DiscountT>
+    requires DiscountProvider<DiscountT>
+inline double legAnnuity(const DiscountT& discount, const datetime::Date& effective,
+                         const datetime::Date& valuationDate, const datetime::Date& maturity,
+                         const datetime::Period& tenor, const datetime::Calendar& calendar,
+                         const datetime::DayCounter& dayCounter,
+                         datetime::BusinessDayConvention businessDayConvention, int paymentLag,
+                         const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Schedule schedule(effective, maturity, tenor, calendar, businessDayConvention,
+                                      datetime::DateGeneration::Forward, false,
+                                      datetime::BusinessDayConvention::Unadjusted);
+    const std::vector<datetime::Date>& dates = schedule.dates();
+    double annuity = 0.0;
+    for (std::size_t k = 1; k < dates.size(); ++k) {
+        const double tau = datetime::yearFraction(dates[k - 1], dates[k], dayCounter);
+        const datetime::Date payDate =
+            calendar.advance(dates[k], datetime::Period(paymentLag, datetime::TimeUnit::Days),
+                             businessDayConvention);
+        const double tPay = datetime::yearFraction(valuationDate, payDate, zeroDayCounter);
+        annuity += tau * discount.discount(tPay);
+    }
+    return annuity;
+}
+
+/// Fixed-leg annuity of an IRS quote over the discount curve.
+template <typename DiscountT, typename IrsLike>
+    requires DiscountProvider<DiscountT>
+inline double fixedAnnuity(const DiscountT& discount, const IrsLike& pillar,
+                           const datetime::Date& referenceDate,
+                           const datetime::DayCounter& zeroDayCounter) {
+    const datetime::Date effective = pillar.start.serial() != 0 ? pillar.start : referenceDate;
+    return pricing::legAnnuity(discount, effective, referenceDate, pillar.maturity,
+                               pillar.fixedTenor, pillar.fixedCalendar, pillar.fixedDayCounter,
+                               pillar.businessDayConvention, pillar.paymentLag, zeroDayCounter);
+}
+
+/// Two-IRS convention: the basis spread is the difference of two par IRS
+/// rates sharing the same fixed schedule.
+inline double basisSpreadAsIrsRateDifference(double firstIrsRate, double secondIrsRate) {
+    return firstIrsRate - secondIrsRate;
+}
+
+/// Convert a single-IRS basis spread into the two-IRS convention:
+/// `Delta_twoIrs = Delta_singleIrs * annuitySecondLeg / annuityFixedSchedule`.
+inline double basisSpreadConventionSwitch(double singleSpread, double secondLegAnnuity,
+                                          double fixedScheduleAnnuity) {
+    if (!(fixedScheduleAnnuity > 0.0)) {
+        throw std::invalid_argument(
+            "basisSpreadConventionSwitch: non-positive fixed schedule annuity");
+    }
+    if (!(secondLegAnnuity > 0.0)) {
+        throw std::invalid_argument("basisSpreadConventionSwitch: non-positive second leg annuity");
+    }
+    return singleSpread * secondLegAnnuity / fixedScheduleAnnuity;
+}
+
+/// Par rate of a fixed-vs-floating IRS from prepared coupon times: the
+/// floating forwards come from `forecast`, every discount factor and the
+/// fixed annuity from `discounting` (exogenous collateral discounting).
+template <typename ScalarT, typename ForecastT, typename DiscountT>
+ScalarT impliedIrsParRate(const IrsQuoteTimes& times, const ForecastT& forecast,
+                          const DiscountT& discounting) {
+    ScalarT floatPv = 0.0;
+    ScalarT previousAccrualDiscount = 0.0;
+    bool hasPrevious = false;
+    for (const IrsFloatCouponTimes& coupon : times.floatCoupons) {
+        const ScalarT discountPay = discounting.discount(coupon.tPay);
+        if (coupon.firstFixed) {
+            floatPv += coupon.tau * discountPay * coupon.firstRate;
+            hasPrevious = false;
+            continue;
+        }
+        const ScalarT previousDiscount =
+            hasPrevious ? previousAccrualDiscount : forecast.discount(coupon.tPrevious);
+        const ScalarT accrualDiscount = forecast.discount(coupon.tAccrual);
+        const ScalarT forward = (previousDiscount / accrualDiscount - 1.0) / coupon.tau;
+        floatPv += coupon.tau * discountPay * forward;
+        previousAccrualDiscount = accrualDiscount;
+        hasPrevious = true;
+    }
+    ScalarT annuity = 0.0;
+    for (const IrsAnnuityCouponTimes& coupon : times.annuityCoupons) {
+        annuity += coupon.tau * discounting.discount(coupon.tPay);
+    }
+    if (!(annuity > 0.0)) {
+        throw std::invalid_argument("impliedIrsRate: non-positive fixed annuity");
+    }
+    return floatPv / annuity;
+}
+
+/// Implied par basis spread from prepared coupon times: the child leg
+/// forecasts on `child`, the parent leg on `parentForecast`, discounting on
+/// `discountAt`. The spread sign follows `spreadOnParentLeg`.
+template <typename ScalarT, typename ChildT, typename ParentT, typename DiscountFn>
+ScalarT impliedBasisSpread(const BasisQuoteTimes& times, const ChildT& child,
+                           const ParentT& parentForecast, const DiscountFn& discountAt,
+                           bool spreadOnParentLeg) {
+    ScalarT weightedChild = 0.0;
+    ScalarT weightedParent = 0.0;
+    ScalarT annuity = 0.0;
+    ScalarT previousChild = 0.0;
+    ScalarT previousParent = 0.0;
+    bool hasPrevious = false;
+    for (const BasisCouponTimes& coupon : times.coupons) {
+        const ScalarT df = discountAt(coupon.t);
+        const ScalarT childAtPrevious = hasPrevious ? previousChild : child.discount(coupon.tPrev);
+        const ScalarT childAtCoupon = child.discount(coupon.t);
+        const ScalarT parentAtPrevious =
+            hasPrevious ? previousParent : parentForecast.discount(coupon.tPrev);
+        const ScalarT parentAtCoupon = parentForecast.discount(coupon.t);
+        const ScalarT forwardChild = (childAtPrevious / childAtCoupon - 1.0) / coupon.tau;
+        const ScalarT forwardParent = (parentAtPrevious / parentAtCoupon - 1.0) / coupon.tau;
+        weightedChild += coupon.tau * df * forwardChild;
+        weightedParent += coupon.tau * df * forwardParent;
+        annuity += coupon.tau * df;
+        previousChild = childAtCoupon;
+        previousParent = parentAtCoupon;
+        hasPrevious = true;
+    }
+    if (!(annuity > 0.0)) {
+        throw std::invalid_argument("impliedBasisSpread: non-positive annuity");
+    }
+    const ScalarT level = (weightedChild - weightedParent) / annuity;
+    return spreadOnParentLeg ? level : -level;
 }
 
 } // namespace quantape::pricing

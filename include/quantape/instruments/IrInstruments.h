@@ -9,18 +9,21 @@
 
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 
 namespace quantape::instruments {
 /**
  * @file IrInstruments.h
- * @brief Plain-data money-market instruments: deposit, repo, FRA, future
+ * @brief Plain-data interest-rate instruments: deposit, repo, FRA, future,
+ *        IRS and basis swap
  *
  * Each struct carries only its own convention fields plus the precomputed
  * quote times (`prepare*`) that turn dates into zero times once, so a Brent
  * trial only reads discount factors. The member `impliedQuote<ScalarT>`
  * forwards to the scalar algebra in `pricing/IrMath.h` and reads either a
  * discount curve set or a forecast curve set, so one type serves the discount
- * and forecast bootstraps.
+ * and forecast bootstraps. The swap members are `double`-only by contract and
+ * reject AD scalars at runtime.
  *
  * `date()` is the instrument's risk maturity (calendar-adjusted where the
  * convention rolls dates, the quoted end for exchange futures), `target()` the
@@ -31,6 +34,7 @@ namespace quantape::instruments {
 /// Money-market zero coupon / repo: `D(T) = 1 / (1 + r tau)`.
 struct Deposit {
     datetime::Date maturity{};
+    datetime::Date start{}; ///< Forecast-side accrual start; unset means the reference date
     datetime::Calendar calendar{};
     datetime::BusinessDayConvention businessDayConvention =
         datetime::BusinessDayConvention::ModifiedFollowing;
@@ -78,6 +82,7 @@ struct Deposit {
 /// Repo / buy-sell-back: the deposit algebra with a separate risk bucket.
 struct Repo {
     datetime::Date maturity{};
+    datetime::Date start{}; ///< Forecast-side accrual start; unset means the reference date
     datetime::Calendar calendar{};
     datetime::BusinessDayConvention businessDayConvention =
         datetime::BusinessDayConvention::ModifiedFollowing;
@@ -214,6 +219,106 @@ struct Future {
     template <typename ScalarT, typename CurveSetT>
     ScalarT impliedQuote(const CurveSetT& curves) const {
         return pricing::impliedFutureQuote<ScalarT>(times, pricing::discountProvider(curves));
+    }
+};
+
+/// Fixed-vs-floating par interest-rate swap on a forecast curve: the floating
+/// leg fixes on the forecast curve, the fixed leg and all discounting come from
+/// the exogenous discount curve (the parent in a standard stack). Fixed and
+/// floating schedules may differ.
+struct Irs {
+    datetime::Date maturity{};
+    datetime::Date start{};        ///< Effective date (past for seasoned swaps)
+    bool firstCouponFixed = false; ///< First floating coupon already fixed
+    double firstCouponRate = 0.0;  ///< Known first floating coupon rate
+    double quote = 0.0;            ///< Par rate (decimal)
+    datetime::Period floatTenor{3, datetime::TimeUnit::Months};
+    datetime::Calendar floatCalendar{};
+    datetime::DayCounter floatDayCounter{datetime::DayCount::Actual360};
+    datetime::Period fixedTenor{1, datetime::TimeUnit::Years};
+    datetime::Calendar fixedCalendar{};
+    datetime::DayCounter fixedDayCounter{datetime::DayCount::Thirty360BondBasis};
+    datetime::BusinessDayConvention businessDayConvention =
+        datetime::BusinessDayConvention::ModifiedFollowing;
+    int paymentLag = 0; ///< Calendar-day payment lag, then business-day adjusted
+    pricing::IrsQuoteTimes times{};
+
+    /// Risk maturity: the fixed-leg termination rolled on the fixed calendar.
+    datetime::Date date() const { return fixedCalendar.adjust(maturity, businessDayConvention); }
+
+    /// Quoted par rate.
+    double target() const { return quote; }
+
+    /// Short kind label.
+    static constexpr std::string_view kindName() noexcept { return "Irs"; }
+
+    /// Precomputes both legs' coupon times with the caller's zero clock.
+    Irs& prepareForecast(const datetime::Date& referenceDate,
+                         const datetime::DayCounter& zeroDayCounter) {
+        times = pricing::makeIrsQuoteTimes(*this, referenceDate, zeroDayCounter);
+        return *this;
+    }
+
+    /// Model par rate over a forecast curve set; the swap legs need `double`
+    /// curves, so a non-double scalar is rejected at runtime.
+    template <typename ScalarT, typename CurveSetT>
+    ScalarT impliedQuote(const CurveSetT& curves) const {
+        if constexpr (std::is_same_v<ScalarT, double>) {
+            return pricing::impliedIrsParRate<ScalarT>(times, curves.forecastCurve,
+                                                       curves.discountCurve);
+        } else {
+            (void)curves;
+            throw std::invalid_argument(
+                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+        }
+    }
+};
+
+/// Par float-vs-float basis swap on a forecast curve (IBOR vs OIS or IBOR vs
+/// IBOR): the spread sits on the parent or child leg per `spreadOnParentLeg`.
+struct BasisSwap {
+    datetime::Date maturity{};
+    double spread = 0.0;           ///< Quoted basis spread (decimal)
+    bool spreadOnParentLeg = true; ///< Quote convention: spread on the OIS parent leg
+    datetime::Period floatTenor{3, datetime::TimeUnit::Months};
+    datetime::DayCounter quoteDayCounter{datetime::DayCount::Actual360};
+    datetime::Calendar calendar{};
+    datetime::BusinessDayConvention businessDayConvention =
+        datetime::BusinessDayConvention::ModifiedFollowing;
+    pricing::BasisQuoteTimes times{};
+
+    /// Risk maturity: quoted date rolled on the calendar.
+    datetime::Date date() const { return calendar.adjust(maturity, businessDayConvention); }
+
+    /// Quoted basis spread.
+    double target() const { return spread; }
+
+    /// Short kind label.
+    static constexpr std::string_view kindName() noexcept { return "Basis"; }
+
+    /// Precomputes the coupon times with the caller's zero clock.
+    BasisSwap& prepareForecast(const datetime::Date& referenceDate,
+                               const datetime::DayCounter& zeroDayCounter) {
+        times = pricing::makeBasisQuoteTimes(*this, referenceDate, zeroDayCounter);
+        return *this;
+    }
+
+    /// Model spread over a forecast curve set; the basis legs need `double`
+    /// curves, so a non-double scalar is rejected at runtime.
+    template <typename ScalarT, typename CurveSetT>
+    ScalarT impliedQuote(const CurveSetT& curves) const {
+        if constexpr (std::is_same_v<ScalarT, double>) {
+            const auto& child = curves.forecastCurve;
+            const auto discountAt = [&curves](double t) {
+                return curves.discountCurve.discount(t);
+            };
+            return pricing::impliedBasisSpread<ScalarT>(times, child, child.parent(), discountAt,
+                                                        spreadOnParentLeg);
+        } else {
+            (void)curves;
+            throw std::invalid_argument(
+                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+        }
     }
 };
 

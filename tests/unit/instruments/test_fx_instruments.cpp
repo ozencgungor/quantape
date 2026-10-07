@@ -15,6 +15,7 @@
 
 #include "quantape/datetime/Calendar.h"
 #include "quantape/instruments/FxInstruments.h"
+#include "quantape/instruments/XccyInstruments.h"
 #include "quantape/markets/Curves/BootstrapInstrument.h"
 #include "quantape/markets/Curves/DiscountCurve.h"
 #include "quantape/markets/Curves/FxSwapBuilder.h"
@@ -365,12 +366,15 @@ TEST_F(FxInstrumentsTest, bootstrapConceptAndImpliedQuote) {
     using DoubleSet = mk::FxSet<DiscountCurve<double>, DiscountCurve<double>>;
     using VarSet = mk::FxSet<DiscountCurve<var>, DiscountCurve<var>>;
     using NestedSet = mk::FxSet<DiscountCurve<fvar<var>>, DiscountCurve<fvar<var>>>;
+    using XccyDoubleSet = mk::XccySet<DiscountCurve<double>, DiscountCurve<double>,
+                                      DiscountCurve<double>, DiscountCurve<double>>;
     static_assert(mk::BootstrapInstrument<inst::FxSpot, DoubleSet, double>);
     static_assert(mk::BootstrapInstrument<inst::FxForward, DoubleSet, double>);
     static_assert(mk::BootstrapInstrument<inst::FxSwap, DoubleSet, double>);
     static_assert(mk::BootstrapInstrument<inst::FxSwap, VarSet, var>);
     static_assert(mk::BootstrapInstrument<inst::FxSwap, NestedSet, fvar<var>>);
     static_assert(mk::BootstrapInstrument<inst::FxForward, VarSet, var>);
+    static_assert(mk::BootstrapInstrument<inst::XccyBasisSwap, XccyDoubleSet, double>);
 
     const std::vector<double> times{0.0, 2.0};
     const std::vector<double> zeros{0.0, 0.04};
@@ -390,6 +394,23 @@ TEST_F(FxInstrumentsTest, bootstrapConceptAndImpliedQuote) {
     }();
     CHECK_CLOSE("concept implied quote", par.impliedQuote<double>(curves), par.target(), 1e-12);
     EXPECT_TRUE(par.date() == par.maturity);
+
+    // The cross-currency instrument carries the adjusted risk date, the quoted
+    // spread target and a prepared `impliedQuote` over the cross-currency set.
+    inst::XccyBasisSwap xccy;
+    xccy.maturity = kReference.plusYears(1);
+    xccy.foreignTenor = dt::Period(3, dt::TimeUnit::Months);
+    xccy.domesticTenor = dt::Period(3, dt::TimeUnit::Months);
+    xccy.foreignCalendar = kWeekends;
+    xccy.domesticCalendar = kWeekends;
+    xccy.spread = 0.0011;
+    xccy.prepare(kReference, kZeroDc);
+    const XccyDoubleSet xccyCurves{baseCurve, baseCurve, quoteCurve, quoteCurve};
+    EXPECT_TRUE(xccy.date() ==
+                xccy.foreignCalendar.adjust(xccy.maturity, xccy.foreignBusinessDayConvention));
+    EXPECT_EQ(xccy.target(), 0.0011);
+    EXPECT_EQ(inst::XccyBasisSwap::kindName(), "Xccy");
+    EXPECT_TRUE(std::isfinite(xccy.impliedQuote<double>(xccyCurves)));
 }
 
 /// Spot adjoint of the CIP model against a central difference.

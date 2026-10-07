@@ -1,5 +1,6 @@
 #include "quantape/markets/Curves/CurveConfig.h"
 
+#include "quantape/instruments/PillarVariants.h"
 #include "quantape/markets/Curves/FraConvexity.h"
 #include "quantape/markets/Curves/FxSwapBuilder.h"
 #include "quantape/markets/Curves/HullWhiteConvexity.h"
@@ -12,6 +13,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 #include <nlohmann/json.hpp>
 
@@ -939,18 +943,189 @@ const DiscountCurve<double>* resolveReference(const std::vector<CurveReference>&
     return nullptr;
 }
 
-PillarKind toDiscountKind(PillarSpec::Kind kind) {
-    switch (kind) {
-        case PillarSpec::Kind::Deposit:
-            return PillarKind::Deposit;
-        case PillarSpec::Kind::Repo:
-            return PillarKind::Repo;
-        case PillarSpec::Kind::Fra:
-            return PillarKind::Fra;
-        case PillarSpec::Kind::Future:
-            return PillarKind::Future;
-        case PillarSpec::Kind::OisSwap:
-            return PillarKind::OisSwap;
+/// Reverse adaptation of a stored discount-curve instrument to the tagged
+/// pillar the bootstrap entry points and the `filledPillars` out-parameter
+/// still consume.
+CurvePillar toCurvePillar(const DiscountInstrument& instrument) {
+    CurvePillar out;
+    std::visit(
+        [&out](const auto& alternative) {
+            using Alternative = std::decay_t<decltype(alternative)>;
+            if constexpr (std::is_same_v<Alternative, instruments::Deposit>) {
+                out.kind = PillarKind::Deposit;
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.quote;
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                out.businessDayConvention = alternative.businessDayConvention;
+            } else if constexpr (std::is_same_v<Alternative, instruments::Repo>) {
+                out.kind = PillarKind::Repo;
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.quote;
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                out.businessDayConvention = alternative.businessDayConvention;
+            } else if constexpr (std::is_same_v<Alternative, instruments::Fra>) {
+                out.kind = PillarKind::Fra;
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.quote;
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                out.businessDayConvention = alternative.businessDayConvention;
+                out.fraConvexityExponent = alternative.fraConvexityExponent;
+            } else if constexpr (std::is_same_v<Alternative, instruments::Future>) {
+                out.kind = PillarKind::Future;
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.quote;
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                out.futureStyle = alternative.futureStyle;
+                out.averagingStyle = alternative.averagingStyle;
+                out.convexityAdjustment = alternative.convexityAdjustment;
+            } else {
+                out.kind = PillarKind::OisSwap;
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.target();
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                out.fixedTenor = alternative.fixedTenor;
+                out.paymentLag = alternative.paymentLag;
+                out.firstCouponFixed = alternative.firstCouponFixed;
+                out.firstCouponRate = alternative.firstCouponRate;
+                out.businessDayConvention = alternative.businessDayConvention;
+            }
+        },
+        instrument.instrument());
+    return out;
+}
+
+/// Reverse adaptation of a stored forecast-curve instrument to the tagged
+/// forecast pillar.
+ForecastPillar toForecastPillar(const ForecastInstrument& instrument) {
+    ForecastPillar out;
+    std::visit(
+        [&out](const auto& alternative) {
+            using Alternative = std::decay_t<decltype(alternative)>;
+            if constexpr (std::is_same_v<Alternative, instruments::Deposit> ||
+                          std::is_same_v<Alternative, instruments::Fra> ||
+                          std::is_same_v<Alternative, instruments::Future>) {
+                if constexpr (std::is_same_v<Alternative, instruments::Deposit>) {
+                    out.kind = ForecastPillar::Kind::Deposit;
+                } else if constexpr (std::is_same_v<Alternative, instruments::Fra>) {
+                    out.kind = ForecastPillar::Kind::Fra;
+                } else {
+                    out.kind = ForecastPillar::Kind::Future;
+                }
+                out.start = alternative.start;
+                out.maturity = alternative.maturity;
+                out.quote = alternative.quote;
+                out.quoteDayCounter = alternative.quoteDayCounter;
+                out.calendar = alternative.calendar;
+                if constexpr (std::is_same_v<Alternative, instruments::Future>) {
+                    out.convexityAdjustment = alternative.convexityAdjustment;
+                    out.futureStyle = alternative.futureStyle;
+                    out.averagingStyle = alternative.averagingStyle;
+                } else {
+                    out.businessDayConvention = alternative.businessDayConvention;
+                }
+            } else if constexpr (std::is_same_v<Alternative, instruments::Irs>) {
+                out.kind = ForecastPillar::Kind::Irs;
+                out.irs = alternative;
+            } else {
+                out.kind = ForecastPillar::Kind::BasisSwap;
+                out.basis = alternative;
+            }
+        },
+        instrument.instrument());
+    return out;
+}
+
+/// Settlement lag of a currency, defaulting to the T+2 majors convention.
+int currencySpotLag(const CurveStackSpec& stack, const std::string& currency) {
+    const auto it = stack.spotLag.find(currency);
+    return it != stack.spotLag.end() ? it->second : 2;
+}
+
+} // namespace
+
+DiscountInstrument toDiscountInstrument(const PillarSpec& pillar,
+                                        const datetime::Date& referenceDate,
+                                        const datetime::DayCounter& zeroDayCounter) {
+    using Instrument = DiscountInstrument::Instrument;
+    switch (pillar.kind) {
+        case PillarSpec::Kind::Deposit: {
+            instruments::Deposit out;
+            out.maturity = pillar.maturity;
+            out.start = pillar.start;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Repo: {
+            instruments::Repo out;
+            out.maturity = pillar.maturity;
+            out.start = pillar.start;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Fra: {
+            instruments::Fra out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.fraConvexityExponent = pillar.fraConvexityExponent;
+            out.quote = pillar.quote;
+            out.prepareDiscount(referenceDate, zeroDayCounter);
+            return DiscountInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Future: {
+            instruments::Future out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.futureStyle = pillar.futureStyle;
+            out.averagingStyle = pillar.averagingStyle;
+            out.convexityAdjustment = pillar.convexityAdjustment;
+            out.quote = pillar.quote;
+            out.prepare(referenceDate, zeroDayCounter, "impliedQuote");
+            return DiscountInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::OisSwap: {
+            const datetime::Date effective =
+                pillar.start.serial() != 0 ? pillar.start : referenceDate;
+            std::vector<pricing::OisCouponTimes> coupons = pricing::prepareOisCouponTimes(
+                effective, pillar.maturity, pillar.fixedTenor, pillar.calendar,
+                pillar.businessDayConvention, pillar.paymentLag, pillar.quoteDayCounter,
+                pillar.firstCouponFixed, pillar.firstCouponRate, referenceDate, zeroDayCounter);
+            detail::OisPillarInstrument ois(
+                pillar.calendar.adjust(pillar.maturity, pillar.businessDayConvention), pillar.quote,
+                std::move(coupons));
+            ois.maturity = pillar.maturity;
+            ois.start = pillar.start;
+            ois.quoteDayCounter = pillar.quoteDayCounter;
+            ois.calendar = pillar.calendar;
+            ois.fixedTenor = pillar.fixedTenor;
+            ois.paymentLag = pillar.paymentLag;
+            ois.firstCouponFixed = pillar.firstCouponFixed;
+            ois.firstCouponRate = pillar.firstCouponRate;
+            ois.businessDayConvention = pillar.businessDayConvention;
+            return DiscountInstrument{Instrument{std::move(ois)}};
+        }
         case PillarSpec::Kind::Irs:
         case PillarSpec::Kind::BasisSwap:
         case PillarSpec::Kind::FxSwap:
@@ -961,18 +1136,94 @@ PillarKind toDiscountKind(PillarSpec::Kind kind) {
         "CurveConfig: buildCurve: forecast pillar kind on a discount curve");
 }
 
-ForecastPillar::Kind toForecastKind(PillarSpec::Kind kind) {
-    switch (kind) {
-        case PillarSpec::Kind::Deposit:
-            return ForecastPillar::Kind::Deposit;
-        case PillarSpec::Kind::Fra:
-            return ForecastPillar::Kind::Fra;
-        case PillarSpec::Kind::Future:
-            return ForecastPillar::Kind::Future;
-        case PillarSpec::Kind::Irs:
-            return ForecastPillar::Kind::Irs;
-        case PillarSpec::Kind::BasisSwap:
-            return ForecastPillar::Kind::BasisSwap;
+ForecastInstrument toForecastInstrument(const PillarSpec& pillar,
+                                        const datetime::Date& referenceDate,
+                                        const datetime::DayCounter& zeroDayCounter) {
+    using Instrument = ForecastInstrument::Instrument;
+    switch (pillar.kind) {
+        case PillarSpec::Kind::Deposit: {
+            instruments::Deposit out;
+            out.maturity = pillar.maturity;
+            out.start = pillar.start;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareForecast(pillar.start.serial() != 0 ? pillar.start : referenceDate,
+                                referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Fra: {
+            instruments::Fra out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.quote = pillar.quote;
+            out.prepareForecast(pillar.start.serial() != 0 ? pillar.start : referenceDate,
+                                referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Future: {
+            instruments::Future out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.calendar = pillar.calendar;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.futureStyle = pillar.futureStyle;
+            out.averagingStyle = pillar.averagingStyle;
+            out.convexityAdjustment = pillar.convexityAdjustment;
+            out.quote = pillar.quote;
+            out.prepare(referenceDate, zeroDayCounter, "impliedForecastFuture");
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::Irs: {
+            if (pillar.maturity.serial() == 0) {
+                throw std::invalid_argument(
+                    "forecastPillarQuotedMaturity: IRS pillar is missing its maturity");
+            }
+            if (!(pillar.floatTenor.length() > 0) || !(pillar.fixedTenor.length() > 0)) {
+                throw std::invalid_argument(
+                    "forecastPillarTarget: IRS pillar is missing a leg tenor");
+            }
+            instruments::Irs out;
+            out.start = pillar.start;
+            out.maturity = pillar.maturity;
+            out.quote = pillar.quote;
+            out.floatTenor = pillar.floatTenor;
+            out.floatCalendar = pillar.floatCalendar;
+            out.floatDayCounter = pillar.floatDayCounter;
+            out.fixedTenor = pillar.fixedTenor;
+            out.fixedCalendar = pillar.fixedCalendar;
+            out.fixedDayCounter = pillar.fixedDayCounter;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.paymentLag = pillar.paymentLag;
+            out.firstCouponFixed = pillar.firstCouponFixed;
+            out.firstCouponRate = pillar.firstCouponRate;
+            out.prepareForecast(referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
+        case PillarSpec::Kind::BasisSwap: {
+            if (pillar.maturity.serial() == 0) {
+                throw std::invalid_argument(
+                    "forecastPillarQuotedMaturity: basis pillar is missing its maturity");
+            }
+            if (!(pillar.floatTenor.length() > 0)) {
+                throw std::invalid_argument(
+                    "forecastPillarTarget: basis pillar is missing its float tenor");
+            }
+            instruments::BasisSwap out;
+            out.maturity = pillar.maturity;
+            out.spread = pillar.quote;
+            out.spreadOnParentLeg = pillar.spreadOnParentLeg;
+            out.floatTenor = pillar.floatTenor;
+            out.quoteDayCounter = pillar.quoteDayCounter;
+            out.calendar = pillar.calendar;
+            out.businessDayConvention = pillar.businessDayConvention;
+            out.prepareForecast(referenceDate, zeroDayCounter);
+            return ForecastInstrument{Instrument{std::move(out)}};
+        }
         case PillarSpec::Kind::Repo:
         case PillarSpec::Kind::OisSwap:
         case PillarSpec::Kind::FxSwap:
@@ -983,96 +1234,9 @@ ForecastPillar::Kind toForecastKind(PillarSpec::Kind kind) {
         "CurveConfig: buildForecastCurve: discount pillar kind on a forecast curve");
 }
 
-/// Discount-side mapping: the shared market fields plus the future options.
-CurvePillar toCurvePillar(const PillarSpec& pillar) {
-    CurvePillar out;
-    out.maturity = pillar.maturity;
-    out.start = pillar.start;
-    out.kind = toDiscountKind(pillar.kind);
-    out.quote = pillar.quote;
-    out.quoteDayCounter = pillar.quoteDayCounter;
-    out.calendar = pillar.calendar;
-    out.fixedTenor = pillar.fixedTenor;
-    out.paymentLag = pillar.paymentLag;
-    out.convexityAdjustment = pillar.convexityAdjustment;
-    out.futureStyle = pillar.futureStyle;
-    out.averagingStyle = pillar.averagingStyle;
-    out.firstCouponFixed = pillar.firstCouponFixed;
-    out.firstCouponRate = pillar.firstCouponRate;
-    out.businessDayConvention = pillar.businessDayConvention;
-    return out;
-}
-
-/// Forecast-side mapping: the kind selects which sub-struct receives the
-/// market fields; future options stay on the top-level pillar.
-ForecastPillar toForecastPillar(const PillarSpec& pillar) {
-    ForecastPillar out;
-    out.kind = toForecastKind(pillar.kind);
-    const auto copyMoneyMarketFields = [&] {
-        out.start = pillar.start;
-        out.maturity = pillar.maturity;
-        out.quote = pillar.quote;
-        out.quoteDayCounter = pillar.quoteDayCounter;
-        out.calendar = pillar.calendar;
-        out.businessDayConvention = pillar.businessDayConvention;
-    };
-    switch (out.kind) {
-        case ForecastPillar::Kind::Deposit:
-        case ForecastPillar::Kind::Fra:
-            copyMoneyMarketFields();
-            break;
-        case ForecastPillar::Kind::Future:
-            copyMoneyMarketFields();
-            out.convexityAdjustment = pillar.convexityAdjustment;
-            out.futureStyle = pillar.futureStyle;
-            out.averagingStyle = pillar.averagingStyle;
-            break;
-        case ForecastPillar::Kind::Irs:
-            out.irs.start = pillar.start;
-            out.irs.maturity = pillar.maturity;
-            out.irs.quote = pillar.quote;
-            out.irs.floatTenor = pillar.floatTenor;
-            out.irs.floatCalendar = pillar.floatCalendar;
-            out.irs.floatDayCounter = pillar.floatDayCounter;
-            out.irs.fixedTenor = pillar.fixedTenor;
-            out.irs.fixedCalendar = pillar.fixedCalendar;
-            out.irs.fixedDayCounter = pillar.fixedDayCounter;
-            out.irs.businessDayConvention = pillar.businessDayConvention;
-            out.irs.paymentLag = pillar.paymentLag;
-            out.irs.firstCouponFixed = pillar.firstCouponFixed;
-            out.irs.firstCouponRate = pillar.firstCouponRate;
-            break;
-        case ForecastPillar::Kind::BasisSwap:
-            out.basis.maturity = pillar.maturity;
-            out.basis.spread = pillar.quote;
-            out.basis.spreadOnParentLeg = pillar.spreadOnParentLeg;
-            out.basis.floatTenor = pillar.floatTenor;
-            out.basis.quoteDayCounter = pillar.quoteDayCounter;
-            out.basis.calendar = pillar.calendar;
-            out.basis.businessDayConvention = pillar.businessDayConvention;
-            break;
-    }
-    return out;
-}
-
-/// Settlement lag of a currency, defaulting to the T+2 majors convention.
-int currencySpotLag(const CurveStackSpec& stack, const std::string& currency) {
-    const auto it = stack.spotLag.find(currency);
-    return it != stack.spotLag.end() ? it->second : 2;
-}
-
-/// FX-side mapping: resolves the pair spot and both currencies' settlement
-/// lags; an omitted near date settles at the joint spot date.
-FxSwapPillar toFxSwapPillar(const CurveStackSpec& stack, const PillarSpec& pillar,
+FxInstrument toFxInstrument(const CurveStackSpec& stack, const PillarSpec& pillar,
                             const XccyCurveSpec& xccy, const std::string& where) {
-    FxSwapPillar out;
-    out.start = pillar.start;
-    out.maturity = pillar.maturity;
-    out.points = pillar.fxPoints;
-    out.outright = pillar.fxOutright;
-    out.convention = pillar.fxConvention;
-    out.dayCounter = pillar.quoteDayCounter;
-    out.isFxBaseCollateral =
+    const bool baseCollateral =
         pillar.isFxBaseCollateralSet ? pillar.isFxBaseCollateral : xccy.isFxBaseCollateral;
     const std::string pair = pillar.fxPair.empty() ? xccy.pair : pillar.fxPair;
     if (pair.size() != 6) {
@@ -1080,31 +1244,39 @@ FxSwapPillar toFxSwapPillar(const CurveStackSpec& stack, const PillarSpec& pilla
     }
     const std::string base = pair.substr(0, 3);
     const std::string quote = pair.substr(3, 3);
-    for (const FxSpotSpec& spot : stack.fxSpots) {
-        if (spot.descriptor.pair() == pair) {
-            out.spot = spot.spot;
+    double spot = 0.0;
+    for (const FxSpotSpec& candidate : stack.fxSpots) {
+        if (candidate.descriptor.pair() == pair) {
+            spot = candidate.spot;
             break;
         }
     }
-    if (!(out.spot > 0.0)) {
+    if (!(spot > 0.0)) {
         fail(where, "missing FX spot for pair '" + pair + "'");
     }
-    if (out.start.serial() == 0) {
+    datetime::Date start = pillar.start;
+    if (start.serial() == 0) {
         const int baseLag = currencySpotLag(stack, base);
         const int quoteLag = currencySpotLag(stack, quote);
-        out.start =
+        start =
             datetime::spotDate(stack.asOf, datetime::Calendar::weekendsOnly(), baseLag, quoteLag);
     }
-    if (!(out.start < out.maturity)) {
+    if (!(start < pillar.maturity)) {
         fail(where, "FxSwap pillar maturity must be after the near date");
     }
+    const FXDescriptor descriptor(base, quote, stack.asOf.toIso());
+    FxInstrument out = instruments::makeFxSwap(
+        descriptor, stack.asOf, start, pillar.maturity, spot,
+        pillar.fxConvention == QuoteConvention::Points ? pillar.fxPoints : pillar.fxOutright,
+        pillar.fxConvention, baseCollateral, 1.0, datetime::Calendar{}, datetime::Calendar{}, 2, 2,
+        pillar.businessDayConvention);
+    out.dayCounter = pillar.quoteDayCounter;
     return out;
 }
 
-/// Xccy-side mapping: curve-level pair conventions plus the per-pillar leg
-/// tenor, calendar, day count and payment lag.
-XccyPillar toXccyPillar(const PillarSpec& pillar, const XccyCurveSpec& xccy) {
-    XccyPillar out;
+XccyInstrument toXccyInstrument(const PillarSpec& pillar, const XccyCurveSpec& xccy) {
+    using Instrument = XccyInstrument::Instrument;
+    instruments::XccyBasisSwap out;
     out.maturity = pillar.maturity;
     out.spread = pillar.quote;
     const bool baseCollateral =
@@ -1124,10 +1296,8 @@ XccyPillar toXccyPillar(const PillarSpec& pillar, const XccyCurveSpec& xccy) {
     out.domesticPaymentLag = pillar.domesticPaymentLag;
     out.foreignBusinessDayConvention = pillar.businessDayConvention;
     out.domesticBusinessDayConvention = pillar.businessDayConvention;
-    return out;
+    return XccyInstrument{Instrument{std::move(out)}};
 }
-
-} // namespace
 
 namespace detail {
 
@@ -1144,26 +1314,62 @@ void validateConvexityReference(const CurveSpec& spec) {
                                 "'convexity' model");
 }
 
-template <typename Pillar, typename Curve>
-void applyModelConvexityToPillars(const CurveStackSpec& stack, const CurveSpec& spec,
-                                  std::vector<Pillar>& pillars,
-                                  const std::vector<std::size_t>& modelFutures,
-                                  const Curve& referenceCurve) {
-    for (const std::size_t index : modelFutures) {
-        const Pillar& pillar = pillars[index];
-        const double t1 = datetime::yearFraction(stack.asOf, pillar.start, spec.zeroDayCounter);
-        const double t2 = datetime::yearFraction(stack.asOf, pillar.maturity, spec.zeroDayCounter);
-        const double accrual =
-            datetime::yearFraction(pillar.start, pillar.maturity, pillar.quoteDayCounter);
-        const double ratio = referenceCurve.discount(t1) / referenceCurve.discount(t2);
-        pillars[index].convexityAdjustment = hullWhiteFuturesAdjustment(
-            spec.convexity.sigma, spec.convexity.meanReversion, t1, accrual, ratio);
-    }
+/// Applies the Hull-White model adjustment to the Future alternative of a
+/// stored family instrument and re-prepares its quote times.
+template <typename InstrumentT, typename ReferenceCurveT>
+void applyModelConvexityToInstrument(const CurveStackSpec& stack, const CurveSpec& spec,
+                                     InstrumentT& instrument, const char* prepareContext,
+                                     const ReferenceCurveT& referenceCurve) {
+    std::visit(
+        [&](auto& alternative) {
+            using Alternative = std::decay_t<decltype(alternative)>;
+            if constexpr (std::is_same_v<Alternative, instruments::Future>) {
+                const double t1 =
+                    datetime::yearFraction(stack.asOf, alternative.start, spec.zeroDayCounter);
+                const double t2 =
+                    datetime::yearFraction(stack.asOf, alternative.maturity, spec.zeroDayCounter);
+                const double accrual = datetime::yearFraction(
+                    alternative.start, alternative.maturity, alternative.quoteDayCounter);
+                const double ratio = referenceCurve.discount(t1) / referenceCurve.discount(t2);
+                alternative.convexityAdjustment = hullWhiteFuturesAdjustment(
+                    spec.convexity.sigma, spec.convexity.meanReversion, t1, accrual, ratio);
+                alternative.prepare(stack.asOf, spec.zeroDayCounter, prepareContext);
+            }
+        },
+        instrument.instrument());
 }
 
-template <typename Pillar, typename Bootstrap, typename Verify>
+/// Stored model convexity adjustment of a family instrument (zero unless the
+/// alternative is a Future).
+template <typename InstrumentT>
+double futureConvexityAdjustment(const InstrumentT& instrument) {
+    return std::visit(
+        [](const auto& alternative) -> double {
+            using Alternative = std::decay_t<decltype(alternative)>;
+            if constexpr (std::is_same_v<Alternative, instruments::Future>) {
+                return alternative.convexityAdjustment;
+            }
+            return 0.0;
+        },
+        instrument.instrument());
+}
+
+/// Sets the shifted-lognormal FRA exponent on the Fra alternative.
+template <typename InstrumentT>
+void setFraConvexityExponent(InstrumentT& instrument, double exponent) {
+    std::visit(
+        [&](auto& alternative) {
+            using Alternative = std::decay_t<decltype(alternative)>;
+            if constexpr (std::is_same_v<Alternative, instruments::Fra>) {
+                alternative.fraConvexityExponent = exponent;
+            }
+        },
+        instrument.instrument());
+}
+
+template <typename InstrumentT, typename Bootstrap, typename Verify>
 auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
-                         std::vector<Pillar>& pillars,
+                         std::vector<InstrumentT>& instruments, const char* prepareContext,
                          const std::vector<CurveReference>& references,
                          const std::vector<std::size_t>& modelFutures, std::string_view errorPrefix,
                          const char* convergenceMessage, Bootstrap bootstrap, Verify verify)
@@ -1180,7 +1386,10 @@ auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
                                         keyLabel(spec.convexity.referenceCurve) +
                                         "' not found in the supplied references");
         }
-        applyModelConvexityToPillars(stack, spec, pillars, modelFutures, *reference);
+        for (const std::size_t index : modelFutures) {
+            applyModelConvexityToInstrument(stack, spec, instruments[index], prepareContext,
+                                            *reference);
+        }
         return bootstrap();
     }
     // Self-referential fixed point: the adjustment is bp-scale, so the bond
@@ -1190,13 +1399,15 @@ auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
         std::vector<double> previous;
         previous.reserve(modelFutures.size());
         for (const std::size_t index : modelFutures) {
-            previous.push_back(pillars[index].convexityAdjustment);
+            previous.push_back(futureConvexityAdjustment(instruments[index]));
         }
-        applyModelConvexityToPillars(stack, spec, pillars, modelFutures, curve);
+        for (const std::size_t index : modelFutures) {
+            applyModelConvexityToInstrument(stack, spec, instruments[index], prepareContext, curve);
+        }
         double maxMove = 0.0;
         for (std::size_t i = 0; i < modelFutures.size(); ++i) {
             const double move =
-                std::abs(pillars[modelFutures[i]].convexityAdjustment - previous[i]);
+                std::abs(futureConvexityAdjustment(instruments[modelFutures[i]]) - previous[i]);
             if (move > maxMove) {
                 maxMove = move;
             }
@@ -1207,7 +1418,9 @@ auto applyModelConvexity(const CurveStackSpec& stack, const CurveSpec& spec,
         curve = bootstrap();
     }
     // Verify the converged adjustments actually reprice the futures.
-    applyModelConvexityToPillars(stack, spec, pillars, modelFutures, curve);
+    for (const std::size_t index : modelFutures) {
+        applyModelConvexityToInstrument(stack, spec, instruments[index], prepareContext, curve);
+    }
     double worst = 0.0;
     for (const std::size_t index : modelFutures) {
         const double check = verify(curve, index);
@@ -1237,14 +1450,16 @@ DiscountCurve<double> buildCurve(const CurveStackSpec& stack, const CurveSpec& s
                                     "' carries forecast pillars; use buildForecastCurve");
     }
     detail::validateConvexityReference(spec);
-    std::vector<CurvePillar> pillars;
+    std::vector<DiscountInstrument> instruments;
     std::vector<std::size_t> modelFutures;
-    pillars.reserve(spec.pillars.size());
+    instruments.reserve(spec.pillars.size());
     for (const PillarSpec& pillar : spec.pillars) {
-        CurvePillar out = toCurvePillar(pillar);
-        if (out.kind == PillarKind::Fra) {
+        instruments.push_back(toDiscountInstrument(pillar, stack.asOf, spec.zeroDayCounter));
+        DiscountInstrument& instrument = instruments.back();
+        const std::string_view kind = instrumentKindName(instrument);
+        if (kind == "Fra") {
             if (pillar.fraConvexityExponentSet) {
-                out.fraConvexityExponent = pillar.fraConvexityExponent;
+                // The factory carries the explicit exponent.
             } else if (spec.fraConvexity.enabled) {
                 if (pillar.start.serial() == 0) {
                     fail("pillar", "FRA convexity requires a 'start' date");
@@ -1253,37 +1468,47 @@ DiscountCurve<double> buildCurve(const CurveStackSpec& stack, const CurveSpec& s
                     pillar.calendar.adjust(pillar.start, pillar.businessDayConvention);
                 const double timeToFixing =
                     datetime::yearFraction(stack.asOf, adjustedStart, spec.zeroDayCounter);
-                out.fraConvexityExponent = fraConvexityExponent(
-                    spec.fraConvexity.sigmaIndex, spec.fraConvexity.sigmaDiscount,
-                    spec.fraConvexity.correlation, timeToFixing);
+                detail::setFraConvexityExponent(
+                    instrument, fraConvexityExponent(spec.fraConvexity.sigmaIndex,
+                                                     spec.fraConvexity.sigmaDiscount,
+                                                     spec.fraConvexity.correlation, timeToFixing));
             }
         }
-        if (out.kind == PillarKind::Future) {
+        if (kind == "Future") {
             if (pillar.convexityAdjustmentSet) {
                 // Explicit market-marked adjustment.
             } else if (spec.convexity.enabled) {
-                modelFutures.push_back(pillars.size());
+                modelFutures.push_back(instruments.size() - 1);
             } else {
                 detail::failMissingFutureConvexity("CurveConfig: ");
             }
         }
-        pillars.push_back(out);
     }
+    const auto taggedPillars = [&]() {
+        std::vector<CurvePillar> pillars;
+        pillars.reserve(instruments.size());
+        for (const DiscountInstrument& instrument : instruments) {
+            pillars.push_back(toCurvePillar(instrument));
+        }
+        return pillars;
+    };
     const auto bootstrap = [&]() {
+        const std::vector<CurvePillar> pillars = taggedPillars();
         return bootstrapDiscountCurve(stack.asOf, spec.zeroDayCounter, spec.space, spec.scheme,
                                       pillars, spec.accuracy, spec.tension, spec.switchIndex);
     };
     const auto finish = [&](DiscountCurve<double> curve) {
         if (filledPillars != nullptr) {
-            *filledPillars = pillars;
+            *filledPillars = taggedPillars();
         }
         return curve;
     };
     const auto verify = [&](const DiscountCurve<double>& curve, const std::size_t index) {
+        const std::vector<CurvePillar> pillars = taggedPillars();
         return impliedQuote(pillars[index], stack.asOf, curve) - pillars[index].quote;
     };
     return finish(detail::applyModelConvexity(
-        stack, spec, pillars, references, modelFutures, "CurveConfig: ",
+        stack, spec, instruments, "impliedQuote", references, modelFutures, "CurveConfig: ",
         "CurveConfig: futures convexity fixed point did not converge", bootstrap, verify));
 }
 
@@ -1321,39 +1546,49 @@ buildForecastCurveImpl(const CurveStackSpec& stack, const CurveSpec& spec,
                                     "' is also a parent curve key in the stack");
     }
     detail::validateConvexityReference(spec);
-    std::vector<ForecastPillar> pillars;
+    std::vector<ForecastInstrument> instruments;
     std::vector<std::size_t> modelFutures;
-    pillars.reserve(spec.forecastPillars.size());
+    instruments.reserve(spec.forecastPillars.size());
     for (const PillarSpec& pillar : spec.forecastPillars) {
-        ForecastPillar out = toForecastPillar(pillar);
-        if (out.kind == ForecastPillar::Kind::Future) {
+        instruments.push_back(toForecastInstrument(pillar, stack.asOf, spec.zeroDayCounter));
+        if (instrumentKindName(instruments.back()) == "Future") {
             if (pillar.convexityAdjustmentSet) {
                 // Explicit market-marked adjustment.
             } else if (spec.convexity.enabled) {
-                modelFutures.push_back(pillars.size());
+                modelFutures.push_back(instruments.size() - 1);
             } else {
                 detail::failMissingFutureConvexity("CurveConfig: buildForecastCurve: ");
             }
         }
-        pillars.push_back(out);
     }
+    const auto taggedPillars = [&]() {
+        std::vector<ForecastPillar> pillars;
+        pillars.reserve(instruments.size());
+        for (const ForecastInstrument& instrument : instruments) {
+            pillars.push_back(toForecastPillar(instrument));
+        }
+        return pillars;
+    };
     const auto bootstrap = [&]() {
+        const std::vector<ForecastPillar> pillars = taggedPillars();
         return bootstrapForecastCurve<ParentT>(parent, discount, stack.asOf, spec.zeroDayCounter,
                                                spec.scheme, pillars, spec.accuracy, spec.tension);
     };
     const auto finish = [&](SpreadCurve<double, ParentT> curve) {
         if (filledPillars != nullptr) {
-            *filledPillars = pillars;
+            *filledPillars = taggedPillars();
         }
         return curve;
     };
     const auto verify = [&](const SpreadCurve<double, ParentT>& curve, const std::size_t index) {
+        const std::vector<ForecastPillar> pillars = taggedPillars();
         return impliedForecastQuote(curve, curve.parent(), pillars[index], stack.asOf,
                                     spec.zeroDayCounter) -
                pillars[index].quote;
     };
     return finish(detail::applyModelConvexity(
-        stack, spec, pillars, references, modelFutures, "CurveConfig: buildForecastCurve: ",
+        stack, spec, instruments, "impliedForecastFuture", references, modelFutures,
+        "CurveConfig: buildForecastCurve: ",
         "CurveConfig: forecast futures convexity fixed point did not converge", bootstrap, verify));
 }
 
@@ -1577,13 +1812,14 @@ std::vector<BuiltCurve> buildStack(const CurveStackSpec& stack) {
             const DiscountCurve<double>* domesticForecast =
                 discountIndex[index] != kNoCurve ? discountCurves[discountIndex[index]].get()
                                                  : domesticDiscount;
-            std::vector<XccyMixedPillar> pillars;
+            std::vector<XccyInstrument> pillars;
             pillars.reserve(spec.pillars.size());
             for (const PillarSpec& pillar : spec.pillars) {
                 if (pillar.kind == PillarSpec::Kind::FxSwap) {
-                    pillars.emplace_back(toFxSwapPillar(stack, pillar, spec.xccy, where));
+                    pillars.push_back(XccyInstrument{XccyInstrument::Instrument{
+                        toFxInstrument(stack, pillar, spec.xccy, where)}});
                 } else if (pillar.kind == PillarSpec::Kind::XccySwap) {
-                    pillars.emplace_back(toXccyPillar(pillar, spec.xccy));
+                    pillars.push_back(toXccyInstrument(pillar, spec.xccy));
                 } else {
                     throw std::invalid_argument("CurveConfig: " + where +
                                                 " pillars must be FxSwap or XccySwap");
