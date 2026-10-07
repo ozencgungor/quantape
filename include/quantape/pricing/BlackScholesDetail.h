@@ -7,12 +7,12 @@
 #ifndef BLACKSCHOLESDETAIL_H
 #define BLACKSCHOLESDETAIL_H
 
+#include "quantape/math/Distributions/Normal.h"
 #include "quantape/util/Constants.h"
 
 #include <cmath>
 
 namespace quantape::pricing {
-using ::quantape::util::kPi;
 
 // ============================================================================
 // Helpers
@@ -21,11 +21,11 @@ using ::quantape::util::kPi;
 namespace quantape::math::detail {
 
 inline double phi(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * kPi);
+    return ::quantape::math::detail::normalPdfDouble(x, 0.0, 1.0);
 }
 
 inline double Phi(double x) {
-    return 0.5 * std::erfc(-x * M_SQRT1_2);
+    return ::quantape::math::detail::normalCdfDouble(x, 0.0, 1.0);
 }
 
 } // namespace quantape::math::detail

@@ -22,3 +22,11 @@ Planned/optional dependencies (not currently vendored):
 
 Ported algorithm implementations retain their upstream notices (e.g. Stan Math
 special-function kernels, BSD-3-Clause). No AGPL-licensed code is included.
+
+Algorithm references (clean-room implementations; no source copied):
+
+  Genz / Drezner-Wesolowsky bivariate and trivariate normal probabilities
+      Z. Drezner & G. O. Wesolowsky (1989); A. Genz (2004)
+  Temme / Thompson-Barnett modified Bessel K_nu algorithms (published methods)
+  AS241 normal quantile (M. Wichura 1988); coefficient set via Stan Math (BSD-3)
+  Incomplete gamma/beta series and Lentz continued fractions (standard recipes)

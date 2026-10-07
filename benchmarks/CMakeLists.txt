@@ -42,6 +42,10 @@ add_executable(bench_risk bench_risk.cpp)
 target_link_libraries(bench_risk PRIVATE quantape)
 quantape_set_warnings(bench_risk)
 
+add_executable(bench_distributions bench_distributions.cpp)
+target_link_libraries(bench_distributions PRIVATE quantape)
+quantape_set_warnings(bench_distributions)
+
 # Allocation-tracking build of the risk harness: same malloc shim as
 # bench_sde_alloc; use it for allocation counts, bench_risk for timings.
 add_executable(bench_risk_alloc bench_risk.cpp)

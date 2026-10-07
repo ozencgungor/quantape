@@ -16,4 +16,6 @@ quantape_add_gtest(qta_test_math_slow
     LABELS unit numerics slow
     TIMEOUT 1800)
 
+add_subdirectory(distributions)
+
 quantape_collect_executables()

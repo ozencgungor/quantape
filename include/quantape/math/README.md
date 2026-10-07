@@ -78,6 +78,38 @@ IFT sensitivities). `fvar<...>` keeps the pathwise route for Hessians.
 Control flow is primal-pinned — derivatives at branches are one-sided values
 of the selected branch.
 
+### Distributions
+
+```cpp
+#include "quantape/math/Distributions.h"
+using namespace quantape::math;
+
+Normal<double> n{0.3, 1.4};
+double p = n.cdf(0.8);                       // pdf/cdf/ccdf/log forms/inv
+auto gh = n.cdfGradHess(0.8);                // analytic g1/g2 (double path)
+
+BivariateNormal<double> bvn{-0.5};           // Genz-style 1-D quadrature
+double c = bvn.cdf(a, b);                    // + analytic bvnCdfGradHess
+
+Gamma<double> g{2.3, 1.7};                   // Gamma, InverseGamma, ChiSquare,
+                                             // NoncentralChiSquare, Beta,
+                                             // StudentT, Lognormal, Poisson,
+                                             // Exponential, InverseGaussian
+```
+
+Also: `NoncentralChiSquare` / `NoncentralBeta` / `NoncentralF`, and
+`TrivariateNormal` (Genz method, with analytic gradient/Hessian packs).
+
+All types follow the `DoubleT` (Black76) pattern: `double` uses the optimized
+kernels and the analytic derivative packs; other scalars (Stan `var` today,
+the in-house AD scalars later) run the generic scalar path. Every family with
+complete first/second parameter partials also has Stan callback bridges: one
+node for `var` and two nodes for `fvar<var>` (`stan::math::hessian`), built on
+the uniform `makeVjpVar` / `makeVhpFvar` convention in
+`Distributions/DistributionsStanPrimitives.h`; quantile derivative packs
+(`invGradHess`) cover the inverse-quantile chain. Coverage, algorithm sources,
+derivative tiers and accuracy gates: `internal_docs/math_distributions_plan.md`.
+
 ## Tests
 
 Run `./build/<target>`; exit code 0 = pass. `test_math`, `test_solvers`,
