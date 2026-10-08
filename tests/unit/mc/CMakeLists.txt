@@ -6,6 +6,9 @@ quantape_add_gtest(qta_test_mc
     SOURCES test_sde_simulator.cpp
             test_sde_processes.cpp
             test_sde_moment_matching.cpp
+            test_sde_transition.cpp
+            test_sde_recording.cpp
+            test_sde_evaluate.cpp
             test_sobol_generator.cpp
             test_sobol_quality.cpp
     LIBS TBB::tbb Threads::Threads
@@ -16,6 +19,7 @@ quantape_add_gtest(qta_test_mc_ad
     SOURCES test_sde_schemes.cpp
             test_sde_gradients.cpp
             test_sde_qmc.cpp
+            test_sde_evaluate_ad.cpp
     STAN
     LABELS unit mc ad slow)
 

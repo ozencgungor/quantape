@@ -1,6 +1,7 @@
 #pragma once
 
 #include "quantape/markets/Curves/DiscountCurve.h"
+#include "quantape/markets/Curves/SpreadCurve.h"
 
 #include <cstddef>
 #include <utility>
@@ -65,6 +66,35 @@ CurveOnGrid<DoubleT> materialize(const DiscountCurve<DoubleT>& curve,
         const DoubleT x0 = zeroSpace ? values[k] * times[k] : values[k];
         const DoubleT x1 = zeroSpace ? values[k + 1] * times[k + 1] : values[k + 1];
         out.forward[k] = (x1 - x0) / dt;
+    }
+    return out;
+}
+
+/// Materialize any double curve provider (a spread/forecast chain, a
+/// type-erased `CurveHandle`, ...) on `times` (strictly increasing,
+/// non-negative). Values are evaluated directly through the provider, so the
+/// frozen arrays are bit-identical to `provider.discount(t)`, `provider.zero(t)`
+/// and `provider.forward(t_k, t_{k+1})` at each grid point.
+template <typename Provider>
+    requires CurveProvider<Provider, double>
+CurveOnGrid<double> materialize(const Provider& curve, const std::vector<double>& times) {
+    CurveOnGrid<double> out;
+    out.times = times;
+    const std::size_t n = times.size();
+    if (n == 0) {
+        return out;
+    }
+    out.discount.resize(n);
+    out.zero.resize(n);
+    if (n > 1) {
+        out.forward.resize(n - 1);
+    }
+    for (std::size_t k = 0; k < n; ++k) {
+        out.discount[k] = curve.discount(times[k]);
+        out.zero[k] = curve.zero(times[k]);
+    }
+    for (std::size_t k = 0; k + 1 < n; ++k) {
+        out.forward[k] = curve.forward(times[k], times[k + 1]);
     }
     return out;
 }

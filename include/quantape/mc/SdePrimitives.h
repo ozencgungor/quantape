@@ -5,6 +5,8 @@
 
 #include <concepts>
 #include <cstddef>
+#include <optional>
+#include <stdexcept>
 #include <vector>
 
 namespace quantape::mc {
@@ -57,14 +59,33 @@ namespace quantape::mc {
 template <typename Scalar = double>
 using StateMatrix = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
 
+/// Validates a caller-supplied record-index set: strictly increasing grid
+/// steps, each within `[0, nSteps]`. Throws `std::invalid_argument` otherwise.
+inline void requireRecordIndices(const std::vector<std::size_t>& indices, std::size_t nSteps) {
+    for (std::size_t r = 0; r < indices.size(); ++r) {
+        if (indices[r] > nSteps) {
+            throw std::invalid_argument("PathBlock: record index beyond the grid");
+        }
+        if (r > 0 && indices[r] <= indices[r - 1]) {
+            throw std::invalid_argument("PathBlock: record indices must be strictly increasing");
+        }
+    }
+}
+
 /**
  * @brief Storage for one block of simulated paths
  *
- * `states[k]` is the (nDims x nPaths) state block at grid time t_k, so a
- * block holds `nSteps + 1` matrices:
+ * Under full retention (the default, `resize`) `states[k]` is the
+ * (nDims x nPaths) state block at grid time t_k, and `states` holds
+ * `nSteps + 1` matrices:
  *
  *     states[k](i, p) = X_i^{(p)}(t_k),   k = 0..N
  *
+ * `resizeRecorded` retains only a caller-supplied grid-index set (the
+ * recordTimes contract): `states[r]` then holds the state at grid step
+ * `recordGridIndex(r)`, an empty set retains nothing, and full retention is
+ * unchanged. The simulator always steps the whole grid; recording only
+ * decides which steps are stored (exposure schedules skip most of them).
  * Path access within a step is a contiguous column (`states[k].col(p)`);
  * blocked evaluation keeps only the current block resident (the storage
  * contract for large path counts / large dimensions).
@@ -73,18 +94,54 @@ template <typename Scalar = double>
 struct PathBlock {
     std::size_t nDims = 0;
     std::size_t nPaths = 0;
-    std::vector<StateMatrix<Scalar>> states; ///< nSteps + 1 matrices
+    std::size_t gridSteps = 0;               ///< intervals stepped (independent of recording)
+    std::vector<StateMatrix<Scalar>> states; ///< recorded states, one per record index
+    /// Grid steps held by `states`; `std::nullopt` (default) = every grid
+    /// point (states[k] at t_k, the historical behavior), an empty vector =
+    /// none, otherwise `states[r]` is the state at step `(*recordIndices)[r]`.
+    std::optional<std::vector<std::size_t>> recordIndices;
 
+    /// Full retention: `states[k]` at grid time t_k (unchanged behavior).
     void resize(std::size_t nDimsIn, std::size_t nSteps, std::size_t nPathsIn) {
         nDims = nDimsIn;
         nPaths = nPathsIn;
+        gridSteps = nSteps;
+        recordIndices.reset();
         states.resize(nSteps + 1);
         for (StateMatrix<Scalar>& s : states) {
             s.resize(static_cast<Eigen::Index>(nDims), static_cast<Eigen::Index>(nPaths));
         }
     }
 
-    std::size_t nSteps() const { return states.empty() ? 0 : states.size() - 1; }
+    /// Recorded retention: store only the caller-supplied grid steps, in the
+    /// given order (empty = none). The index set is validated.
+    void resizeRecorded(std::size_t nDimsIn, std::size_t nSteps, std::size_t nPathsIn,
+                        const std::vector<std::size_t>& indices) {
+        requireRecordIndices(indices, nSteps);
+        nDims = nDimsIn;
+        nPaths = nPathsIn;
+        gridSteps = nSteps;
+        recordIndices = indices;
+        states.resize(indices.size());
+        for (StateMatrix<Scalar>& s : states) {
+            s.resize(static_cast<Eigen::Index>(nDims), static_cast<Eigen::Index>(nPaths));
+        }
+    }
+
+    bool storesAll() const noexcept { return !recordIndices.has_value(); }
+
+    bool storesNone() const noexcept { return recordIndices.has_value() && recordIndices->empty(); }
+
+    std::size_t nRecorded() const noexcept { return states.size(); }
+
+    /// Grid step of recorded slot `r` (the identity under full retention).
+    std::size_t recordGridIndex(std::size_t r) const {
+        return storesAll() ? r : (*recordIndices)[r];
+    }
+
+    std::size_t nSteps() const {
+        return gridSteps != 0 ? gridSteps : (states.empty() ? 0 : states.size() - 1);
+    }
 };
 
 /// Batch drift functor: `out(:, p) = f(x(:, p), t, theta)` for all paths p.

@@ -38,6 +38,19 @@ target_link_libraries(bench_sde_alloc PRIVATE quantape TBB::tbb)
 quantape_enable_stan_defs(bench_sde_alloc)
 quantape_set_warnings(bench_sde_alloc)
 
+# SDE market-layer harness: numeraire views, state-to-curve evaluation and
+# frozen-market lookups/freeze. The alloc twin builds the same source with the
+# malloc shim and the var / fvar<var> allocation-shape cases.
+add_executable(bench_market bench_market.cpp)
+target_link_libraries(bench_market PRIVATE quantape)
+quantape_set_warnings(bench_market)
+
+add_executable(bench_market_alloc bench_market.cpp)
+target_compile_definitions(bench_market_alloc PRIVATE QUANTAPE_MARKET_ALLOC_COUNTS=1)
+target_link_libraries(bench_market_alloc PRIVATE quantape TBB::tbb)
+quantape_enable_stan_defs(bench_market_alloc)
+quantape_set_warnings(bench_market_alloc)
+
 add_executable(bench_risk bench_risk.cpp)
 target_link_libraries(bench_risk PRIVATE quantape)
 quantape_set_warnings(bench_risk)

@@ -91,6 +91,36 @@ public:
         });
     }
 
+    /// Streaming overload with the recordTimes contract: the full grid is
+    /// stepped, but each block stores only the caller-supplied grid steps
+    /// (`recordIndices` strictly increasing, empty = none). Sink contract is
+    /// otherwise identical to `simulateBlocks`; block indices remain block
+    /// indices, not record slots.
+    template <typename DriftF, typename DiffusionF, typename Source, typename Sink>
+        requires Drift<DriftF, Scalar> && Diffusion<DiffusionF, Scalar> && RandomSource<Source> &&
+                 (Scheme::uniformStreams == 0 || UniformRandomSource<Source>)
+    void simulateBlocksRecorded(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& x0,
+                                const DriftF& drift, const DiffusionF& diffusion,
+                                const Source& source, std::size_t nPaths, std::size_t blockSize,
+                                const std::vector<std::size_t>& recordIndices, const Sink& sink,
+                                Schedule schedule = Schedule::Sequential) const {
+        if (nPaths == 0) {
+            throw std::invalid_argument("SdeSimulator: nPaths must be positive");
+        }
+        if (blockSize == 0) {
+            throw std::invalid_argument("SdeSimulator: blockSize must be positive");
+        }
+        requireRecordIndices(recordIndices, m_timeGrid.nSteps());
+        const std::size_t nBlocks = (nPaths + blockSize - 1) / blockSize;
+        detail::parallelFor(nBlocks, schedule, [&](std::size_t blockIndex) {
+            const std::size_t pathBegin = blockIndex * blockSize;
+            const std::size_t blockPaths = std::min(blockSize, nPaths - pathBegin);
+            PathBlock<Scalar> block =
+                simulateBlock(x0, drift, diffusion, source, pathBegin, blockPaths, &recordIndices);
+            sink(block, blockIndex);
+        });
+    }
+
     /// Collecting overload; `Schedule::Parallel` stripes blocks over
     /// std::thread workers (deterministic: blocks are independent and the
     /// keyed source makes every path a pure function of its index).
@@ -117,6 +147,34 @@ public:
         return blocks;
     }
 
+    /// Collecting overload with the recordTimes contract (see
+    /// `simulateBlocksRecorded`): only the requested grid steps are stored.
+    template <typename DriftF, typename DiffusionF, typename Source>
+        requires Drift<DriftF, Scalar> && Diffusion<DiffusionF, Scalar> && RandomSource<Source> &&
+                 (Scheme::uniformStreams == 0 || UniformRandomSource<Source>)
+    std::vector<PathBlock<Scalar>>
+    simulateRecorded(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& x0, const DriftF& drift,
+                     const DiffusionF& diffusion, const Source& source, std::size_t nPaths,
+                     std::size_t blockSize, const std::vector<std::size_t>& recordIndices,
+                     Schedule schedule = Schedule::Sequential) const {
+        if (nPaths == 0) {
+            throw std::invalid_argument("SdeSimulator: nPaths must be positive");
+        }
+        if (blockSize == 0) {
+            throw std::invalid_argument("SdeSimulator: blockSize must be positive");
+        }
+        requireRecordIndices(recordIndices, m_timeGrid.nSteps());
+        const std::size_t nBlocks = (nPaths + blockSize - 1) / blockSize;
+        std::vector<PathBlock<Scalar>> blocks(nBlocks);
+        detail::parallelFor(nBlocks, schedule, [&](std::size_t blockIndex) {
+            const std::size_t pathBegin = blockIndex * blockSize;
+            const std::size_t blockPaths = std::min(blockSize, nPaths - pathBegin);
+            blocks[blockIndex] =
+                simulateBlock(x0, drift, diffusion, source, pathBegin, blockPaths, &recordIndices);
+        });
+        return blocks;
+    }
+
     /// One path, bitwise identical to path `pathIndex` of a full run
     template <typename DriftF, typename DiffusionF, typename Source>
         requires Drift<DriftF, Scalar> && Diffusion<DiffusionF, Scalar> && RandomSource<Source> &&
@@ -125,6 +183,20 @@ public:
                                    const DriftF& drift, const DiffusionF& diffusion,
                                    const Source& source, std::size_t pathIndex) const {
         return simulateBlock(x0, drift, diffusion, source, pathIndex, 1);
+    }
+
+    /// One path with the recordTimes contract (see
+    /// `simulateBlocksRecorded`), bitwise identical to the same path of a
+    /// full recorded run.
+    template <typename DriftF, typename DiffusionF, typename Source>
+        requires Drift<DriftF, Scalar> && Diffusion<DiffusionF, Scalar> && RandomSource<Source> &&
+                 (Scheme::uniformStreams == 0 || UniformRandomSource<Source>)
+    PathBlock<Scalar> simulatePathRecorded(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& x0,
+                                           const DriftF& drift, const DiffusionF& diffusion,
+                                           const Source& source, std::size_t pathIndex,
+                                           const std::vector<std::size_t>& recordIndices) const {
+        requireRecordIndices(recordIndices, m_timeGrid.nSteps());
+        return simulateBlock(x0, drift, diffusion, source, pathIndex, 1, &recordIndices);
     }
 
     /// One path with an explicit scalar type and a shared (per-step
@@ -180,30 +252,66 @@ public:
     }
 
 private:
+    /// `recordIndices == nullptr` (or the full grid) is the historical full
+    /// retention path, unchanged; otherwise two reused work states step the
+    /// full grid and only the requested steps are copied into the block.
     template <typename DriftF, typename DiffusionF, typename Source>
     PathBlock<Scalar> simulateBlock(const Eigen::Matrix<Scalar, Eigen::Dynamic, 1>& x0,
                                     const DriftF& drift, const DiffusionF& diffusion,
                                     const Source& source, std::size_t pathBegin,
-                                    std::size_t blockPaths) const {
+                                    std::size_t blockPaths,
+                                    const std::vector<std::size_t>* recordIndices = nullptr) const {
         const std::size_t nSteps = m_timeGrid.nSteps();
         const std::size_t nDims = static_cast<std::size_t>(x0.size());
 
-        PathBlock<Scalar> block;
-        block.resize(nDims, nSteps, blockPaths);
-        for (std::size_t p = 0; p < blockPaths; ++p) {
-            block.states[0].col(static_cast<Eigen::Index>(p)) = x0;
+        if (recordIndices == nullptr || recordIndices->size() == nSteps + 1) {
+            PathBlock<Scalar> block;
+            block.resize(nDims, nSteps, blockPaths);
+            for (std::size_t p = 0; p < blockPaths; ++p) {
+                block.states[0].col(static_cast<Eigen::Index>(p)) = x0;
+            }
+
+            // Scheme-owned scratch, constructed once per block and reused
+            // across steps (zero per-step allocation).
+            typename Scheme::template Scratch<Scalar> scratch(
+                static_cast<Eigen::Index>(nDims), static_cast<Eigen::Index>(blockPaths));
+            Eigen::MatrixXd z;
+            Eigen::MatrixXd uniforms;
+
+            for (std::size_t k = 0; k < nSteps; ++k) {
+                stepPath(block.states[k], block.states[k + 1], k, pathBegin, source, drift,
+                         diffusion, m_theta[k], z, uniforms, scratch);
+            }
+            return block;
         }
 
-        // Scheme-owned scratch, constructed once per block and reused
-        // across steps (zero per-step allocation).
+        PathBlock<Scalar> block;
+        block.resizeRecorded(nDims, nSteps, blockPaths, *recordIndices);
+        StateMatrix<Scalar> x(static_cast<Eigen::Index>(nDims),
+                              static_cast<Eigen::Index>(blockPaths));
+        StateMatrix<Scalar> xNext(static_cast<Eigen::Index>(nDims),
+                                  static_cast<Eigen::Index>(blockPaths));
+        for (std::size_t p = 0; p < blockPaths; ++p) {
+            x.col(static_cast<Eigen::Index>(p)) = x0;
+        }
+
         typename Scheme::template Scratch<Scalar> scratch(static_cast<Eigen::Index>(nDims),
                                                           static_cast<Eigen::Index>(blockPaths));
         Eigen::MatrixXd z;
         Eigen::MatrixXd uniforms;
-
+        std::size_t nextRecord = 0;
+        if (nextRecord < recordIndices->size() && (*recordIndices)[nextRecord] == 0) {
+            block.states[nextRecord] = x;
+            ++nextRecord;
+        }
         for (std::size_t k = 0; k < nSteps; ++k) {
-            stepPath(block.states[k], block.states[k + 1], k, pathBegin, source, drift, diffusion,
-                     m_theta[k], z, uniforms, scratch);
+            stepPath(x, xNext, k, pathBegin, source, drift, diffusion, m_theta[k], z, uniforms,
+                     scratch);
+            x.swap(xNext);
+            if (nextRecord < recordIndices->size() && (*recordIndices)[nextRecord] == k + 1) {
+                block.states[nextRecord] = x;
+                ++nextRecord;
+            }
         }
         return block;
     }

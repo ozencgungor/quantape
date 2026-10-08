@@ -12,6 +12,7 @@
 #include "quantape/format/Number.h"
 #include "quantape/log/Log.h"
 #include "quantape/mc/Estimator.h"
+#include "quantape/mc/Evaluate.h"
 #include "quantape/mc/ForwardStan.h"
 #include "quantape/mc/Gradients.h"
 #include "quantape/mc/MomentMatching.h"
@@ -24,6 +25,7 @@
 #include "quantape/mc/SobolSource.h"
 #include "quantape/mc/StateDerivatives.h"
 #include "quantape/mc/TimeGrid.h"
+#include "quantape/mc/Transition.h"
 #include "quantape/mc/mcfwdrev/ForwardGradients.h"
 #include "quantape/mc/mcfwdrev/LeanGradients.h"
 #include "quantape/mc/processes/HestonQeProcess.h"
@@ -43,6 +45,7 @@
 #include <memory>
 #include <new>
 #include <random>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -312,6 +315,30 @@ struct GbmThetaModel {
                    const std::vector<Scalar>& th, std::size_t,
                    quantape::mc::StateMatrix<Scalar>& out) const {
         out = (th[1] * x.array()).matrix();
+    }
+};
+
+// GBM with the exact lognormal transition hook (same theta layout).
+struct ExactGbmModel {
+    template <typename Scalar>
+    void drift(const quantape::mc::StateMatrix<Scalar>& x, double, const std::vector<Scalar>& th,
+               quantape::mc::StateMatrix<Scalar>& out) const {
+        out = (th[0] * x.array()).matrix();
+    }
+    template <typename Scalar>
+    void diffusion(const quantape::mc::StateMatrix<Scalar>& x, double,
+                   const std::vector<Scalar>& th, std::size_t,
+                   quantape::mc::StateMatrix<Scalar>& out) const {
+        out = (th[1] * x.array()).matrix();
+    }
+    template <typename Scalar>
+    void transition(const quantape::mc::StateMatrix<Scalar>& x, double, double dt,
+                    const Eigen::MatrixXd& z, const std::vector<Scalar>& th,
+                    quantape::mc::StateMatrix<Scalar>& out) const {
+        using std::sqrt;
+        const Scalar logDrift = (th[0] - Scalar(0.5) * th[1] * th[1]) * Scalar(dt);
+        const auto logScale = (th[1] * Scalar(sqrt(dt))) * z.row(0).array() + Scalar(logDrift);
+        out = (x.array() * logScale.exp()).matrix();
     }
 };
 
@@ -1116,6 +1143,98 @@ int main(int argc, char** argv) {
                     quantape::mc::diffusionOf(model), sobolSource, payoff, nPaths,
                     Schedule::Parallel);
                 return g.value + g.gradient(0);
+            });
+        }
+    }
+
+    // ── 10. P2: exact transition hook, recorded storage, batched evaluation ──
+    if (!onlyGrad) {
+        const std::size_t nPaths = 100000;
+        const std::size_t nSteps = 252;
+        const TimeGrid grid(1.0, nSteps);
+        const std::vector<double> theta = {0.05, 0.2};
+        const std::vector<std::vector<double>> thetaSteps(nSteps, theta);
+        const auto x0 = Eigen::VectorXd::Constant(1, 100.0);
+
+        // exact-transition hook (same grid/source; scheme path for comparison
+        // is the existing "euler gbm stream" case above)
+        {
+            const SdeSimulator<double, quantape::mc::TransitionScheme<ExactGbmModel>> simulator(
+                grid, thetaSteps, quantape::mc::transitionScheme(ExactGbmModel{}));
+            const IidGaussianSource<> source(1, 7);
+            bench_us("exact transition gbm stream 100k x 252", double(nPaths * nSteps), reps, [&] {
+                double checksum = 0.0;
+                simulator.simulateBlocks(
+                    x0, quantape::mc::driftOf(ExactGbmModel{}),
+                    quantape::mc::diffusionOf(ExactGbmModel{}), source, nPaths, 4096,
+                    [&checksum](const quantape::mc::PathBlock<double>& block, std::size_t) {
+                        checksum += block.states.back()(0, 0);
+                    });
+                return checksum;
+            });
+        }
+
+        // recorded storage: the full weekly grid is stepped, only the
+        // exposure schedule is retained
+        {
+            const SdeSimulator<double, Euler> simulator(grid, thetaSteps);
+            const IidGaussianSource<> source(1, 7);
+            const GbmThetaModel model;
+            const std::vector<std::size_t> exposure = {0, 63, 126, 189, 252};
+            bench_us("euler gbm recorded {5 dates} stream 100k x 252", double(nPaths * nSteps),
+                     reps, [&] {
+                         double checksum = 0.0;
+                         simulator.simulateBlocksRecorded(
+                             x0, quantape::mc::driftOf(model), quantape::mc::diffusionOf(model),
+                             source, nPaths, 4096, exposure,
+                             [&checksum](const quantape::mc::PathBlock<double>& block,
+                                         std::size_t) { checksum += block.states.back()(0, 0); });
+                         return checksum;
+                     });
+        }
+
+        // block-batched SoA evaluation vs the equivalent per-path loop
+        {
+            const std::size_t evalPaths = 20000;
+            const std::size_t evalSteps = 64;
+            const TimeGrid evalGrid(1.0, evalSteps);
+            const std::vector<std::vector<double>> evalTheta(evalSteps, theta);
+            const SdeSimulator<double> simulator(evalGrid, evalTheta);
+            const IidGaussianSource<> source(1, 7);
+            const GbmThetaModel model;
+            const auto blocks =
+                simulator.simulate(x0, quantape::mc::driftOf(model),
+                                   quantape::mc::diffusionOf(model), source, evalPaths, 4096);
+            std::vector<quantape::mc::StateMatrix<double>> outputs(blocks.size());
+            for (std::size_t bi = 0; bi < blocks.size(); ++bi) {
+                outputs[bi].resize(2, blocks[bi].states.back().cols());
+            }
+            const auto evaluator = [](std::span<const double> state, std::span<double> out) {
+                out[0] = state[0] * state[0] + 0.25 * state[1];
+                out[1] = state[0] > 100.0 ? state[0] - 100.0 : 0.0;
+            };
+            bench_us("evaluateBlock terminal 20k", double(evalPaths), reps, [&] {
+                double checksum = 0.0;
+                for (std::size_t bi = 0; bi < blocks.size(); ++bi) {
+                    quantape::mc::evaluateBlock<double>(quantape::mc::perPath<double>(evaluator),
+                                                        blocks[bi].states.back(), outputs[bi]);
+                    checksum += outputs[bi](0, 0) + outputs[bi](1, 0);
+                }
+                return checksum;
+            });
+            bench_us("evaluate per-path loop 20k", double(evalPaths), reps, [&] {
+                double checksum = 0.0;
+                for (std::size_t bi = 0; bi < blocks.size(); ++bi) {
+                    const auto& states = blocks[bi].states.back();
+                    auto& out = outputs[bi];
+                    for (Eigen::Index p = 0; p < states.cols(); ++p) {
+                        const double s = states(0, p);
+                        out(0, p) = s * s + 0.25 * states(1, p);
+                        out(1, p) = s > 100.0 ? s - 100.0 : 0.0;
+                    }
+                    checksum += out(0, 0) + out(1, 0);
+                }
+                return checksum;
             });
         }
     }
