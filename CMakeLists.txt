@@ -59,6 +59,8 @@ if(NOT DEFINED QUANTAPE_BUILD_BENCHMARKS)
 endif()
 option(QUANTAPE_TEST_OPTIMIZATION
        "Build tests with -O2 in optimized configurations (never in Debug)" ON)
+option(QUANTAPE_WITH_AD
+       "Build the standalone lightape AD engine (in-tree; not wired into quantape yet)" OFF)
 option(QUANTAPE_ENABLE_LOGGING "Build with quill-based logging (macros become no-ops when OFF)" ON)
 set(QUANTAPE_LOG_COMPILE_LEVEL "" CACHE STRING
     "Compile-time log level: TRACE/DEBUG/INFO/WARN/ERROR/CRITICAL (default: TRACE in Debug, INFO otherwise)")
@@ -213,6 +215,12 @@ if(QUANTAPE_BUILD_TESTS)
 endif()
 if(QUANTAPE_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+if(QUANTAPE_WITH_AD)
+    if(LIGHTAPE_BUILD_TESTS)
+        enable_testing()
+    endif()
+    add_subdirectory(lightape)
 endif()
 
 # Single target depending on every executable (IDE-friendly build target).
