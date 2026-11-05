@@ -8,9 +8,11 @@
 #      (plus the standard library / Eigen in dedicated adapter headers)
 #   4. CamelCase file names under include/ and src/
 #   5. include-guard convention in the new low-level modules
-#   6. lightape self-containment: the standalone AD engine includes only its
-#      own headers, the standard library and Eigen (Eigen confined to
-#      lightape/eigen); never quantape, Stan, Boost, TBB or other project code
+#   6. lightape engine self-containment: lightape/include and lightape/src
+#      include only lightape headers, the standard library and Eigen (Eigen
+#      confined to adapter headers); never quantape, Stan, Boost, TBB or other
+#      project code. Benchmarks (and the test harness) may include quantape
+#      header-only for cross-project comparisons.
 #   7. no redundant `inline` on lightape function templates: templates are
 #      ODR-exempt and clang-tidy has no check for this
 #
@@ -89,7 +91,7 @@ while IFS= read -r line; do
     report "lightape self-containment: $line"
 done < <(git grep -n -E \
     '#[[:space:]]*include[[:space:]]*[<"](quantape|stan|boost|tbb|sundials|quill|zmij)(/|")' \
-    -- 'lightape/**' 2>/dev/null || true)
+    -- 'lightape/include/**' 'lightape/src/**' 2>/dev/null || true)
 
 # ── 7. redundant `inline` on lightape function templates ────────────────────
 # Function templates are exempt from the one-definition rule and do not need
