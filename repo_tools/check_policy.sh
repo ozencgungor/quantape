@@ -8,6 +8,11 @@
 #      (plus the standard library / Eigen in dedicated adapter headers)
 #   4. CamelCase file names under include/ and src/
 #   5. include-guard convention in the new low-level modules
+#   6. lightape self-containment: the standalone AD engine includes only its
+#      own headers, the standard library and Eigen (Eigen confined to
+#      lightape/eigen); never quantape, Stan, Boost, TBB or other project code
+#   7. no redundant `inline` on lightape function templates: templates are
+#      ODR-exempt and clang-tidy has no check for this
 #
 # Usage: repo_tools/check_policy.sh
 set -uo pipefail
@@ -78,6 +83,44 @@ while IFS= read -r file; do
         report "guard must start with QUANTAPE_: $file ($guard)"
     fi
 done < <(git ls-files 'include/quantape/util/**' 'include/quantape/ad/**')
+
+# ── 6. lightape self-containment ────────────────────────────────────────────
+while IFS= read -r line; do
+    report "lightape self-containment: $line"
+done < <(git grep -n -E \
+    '#[[:space:]]*include[[:space:]]*[<"](quantape|stan|boost|tbb|sundials|quill|zmij)(/|")' \
+    -- 'lightape/**' 2>/dev/null || true)
+
+# ── 7. redundant `inline` on lightape function templates ────────────────────
+# Function templates are exempt from the one-definition rule and do not need
+# `inline`; clang-tidy has no check for it (readability-redundant-inline-
+# specifier only covers in-class definitions), so it is guarded here. A
+# template head may carry a `requires(...)` clause on the following line.
+# `inline constexpr`/`inline static` variables stay (load-bearing). Files are
+# taken from the index when tracked, else from the working tree so the check
+# also covers lightape while it is still untracked.
+_lightape_headers=$(git ls-files 'lightape/include/**' 2>/dev/null)
+if [ -z "$_lightape_headers" ] && [ -d lightape/include ]; then
+    _lightape_headers=$(find lightape/include -type f -name '*.h' 2>/dev/null)
+fi
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    while IFS= read -r line; do
+        report "redundant inline on function template: $line"
+    done < <(awk '
+        FNR == 1 { prev = "" }
+        prev ~ /^[[:space:]]*template[[:space:]]*</ &&
+        $0 ~ /^[[:space:]]*inline[[:space:]]/ &&
+        $0 !~ /inline[[:space:]]+(constexpr|static)/ {
+            printf "%s:%d:%s\n", FILENAME, FNR, $0
+        }
+        prev ~ /^[[:space:]]*requires[[:space:]]*\(/ &&
+        $0 ~ /^[[:space:]]*inline[[:space:]]/ {
+            printf "%s:%d:%s\n", FILENAME, FNR, $0
+        }
+        { prev = $0 }
+    ' "$file")
+done <<< "$_lightape_headers"
 
 if [ "$failures" -eq 0 ]; then
     echo "policy: ok"
