@@ -1,0 +1,108 @@
+# clang-tidy configuration for the standalone lightape AD engine.
+#
+# Same philosophy as the repo root config: enable what is actionable, disable
+# what is noise for header-only AD/TMP code, and keep the set honest (zero
+# findings under repo_tools/check_tidy.sh, which runs the lightape TUs with
+# `--warnings-as-errors='*'`). Paths outside lightape/ are filtered out by the
+# gate, so third-party/system diagnostics never fail the build.
+#
+# Enabled families:
+#   clang-analyzer-*              - static analyzer (dead stores, uninitialized
+#                                   reads, use-after-move, null derefs, ...)
+#   clang-diagnostic-unused-*     - compiler unused-function/variable/...
+#                                   warnings (the build's -Wall -Wextra set)
+#   bugprone-*                    - real-bug patterns (minus noise below)
+#   performance-*                 - copies, accidental copies, move hygiene
+#   cppcoreguidelines-init-variables - uninitialized locals; deliberately the
+#                                   only cppcoreguidelines check (the bounds/
+#                                   ownership/macro ones flood this codebase)
+#   readability-redundant-*       - redundant declarations/init/typename/...
+#   modernize-use-nullptr/override/using/bool-literals - low-risk idioms
+#
+# Excluded on purpose; each is noise in this codebase, not wrong in general:
+#   bugprone-easily-swappable-parameters - mathematical APIs take (a, b) pairs
+#       like (x, scale); swapping is a caller contract, not a bug.
+#   bugprone-narrowing-conversions - intentional double<->scalar conversions
+#       across the AD scalar hierarchy.
+#   bugprone-implicit-widening-of-multiplication-result - intentional size
+#       arithmetic; the few test-site instances are tiny constants.
+#   bugprone-exception-escape - the only entry points are tape scope
+#       destructors and SegmentRecorder::abort(), which call
+#       RevTape::resetTo; resetTo only shrinks trivially-destructible vectors
+#       (pop_back/clear/shrink resize), which cannot actually throw under any
+#       supported STL, but std::vector::resize is not formally noexcept, so
+#       the check cannot prove it. Decorating the whole reset path noexcept
+#       would just encode that assumption in the API.
+#   bugprone-macro-parentheses - macro-heavy trait glue is parenthesized by
+#       convention.
+#   bugprone-random-generator-seed - fixed seeds are deliberate in tests.
+#   performance-enum-size - enum size is not a hot-path concern and narrowing
+#       the base changes ABI for little gain.
+#   performance-unnecessary-value-param - AD scalars are passed by value by
+#       design; the scalar is the handle (same choice as the root config).
+#   cppcoreguidelines-pro-bounds-* - raw pointer/array indexing is the
+#       hot-path style of the engine and of Eigen views; bounds-checked
+#       alternatives would change codegen.
+#   cppcoreguidelines-pro-type-const-cast - the single hit is Executor's
+#       type-erased BatchFn, which strips const only to store a `void*` and
+#       re-applies the exact const-qualified functor type in invokeBatch;
+#       no object is modified through a const path.
+#   cppcoreguidelines-owning-memory / special-member-functions /
+#   macro-usage / avoid-do-while / pro-type-vararg / use-enum-class /
+#   prefer-member-initializer / avoid-non-const-global-variables /
+#   missing-std-forward - raw arena ownership, deliberate RAII-with-deleted-
+#       copies classes, X-macro table glue, single-pass do/while macros,
+#       snprintf, unscoped enums, in-constructor initializers and the
+#       non-forwarding F&& seam parameters are all intentional.
+#   modernize-use-trailing-return-type - out of style for this codebase.
+#   modernize-use-designated-initializers - positional aggregate init reads
+#       better in the scientific code here.
+#   modernize-concat-nested-namespaces / use-auto / use-std-numbers /
+#   return-braced-init-list / use-nodiscard / use-ranges / use-constraints /
+#   use-scoped-lock - style preferences, not bugs.
+#   readability-identifier-length - single-letter math names (x, y, i, j, n)
+#       are the domain language.
+#   readability-math-missing-parentheses - `i * n + j`-style index arithmetic
+#       is deliberate; extra parentheses hurt readability.
+#   readability-uppercase-literal-suffix - not enforced in this codebase.
+#   readability-magic-numbers - numeric literals are domain coefficients with
+#       the surrounding formula as documentation.
+#   readability-function-cognitive-complexity - kernels (series, quadrature)
+#       are long by nature.
+#   readability-use-std-min-max / avoid-nested-conditional-operator /
+#       isolate-declaration / simplify-boolean-expr - clarity preferences.
+#   readability-use-concise-preprocessor-directives - `#if defined(X)` is
+#       preferred for greppability and mixed &&/|| conditions.
+#   readability-convert-member-functions-to-static - false positives through
+#       CRTP and template-dependent calls.
+#
+# NOTE: clang-tidy has no check for a redundant `inline` on a function
+# template (readability-redundant-inline-specifier only covers in-class
+# definitions and implicit-inline variables); repo_tools/check_policy.sh
+# enforces the function-template sweep separately.
+
+Checks: >
+  -*,
+  clang-analyzer-*,
+  clang-diagnostic-unused-*,
+  bugprone-*,
+  performance-*,
+  cppcoreguidelines-init-variables,
+  readability-redundant-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  modernize-use-bool-literals,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-exception-escape,
+  -bugprone-macro-parentheses,
+  -bugprone-random-generator-seed,
+  -performance-enum-size,
+  -performance-unnecessary-value-param
+WarningsAsErrors: ''
+HeaderFilterRegex: 'lightape/.*'
+FormatStyle: file
+UseColor: false
+...
