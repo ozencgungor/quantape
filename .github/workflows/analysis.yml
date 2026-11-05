@@ -23,13 +23,21 @@ jobs:
           path: |
             third-party
             build-ci/_deps
-          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh') }}
+            build-lightape/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'repo_tools/fetch_third_party.sh', 'lightape/CMakeLists.txt') }}
 
       - name: Fetch pinned dependencies (Eigen, Stan Math)
         run: repo_tools/fetch_third_party.sh
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pin the same clang-tidy as local dev (the PyPI wheel, 22.1.8): the
+      # allowlists in repo_tools/check_tidy.sh are verified against it and
+      # distro clang-tidy versions drift.
       - name: Install clang-tidy
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+        run: pip install clang-tidy==22.1.8
 
       - name: Configure (compile database only)
         run: >
@@ -40,6 +48,19 @@ jobs:
           -DQUANTAPE_BUILD_TOOLS=OFF
           -DQUANTAPE_BUILD_EXAMPLES=OFF
 
+      # lightape is standalone and header-only: its own database (tests +
+      # benchmarks; third-party/eigen from the fetch above) is what
+      # repo_tools/check_tidy.sh analyses it with. libm keeps the configure
+      # independent of the SLEEF download.
+      - name: Configure lightape (compile database only)
+        run: >
+          cmake -S lightape -B build-lightape
+          -DCMAKE_BUILD_TYPE=Release
+          -DLIGHTAPE_BUILD_TESTS=ON
+          -DLIGHTAPE_BUILD_BENCHMARKS=ON
+          -DLIGHTAPE_VECTOR_MATH=libm
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
       # Allowlist in repo_tools/check_tidy.sh grows module by module; it exits
       # 0 when nothing allowlisted changed. The googletest include dirs are
       # marked SYSTEM in cmake/Dependencies.cmake (quantape_mark_system), so
@@ -47,6 +68,7 @@ jobs:
       - name: clang-tidy (allowlisted modules)
         env:
           BUILD_DIR: build-ci
+          LIGHTAPE_BUILD_DIR: build-lightape
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             repo_tools/check_tidy.sh --changed "${{ github.event.pull_request.base.sha }}"
