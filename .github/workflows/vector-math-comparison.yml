@@ -1,0 +1,33 @@
+name: vector-math-comparison
+
+# Manual x86-64 comparison of the lightape vector-math backends (libm vs SLEEF
+# explicit ISAs) and the AD benches. Runs on a real x86-64 Linux runner: this
+# is about honest wall-clock medians on x86 hardware, not emulation.
+#
+# Trigger: Actions -> vector-math-comparison -> Run workflow.
+# Artifacts: comparison-results/ (environment, full ctest suites for both
+# builds, per-function tables, batch/scalar AD benches).
+# See internal_docs/simd_vector_math_plan.md (plan) and decisions.md #28.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build cmake g++
+
+      - name: Run vector-math comparison (full suites + benches)
+        run: repo_tools/run_vector_math_comparison.sh --tests
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-results
+          path: comparison-results/
