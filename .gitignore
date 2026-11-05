@@ -71,3 +71,6 @@ joe-kuo-65536-*.txt
 # python bytecode
 __pycache__/
 *.pyc
+
+# Vector-math comparison artifacts
+comparison-results/
