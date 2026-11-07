@@ -22,8 +22,8 @@ namespace quantape::instruments {
  * trial only reads discount factors. The member `impliedQuote<ScalarT>`
  * forwards to the scalar algebra in `pricing/IrMath.h` and reads either a
  * discount curve set or a forecast curve set, so one type serves the discount
- * and forecast bootstraps. The swap members are `double`-only by contract and
- * reject AD scalars at runtime.
+ * and forecast bootstraps. Every member is scalar generic, including the swap
+ * members, so a quote residual can be evaluated on a `var` curve.
  *
  * `date()` is the instrument's risk maturity (calendar-adjusted where the
  * convention rolls dates, the quoted end for exchange futures), `target()` the
@@ -259,18 +259,11 @@ struct Irs {
         return *this;
     }
 
-    /// Model par rate over a forecast curve set; the swap legs need `double`
-    /// curves, so a non-double scalar is rejected at runtime.
+    /// Model par rate over a forecast curve set; scalar generic end to end.
     template <typename ScalarT, typename CurveSetT>
     ScalarT impliedQuote(const CurveSetT& curves) const {
-        if constexpr (std::is_same_v<ScalarT, double>) {
-            return pricing::impliedIrsParRate<ScalarT>(times, curves.forecastCurve,
-                                                       curves.discountCurve);
-        } else {
-            (void)curves;
-            throw std::invalid_argument(
-                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
-        }
+        return pricing::impliedIrsParRate<ScalarT>(times, curves.forecastCurve,
+                                                   curves.discountCurve);
     }
 };
 
@@ -303,22 +296,13 @@ struct BasisSwap {
         return *this;
     }
 
-    /// Model spread over a forecast curve set; the basis legs need `double`
-    /// curves, so a non-double scalar is rejected at runtime.
+    /// Model spread over a forecast curve set; scalar generic end to end.
     template <typename ScalarT, typename CurveSetT>
     ScalarT impliedQuote(const CurveSetT& curves) const {
-        if constexpr (std::is_same_v<ScalarT, double>) {
-            const auto& child = curves.forecastCurve;
-            const auto discountAt = [&curves](double t) {
-                return curves.discountCurve.discount(t);
-            };
-            return pricing::impliedBasisSpread<ScalarT>(times, child, child.parent(), discountAt,
-                                                        spreadOnParentLeg);
-        } else {
-            (void)curves;
-            throw std::invalid_argument(
-                "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
-        }
+        const auto& child = curves.forecastCurve;
+        const auto discountAt = [&curves](double t) { return curves.discountCurve.discount(t); };
+        return pricing::impliedBasisSpread<ScalarT>(times, child, child.parent(), discountAt,
+                                                    spreadOnParentLeg);
     }
 };
 

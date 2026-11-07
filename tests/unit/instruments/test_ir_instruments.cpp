@@ -389,7 +389,7 @@ TEST_F(IrInstrumentsTest, cashflowsUseCurrencyAndFixedFlows) {
 
 /// IRS and basis-swap instruments: metadata, prepared quote algebra and the
 /// double-only runtime contract that keeps the swap legs off the AD path.
-TEST_F(IrInstrumentsTest, irsAndBasisSwapMetadataAndDoubleOnlyContract) {
+TEST_F(IrInstrumentsTest, irsAndBasisSwapMetadataAndQuoteComposesOnTape) {
     const mk::DiscountCurve<double> parent = makeCurve({0.0, 0.03, 0.032});
     const auto parentPtr = std::make_shared<mk::DiscountCurve<double>>(parent);
     const std::vector<double> spreadTimes{0.0, 1.0, 2.0};
@@ -434,21 +434,72 @@ TEST_F(IrInstrumentsTest, irsAndBasisSwapMetadataAndDoubleOnlyContract) {
     CHECK_CLOSE("basis overload quote", pr::impliedBasisSpread<double>(preparedBasis, curves),
                 basis.spread, 1e-15);
 
-    // The swap quotes are double-only: the runtime message is frozen.
-    try {
-        (void)preparedIrs.template impliedQuote<stan::math::var>(curves);
-        FAIL() << "irs var quote did not throw";
-    } catch (const std::invalid_argument& error) {
-        EXPECT_STREQ(error.what(),
-                     "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+    // The swap quotes are scalar generic: on a `var` curve they must reproduce
+    // the double value and carry the analytic derivative, checked against a
+    // central difference of the same double algebra. Each quote gets its own
+    // nested tape: `var::grad()` accumulates into existing adjoints rather than
+    // zeroing them, so sharing a tape would mix the two derivatives.
+    using stan::math::var;
+    const double fdStep = 1e-6;
+    const auto centralDifference = [&](auto&& quoteAt) {
+        return (quoteAt(fdStep) - quoteAt(-fdStep)) / (2.0 * fdStep);
+    };
+
+    double irsAdjoint = 0.0;
+    {
+        stan::math::nested_rev_autodiff tape;
+        std::vector<var> zeros{var(0.0), var(0.03), var(0.032)};
+        const mk::DiscountCurve<var> parentV(kTimes, zeros, mk::InterpolationSpace::LogDiscount,
+                                             mk::InterpolationScheme::Linear);
+        const auto ptr = std::make_shared<const mk::DiscountCurve<var>>(parentV);
+        std::vector<var> spreads{var(0.0), var(0.0008), var(0.0010)};
+        const mk::SpreadCurve<var> childV(ptr, spreadTimes, spreads,
+                                          mk::InterpolationScheme::Linear);
+        const mk::ForecastSet<mk::SpreadCurve<var>, mk::DiscountCurve<var>> curvesVar{childV,
+                                                                                      parentV};
+        var quote = preparedIrs.template impliedQuote<var>(curvesVar);
+        CHECK_CLOSE("irs var quote value", quote.val(), irs.quote, 1e-15);
+        quote.grad();
+        irsAdjoint = zeros[1].adj();
     }
-    try {
-        (void)preparedBasis.template impliedQuote<stan::math::var>(curves);
-        FAIL() << "basis var quote did not throw";
-    } catch (const std::invalid_argument& error) {
-        EXPECT_STREQ(error.what(),
-                     "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
+    const double irsFd = centralDifference([&](double bump) {
+        const mk::DiscountCurve<double> bumped = makeCurve({0.0, 0.03 + bump, 0.032});
+        const auto bumpedPtr = std::make_shared<const mk::DiscountCurve<double>>(bumped);
+        const mk::SpreadCurve<double> bumpedChild(bumpedPtr, spreadTimes,
+                                                  std::vector<double>{0.0, 0.0008, 0.0010},
+                                                  mk::InterpolationScheme::Linear);
+        const mk::ForecastSet<mk::SpreadCurve<double>, mk::DiscountCurve<double>> bumpedCurves{
+            bumpedChild, bumped};
+        return preparedIrs.template impliedQuote<double>(bumpedCurves);
+    });
+    CHECK_CLOSE("irs var adjoint w.r.t. the parent zero node", irsAdjoint, irsFd, 1e-6);
+
+    double basisAdjoint = 0.0;
+    {
+        stan::math::nested_rev_autodiff tape;
+        std::vector<var> zeros{var(0.0), var(0.03), var(0.032)};
+        const mk::DiscountCurve<var> parentV(kTimes, zeros, mk::InterpolationSpace::LogDiscount,
+                                             mk::InterpolationScheme::Linear);
+        const auto ptr = std::make_shared<const mk::DiscountCurve<var>>(parentV);
+        std::vector<var> spreads{var(0.0), var(0.0008), var(0.0010)};
+        const mk::SpreadCurve<var> childV(ptr, spreadTimes, spreads,
+                                          mk::InterpolationScheme::Linear);
+        const mk::ForecastSet<mk::SpreadCurve<var>, mk::DiscountCurve<var>> curvesVar{childV,
+                                                                                      parentV};
+        var quote = preparedBasis.template impliedQuote<var>(curvesVar);
+        CHECK_CLOSE("basis var quote value", quote.val(), basis.spread, 1e-15);
+        quote.grad();
+        basisAdjoint = spreads[1].adj();
     }
+    const double basisFd = centralDifference([&](double bump) {
+        const mk::SpreadCurve<double> bumpedChild(parentPtr, spreadTimes,
+                                                  std::vector<double>{0.0, 0.0008 + bump, 0.0010},
+                                                  mk::InterpolationScheme::Linear);
+        const mk::ForecastSet<mk::SpreadCurve<double>, mk::DiscountCurve<double>> bumpedCurves{
+            bumpedChild, parent};
+        return preparedBasis.template impliedQuote<double>(bumpedCurves);
+    });
+    CHECK_CLOSE("basis var adjoint w.r.t. the spread node", basisAdjoint, basisFd, 1e-6);
 
     // A matured accrual is rejected with the frozen per-instrument text.
     inst::Irs matured = irs;

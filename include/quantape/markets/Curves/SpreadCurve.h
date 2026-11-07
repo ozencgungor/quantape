@@ -112,6 +112,12 @@ concept CurveProvider = requires(const P& provider, double t1, double t2) {
     requires std::same_as<std::decay_t<decltype(provider.forward(t1, t2))>, DoubleT>;
 };
 
+/// Scalar carried by a curve provider (`double`, `var`, `fvar<var>`, ...),
+/// read off its `discount` signature. Lets a templated quote deduce the scalar
+/// from its curve arguments instead of taking an explicit template argument.
+template <typename P>
+using curve_scalar_t = std::decay_t<decltype(std::declval<const P&>().discount(0.0))>;
+
 /// A `CurveProvider` that also exposes its solved node grid and interpolation
 /// weights, so it can back a spread curve or a chained forecast curve.
 template <typename C>

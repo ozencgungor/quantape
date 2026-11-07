@@ -193,13 +193,21 @@ the selected branch. See `include/quantape/math/README.md` for details and
 contracts.
 
 Curve evaluation follows the same rule: `DiscountCurve` and `SpreadCurve`
-instantiate at `double`, `var` and `fvar<var>`, and every bootstrap instrument
-models the scalar-generic `BootstrapInstrument` concept
-(`impliedQuote<ScalarT>`), so curve values, quote residuals and solver-derived
-sensitivities (through the scalar-generic Brent solver and its
-implicit-function-theorem polish) compose on the caller's tape. The production
-bootstrap, quote-Jacobian transforms, stack/tree risk, xccy rows, risk reports
-and hedge solve are double-only paths, gated at double precision.
+instantiate at `double`, `var` and `fvar<var>`, and **every** bootstrap
+instrument in both ladders is scalar generic — deposit, repo, FRA, future and
+OIS par swap on the discount side; deposit, FRA, future, par IRS and basis swap
+on the forecast side — so a model quote returns a `var` residual when handed a
+`var` curve set and can be differentiated on the caller's tape. The scalar is
+deduced from the curve arguments (`curve_scalar_t`), so no call site names it.
+
+Separately, the bootstrap itself is a `double` path: `bootstrapDiscountCurve`
+returns `DiscountCurve<double>`, `bootstrapForecastCurve` returns
+`SpreadCurve<double, ParentT>`, and both instantiate the Brent solver at
+`double`. Differentiating a solver output is therefore a test-local exercise
+(`math::BrentSolver<var>` on a hand-built curve, as in
+`tests/unit/markets/ad/test_curve_ad.cpp`), not a library feature. The
+production bootstrap, quote-Jacobian transforms, stack/tree risk, xccy rows,
+risk reports and hedge solve are double-only paths, gated at double precision.
 
 The optimizer building blocks follow the same pattern: iteration state in
 double, exact AD gradients and HVPs per step (no finite differences), final

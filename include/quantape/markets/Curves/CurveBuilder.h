@@ -274,42 +274,45 @@ inline double legAnnuity(const DiscountT& discount, const datetime::Date& effect
 /// `forecast`, every discount factor and the fixed annuity from `discount`
 /// (exogenous collateral discounting).
 template <typename ForecastT, typename DiscountT>
-    requires CurveProvider<ForecastT, double> && CurveProvider<DiscountT, double>
-inline double impliedIrsRate(const ForecastT& forecast, const DiscountT& discount,
-                             const IrsPillar& pillar, const datetime::Date& referenceDate,
-                             const datetime::DayCounter& zeroDayCounter) {
+    requires CurveProvider<ForecastT, curve_scalar_t<ForecastT>> &&
+             CurveProvider<DiscountT, curve_scalar_t<ForecastT>>
+inline curve_scalar_t<ForecastT>
+impliedIrsRate(const ForecastT& forecast, const DiscountT& discount, const IrsPillar& pillar,
+               const datetime::Date& referenceDate, const datetime::DayCounter& zeroDayCounter) {
+    using DoubleT = curve_scalar_t<ForecastT>;
     const pricing::IrsQuoteTimes times =
         pricing::makeIrsQuoteTimes(pillar, referenceDate, zeroDayCounter);
-    return pricing::impliedIrsParRate<double>(times, forecast, discount);
+    return pricing::impliedIrsParRate<DoubleT>(times, forecast, discount);
 }
 
 /// Implied par basis spread of `pillar` against a child spread curve: the
 /// parent leg forecasts on `parentForecast` (the child's own parent by
 /// default), discounting on `discountCurve` when given (exogenous OIS).
-template <typename ParentT, typename ParentForecastT, typename DiscountT = DiscountCurve<double>>
-    requires CurveNodeProvider<ParentT> && CurveProvider<ParentForecastT, double> &&
-             CurveProvider<DiscountT, double>
-inline double impliedBasisSpread(const SpreadCurve<double, ParentT>& child,
-                                 const ParentForecastT& parentForecast, const BasisPillar& pillar,
-                                 const datetime::Date& referenceDate,
-                                 const datetime::DayCounter& zeroDayCounter,
-                                 const DiscountT* discountCurve = nullptr) {
+template <typename DoubleT, typename ParentT, typename ParentForecastT,
+          typename DiscountT = DiscountCurve<DoubleT>>
+    requires CurveProvider<ParentT, DoubleT> && CurveProvider<ParentForecastT, DoubleT> &&
+             CurveProvider<DiscountT, DoubleT>
+inline DoubleT impliedBasisSpread(const SpreadCurve<DoubleT, ParentT>& child,
+                                  const ParentForecastT& parentForecast, const BasisPillar& pillar,
+                                  const datetime::Date& referenceDate,
+                                  const datetime::DayCounter& zeroDayCounter,
+                                  const DiscountT* discountCurve = nullptr) {
     const pricing::BasisQuoteTimes times =
         pricing::makeBasisQuoteTimes(pillar, referenceDate, zeroDayCounter);
-    const auto discountAt = [&](double t) -> double {
+    const auto discountAt = [&](double t) -> DoubleT {
         return discountCurve != nullptr ? discountCurve->discount(t) : child.parent().discount(t);
     };
-    return pricing::impliedBasisSpread<double>(times, child, parentForecast, discountAt,
-                                               pillar.spreadOnParentLeg);
+    return pricing::impliedBasisSpread<DoubleT>(times, child, parentForecast, discountAt,
+                                                pillar.spreadOnParentLeg);
 }
 
 /// Overload using the child's own parent for the parent forecast.
-template <typename ParentT, typename DiscountT = DiscountCurve<double>>
-    requires CurveNodeProvider<ParentT> && CurveProvider<DiscountT, double>
-inline double impliedBasisSpread(const SpreadCurve<double, ParentT>& child,
-                                 const BasisPillar& pillar, const datetime::Date& referenceDate,
-                                 const datetime::DayCounter& zeroDayCounter,
-                                 const DiscountT* discountCurve = nullptr) {
+template <typename DoubleT, typename ParentT, typename DiscountT = DiscountCurve<DoubleT>>
+    requires CurveProvider<ParentT, DoubleT> && CurveProvider<DiscountT, DoubleT>
+inline DoubleT impliedBasisSpread(const SpreadCurve<DoubleT, ParentT>& child,
+                                  const BasisPillar& pillar, const datetime::Date& referenceDate,
+                                  const datetime::DayCounter& zeroDayCounter,
+                                  const DiscountT* discountCurve = nullptr) {
     return impliedBasisSpread(child, child.parent(), pillar, referenceDate, zeroDayCounter,
                               discountCurve);
 }
@@ -627,12 +630,12 @@ inline DoubleT impliedForecastFuture(const SpreadCurve<DoubleT, ParentT>& foreca
 
 /// Model quote of a swap-style forecast instrument: the basis spread or the
 /// par IRS rate, whichever the pillar targets.
-template <typename ParentT, typename DiscountT>
-    requires CurveNodeProvider<ParentT> && CurveProvider<DiscountT, double>
-inline double impliedForecastSwapQuote(const SpreadCurve<double, ParentT>& forecast,
-                                       const DiscountT& discounting, const ForecastPillar& pillar,
-                                       const datetime::Date& referenceDate,
-                                       const datetime::DayCounter& zeroDayCounter) {
+template <typename DoubleT, typename ParentT, typename DiscountT>
+    requires CurveProvider<ParentT, DoubleT> && CurveProvider<DiscountT, DoubleT>
+inline DoubleT impliedForecastSwapQuote(const SpreadCurve<DoubleT, ParentT>& forecast,
+                                        const DiscountT& discounting, const ForecastPillar& pillar,
+                                        const datetime::Date& referenceDate,
+                                        const datetime::DayCounter& zeroDayCounter) {
     switch (pillar.kind) {
         case ForecastPillar::Kind::Irs:
             return impliedIrsRate(forecast, discounting, pillar.irs, referenceDate, zeroDayCounter);
@@ -650,8 +653,8 @@ inline double impliedForecastSwapQuote(const SpreadCurve<double, ParentT>& forec
 
 /// Model quote of a forecast-curve instrument: the simple forward (deposit or
 /// FRA), the basis spread or the par IRS rate, whichever the pillar targets.
-/// The simple branches are scalar generic and drive the reverse-mode gradient;
-/// the swap branches require `double` curves.
+/// Every branch is scalar generic, so the quote is differentiable on the
+/// caller's tape for `var` curves as well.
 template <typename DoubleT, typename ParentT, typename DiscountT>
     requires CurveProvider<SpreadCurve<DoubleT, ParentT>, DoubleT> &&
              CurveProvider<DiscountT, DoubleT>
@@ -667,13 +670,8 @@ inline DoubleT impliedForecastQuote(const SpreadCurve<DoubleT, ParentT>& forecas
             return impliedForecastFuture(forecast, pillar, referenceDate, zeroDayCounter);
         case ForecastPillar::Kind::BasisSwap:
         case ForecastPillar::Kind::Irs:
-            if constexpr (std::is_same_v<DoubleT, double>) {
-                return impliedForecastSwapQuote(forecast, discounting, pillar, referenceDate,
-                                                zeroDayCounter);
-            } else {
-                throw std::invalid_argument(
-                    "impliedForecastQuote: basis and IRS pillars need a double forecast curve");
-            }
+            return impliedForecastSwapQuote(forecast, discounting, pillar, referenceDate,
+                                            zeroDayCounter);
     }
     throw std::invalid_argument("impliedForecastQuote: unknown forecast pillar kind");
 }
