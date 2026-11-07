@@ -9,8 +9,11 @@
 
 #include <Eigen/Dense>
 
+#include <algorithm>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -125,7 +128,12 @@ struct GradientWorkspace {
 
     // checkpointed mode
     PathBlock<double> fwdPath;
-    PathBlock<var> termPath; ///< one state (nSteps = 0): terminal seed
+    /// Terminal-seed block. It holds `nSteps + 1` states so that any legal grid
+    /// index is defined (a payoff indexing `states[k]` must not be UB); all are
+    /// zero except the last, which is overwritten per path. The block is only
+    /// used to seed the adjoint, and that is exact solely for a terminal payoff
+    /// — see the value check in the stepping loop.
+    PathBlock<var> termPath;
     StateMatrix<var> xVar;
     StateMatrix<var> xNextVar;
     Eigen::VectorXd lambda;
@@ -143,7 +151,10 @@ struct GradientWorkspace {
           scratchVar(nDims, static_cast<Eigen::Index>(1)) {
         varPath.resize(static_cast<std::size_t>(nDims), nSteps, nPaths);
         fwdPath.resize(static_cast<std::size_t>(nDims), nSteps, nPaths);
-        termPath.resize(static_cast<std::size_t>(nDims), 0, nPaths);
+        termPath.resize(static_cast<std::size_t>(nDims), nSteps, nPaths);
+        for (StateMatrix<var>& state : termPath.states) {
+            state.setZero();
+        }
         xVar.resize(nDims, static_cast<Eigen::Index>(nPaths));
         xNextVar.resize(nDims, static_cast<Eigen::Index>(nPaths));
         lambda.resize(nDims);
@@ -222,6 +233,7 @@ GradientSamples simulateGradientSamples(const SdeSimulator<double, Scheme>& simu
     if (nPaths == 0) {
         throw std::invalid_argument("simulateGradientSamples: nPaths must be positive");
     }
+    quantape::mc::requireSharedTheta(simulator.theta(), theta);
     const std::size_t d = static_cast<std::size_t>(x0.size());
     const std::size_t p = theta.size();
     const std::size_t nSteps = simulator.timeGrid().nSteps();
@@ -300,6 +312,7 @@ GradientSamples simulateGradientCheckpointedSamples(
     if (nPaths == 0) {
         throw std::invalid_argument("simulateGradientCheckpointedSamples: nPaths must be positive");
     }
+    quantape::mc::requireSharedTheta(simulator.theta(), theta);
     const std::size_t d = static_cast<std::size_t>(x0.size());
     const std::size_t p = theta.size();
     const std::size_t nSteps = simulator.timeGrid().nSteps();
@@ -333,12 +346,25 @@ GradientSamples simulateGradientCheckpointedSamples(
             // 2. Terminal adjoint seed: lambda = d pi / d x_N (tiny tape).
             {
                 stan::math::nested_rev_autodiff scope;
-                ws.termPath.states[0] = ws.fwdPath.states.back();
+                ws.termPath.states.back().col(0) = ws.fwdPath.states.back();
                 var pi = payoff.template operator()<var>(ws.termPath);
+                // Checkpointing seeds the adjoint from the terminal state alone,
+                // so it is exact only when the payoff is terminal. Evaluate the
+                // payoff on the seed block and compare with the value taken from
+                // the full forward path: a path-dependent payoff differs and is
+                // rejected here instead of silently returning the terminal-only
+                // gradient. (Poisoning the block with NaN would not work: a
+                // linear payoff still receives finite adjoints, because adjoints
+                // do not depend on intermediate values.)
+                if (!(pi.val() == samples.values[offset])) {
+                    throw std::invalid_argument(
+                        "simulateGradientCheckpointed: the payoff depends on non-terminal "
+                        "states; use simulateGradient (full tape) instead");
+                }
                 pi.grad();
                 for (std::size_t i = 0; i < d; ++i) {
                     ws.lambda(static_cast<Eigen::Index>(i)) =
-                        ws.termPath.states[0](static_cast<Eigen::Index>(i), 0).adj();
+                        ws.termPath.states.back()(static_cast<Eigen::Index>(i), 0).adj();
                 }
             }
 
@@ -389,6 +415,181 @@ GradientSamples simulateGradientCheckpointedSamples(
     return samples;
 }
 
+/**
+ * @brief Per-interval pathwise gradient samples — time-dependent parameters
+ *
+ * `dV/dtheta_k` for every grid interval `k`, where `theta_k` is the parameter
+ * vector the simulator applies on `[t_k, t_{k+1})` (see `SdeSimulator`). One
+ * per-step `var` leaf per parameter is created on each path's tape, so a single
+ * reverse sweep yields every interval's adjoint:
+ *
+ *     dV/dtheta_k = B_k^T lambda_{k+1},     B_k = dPhi_k/dtheta_k
+ *
+ * which is exact for the discretised model (the adjoint recursion
+ * `lambda_k = (dpi/dX_k) + A_k^T lambda_{k+1}` is the chain rule, not an
+ * approximation). The parameters are taken from the simulator, so the AD model
+ * and the simulated model are the same object by construction; an empty
+ * per-step theta is rejected because there would be nothing to differentiate.
+ *
+ * Output is aggregate rather than per-path: the raw object is `p x nSteps` per
+ * path, which is `O(p*nSteps*nPaths)` and infeasible at production shapes. Each
+ * block accumulates its own partial sums in a fixed block index, so the
+ * reduction is deterministic and shard-mergeable.
+ *
+ * For any parameterisation `theta_k = f_k(phi)`, the gradient follows by the
+ * chain rule: `dV/dphi = sum_k (df_k/dphi)^T (dV/dtheta_k)`. For a genuinely
+ * shared parameter the sum over `k` is the shared derivative; for a piecewise
+ * model it is the *uniform-shift* derivative, which is a different quantity.
+ */
+struct IntervalGradientEstimate {
+    Eigen::MatrixXd mean;     ///< (p x nSteps): mean dV/dtheta_k
+    Eigen::MatrixXd stdError; ///< (p x nSteps)
+    double value = 0.0;       ///< mean payoff on the same paths
+    double valueStdError = 0.0;
+    std::size_t nPaths = 0;
+    std::size_t nParameters = 0;
+    std::size_t nSteps = 0;
+};
+
+namespace detail {
+
+/// Per-worker workspace for the per-interval kernel: step-indexed leaves, one
+/// path buffer, and reused draw/scratch buffers (no per-path allocation).
+template <typename Scheme>
+struct IntervalWorkspace {
+    using var = stan::math::var;
+    PathBlock<var> path;
+    Eigen::Matrix<var, Eigen::Dynamic, 1> x0Vars;
+    std::vector<std::vector<var>> thetaVars;
+    Eigen::MatrixXd z;
+    Eigen::MatrixXd uniforms;
+    typename Scheme::template Scratch<var> scratch;
+    Eigen::MatrixXd grad; ///< (p x nSteps) per-path interval gradient scratch
+
+    IntervalWorkspace(Eigen::Index nDims, std::size_t nSteps, std::size_t nTheta,
+                      Eigen::Index nPaths)
+        : thetaVars(nSteps, std::vector<var>(nTheta)), scratch(nDims, nPaths) {
+        x0Vars.resize(nDims);
+        path.resize(static_cast<std::size_t>(nDims), nSteps, 1);
+    }
+};
+
+} // namespace detail
+
+template <typename Scheme, typename DriftF, typename DiffusionF, typename Source, typename Payoff>
+    requires Drift<DriftF, double> && Diffusion<DiffusionF, double> && RandomSource<Source> &&
+             (Scheme::uniformStreams == 0 || UniformRandomSource<Source>) && PathPayoff<Payoff>
+IntervalGradientEstimate simulateIntervalGradient(const SdeSimulator<double, Scheme>& simulator,
+                                                  const Eigen::VectorXd& x0, const DriftF& drift,
+                                                  const DiffusionF& diffusion, const Source& source,
+                                                  const Payoff& payoff, std::size_t nPaths,
+                                                  Schedule schedule = Schedule::Sequential) {
+    using stan::math::var;
+    if (nPaths == 0) {
+        throw std::invalid_argument("simulateIntervalGradient: nPaths must be positive");
+    }
+    const std::size_t d = static_cast<std::size_t>(x0.size());
+    const std::size_t nSteps = simulator.timeGrid().nSteps();
+    const auto& thetaSteps = simulator.theta();
+    if (thetaSteps.empty() || thetaSteps[0].empty()) {
+        throw std::invalid_argument(
+            "simulateIntervalGradient: the simulator must carry a non-empty per-interval theta");
+    }
+    const std::size_t p = thetaSteps[0].size();
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        if (thetaSteps[k].size() != p) {
+            throw std::invalid_argument(
+                "simulateIntervalGradient: per-interval theta must have a uniform width");
+        }
+    }
+
+    const std::size_t kBlock = 1024;
+    const std::size_t nBlocks = (nPaths + kBlock - 1) / kBlock;
+    std::vector<Eigen::MatrixXd> blockSum(nBlocks);
+    std::vector<Eigen::MatrixXd> blockSumSq(nBlocks);
+    std::vector<double> blockValue(nBlocks, 0.0);
+    std::vector<double> blockValueSq(nBlocks, 0.0);
+
+    const auto makeWorkspace = [&] {
+        return detail::IntervalWorkspace<Scheme>(static_cast<Eigen::Index>(d), nSteps, p, 1);
+    };
+    detail::parallelForWithLocal(
+        nBlocks, schedule, makeWorkspace,
+        [&](std::size_t block, detail::IntervalWorkspace<Scheme>& ws) {
+            Eigen::MatrixXd sum = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(p),
+                                                        static_cast<Eigen::Index>(nSteps));
+            Eigen::MatrixXd sumSq = sum;
+            double valueSum = 0.0;
+            double valueSq = 0.0;
+            const std::size_t begin = block * kBlock;
+            const std::size_t end = std::min(begin + kBlock, nPaths);
+            for (std::size_t pathIndex = begin; pathIndex < end; ++pathIndex) {
+                stan::math::nested_rev_autodiff scope;
+                for (std::size_t k = 0; k < nSteps; ++k) {
+                    for (std::size_t j = 0; j < p; ++j) {
+                        ws.thetaVars[k][j] = thetaSteps[k][j];
+                    }
+                }
+                for (std::size_t i = 0; i < d; ++i) {
+                    ws.x0Vars(static_cast<Eigen::Index>(i)) = x0(static_cast<Eigen::Index>(i));
+                }
+                ws.path.states[0].col(0) = ws.x0Vars;
+                for (std::size_t k = 0; k < nSteps; ++k) {
+                    simulator.template stepPath<var>(
+                        ws.path.states[k], ws.path.states[k + 1], k, pathIndex, source, drift,
+                        diffusion, ws.thetaVars[k], ws.z, ws.uniforms, ws.scratch);
+                }
+                var y = payoff.template operator()<var>(ws.path);
+                y.grad();
+                const double value = y.val();
+                valueSum += value;
+                valueSq += value * value;
+                for (std::size_t k = 0; k < nSteps; ++k) {
+                    for (std::size_t j = 0; j < p; ++j) {
+                        const double g = ws.thetaVars[k][j].adj();
+                        sum(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(k)) += g;
+                        sumSq(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(k)) += g * g;
+                    }
+                }
+            }
+            blockSum[block] = sum;
+            blockSumSq[block] = sumSq;
+            blockValue[block] = valueSum;
+            blockValueSq[block] = valueSq;
+        });
+
+    IntervalGradientEstimate estimate;
+    estimate.mean =
+        Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(p), static_cast<Eigen::Index>(nSteps));
+    estimate.stdError = estimate.mean;
+    estimate.nPaths = nPaths;
+    estimate.nParameters = p;
+    estimate.nSteps = nSteps;
+    for (std::size_t b = 0; b < nBlocks; ++b) {
+        estimate.mean += blockSum[b];
+        estimate.stdError += blockSumSq[b];
+        estimate.value += blockValue[b];
+        estimate.valueStdError += blockValueSq[b];
+    }
+    const double n = static_cast<double>(nPaths);
+    estimate.mean /= n;
+    estimate.value /= n;
+    estimate.valueStdError = nPaths > 1
+                                 ? std::sqrt(std::max(0.0, estimate.valueStdError / n -
+                                                               estimate.value * estimate.value) /
+                                             (n - 1.0) / n)
+                                 : 0.0;
+    for (Eigen::Index j = 0; j < estimate.mean.rows(); ++j) {
+        for (Eigen::Index k = 0; k < estimate.mean.cols(); ++k) {
+            const double m = estimate.mean(j, k);
+            const double second = estimate.stdError(j, k) / n;
+            estimate.stdError(j, k) =
+                nPaths > 1 ? std::sqrt(std::max(0.0, (second - m * m) / (n - 1.0)) / n) : 0.0;
+        }
+    }
+    return estimate;
+}
+
 /// Convenience: full path range, reduced estimate (in-process or TBB).
 template <typename Scheme, typename DriftF, typename DiffusionF, typename Source, typename Payoff>
     requires Drift<DriftF, double> && Diffusion<DiffusionF, double> && RandomSource<Source> &&
@@ -414,6 +615,150 @@ GradientEstimate simulateGradientCheckpointed(const SdeSimulator<double, Scheme>
                                               Schedule schedule = Schedule::Sequential) {
     return reduceGradientSamples(simulateGradientCheckpointedSamples(
         simulator, x0, theta, drift, diffusion, source, payoff, 0, nPaths, schedule));
+}
+
+/**
+ * @brief Contracted pathwise gradient samples — time-dependent parameters
+ *
+ * Mode B of the per-interval design. The raw per-interval gradient is
+ * `p x nSteps` *per path*, which is `O(p*nSteps*nPaths)` and infeasible at
+ * production shapes, so it is contracted in the kernel instead: given
+ * `W_k in R^{p x q}` the sample is
+ *
+ *     h^(i) = sum_k W_k^T G^(i)[:,k],        G^(i)[:,k] = dV/dtheta_k |path i
+ *
+ * which is exactly `dV/dphi` for any parameterisation `theta_k = f_k(phi)`
+ * with `W_k = df_k/dphi`. Storing the per-path `h` (not the raw `G`) keeps the
+ * usual `(d + q) x nPaths` sample layout, so the reduction, the standard error,
+ * the CRN/FD gates and shard merging all work unchanged.
+ *
+ * The contraction must be done *per path*: `Var(sum_k c_k g_k)` is not
+ * `sum_k c_k^2 Var(g_k)`, so contracting after reducing would drop the
+ * cross-interval covariance and understate the standard error. This entry point
+ * is the one to use whenever an SE is wanted on a parameterisation.
+ *
+ * `contraction(step)` returns the `p x q` weight block for interval `step`.
+ */
+template <typename Scheme, typename DriftF, typename DiffusionF, typename Source, typename Payoff,
+          typename Contraction>
+    requires Drift<DriftF, double> && Diffusion<DiffusionF, double> && RandomSource<Source> &&
+             (Scheme::uniformStreams == 0 || UniformRandomSource<Source>) && PathPayoff<Payoff>
+GradientSamples simulateContractedGradientSamples(const SdeSimulator<double, Scheme>& simulator,
+                                                  const Eigen::VectorXd& x0, const DriftF& drift,
+                                                  const DiffusionF& diffusion, const Source& source,
+                                                  const Payoff& payoff,
+                                                  const Contraction& contraction,
+                                                  std::size_t pathBegin, std::size_t nPaths,
+                                                  Schedule schedule = Schedule::Sequential) {
+    using stan::math::var;
+    if (nPaths == 0) {
+        throw std::invalid_argument("simulateContractedGradientSamples: nPaths must be positive");
+    }
+    const std::size_t d = static_cast<std::size_t>(x0.size());
+    const std::size_t nSteps = simulator.timeGrid().nSteps();
+    const auto& thetaSteps = simulator.theta();
+    if (thetaSteps.empty() || thetaSteps[0].empty()) {
+        throw std::invalid_argument(
+            "simulateContractedGradientSamples: the simulator must carry a non-empty "
+            "per-interval theta");
+    }
+    const std::size_t p = thetaSteps[0].size();
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        if (thetaSteps[k].size() != p) {
+            throw std::invalid_argument(
+                "simulateContractedGradientSamples: per-interval theta must have a uniform width");
+        }
+    }
+    // Validate the weight blocks before touching the tape.
+    std::vector<Eigen::MatrixXd> weights(nSteps);
+    std::size_t q = 0;
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        weights[k] = contraction(k);
+        if (weights[k].rows() != static_cast<Eigen::Index>(p) || weights[k].cols() == 0) {
+            throw std::invalid_argument(
+                "simulateContractedGradientSamples: each weight block must be p x q with q > 0");
+        }
+        if (k == 0) {
+            q = static_cast<std::size_t>(weights[k].cols());
+        } else if (static_cast<std::size_t>(weights[k].cols()) != q) {
+            throw std::invalid_argument(
+                "simulateContractedGradientSamples: the weight blocks must share a column count");
+        }
+    }
+
+    GradientSamples samples;
+    samples.pathBegin = pathBegin;
+    samples.nStateDims = d;
+    samples.nParameters = q;
+    samples.values.assign(nPaths, 0.0);
+    samples.gradients =
+        Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(d + q), static_cast<Eigen::Index>(nPaths));
+
+    const auto makeWorkspace = [&] {
+        detail::IntervalWorkspace<Scheme> ws(static_cast<Eigen::Index>(d), nSteps, p, 1);
+        ws.grad.resize(static_cast<Eigen::Index>(p), static_cast<Eigen::Index>(nSteps));
+        return ws;
+    };
+    detail::parallelForWithLocal(
+        nPaths, schedule, makeWorkspace,
+        [&](std::size_t offset, detail::IntervalWorkspace<Scheme>& ws) {
+            const std::size_t pathIndex = pathBegin + offset;
+            stan::math::nested_rev_autodiff scope;
+            for (std::size_t k = 0; k < nSteps; ++k) {
+                for (std::size_t j = 0; j < p; ++j) {
+                    ws.thetaVars[k][j] = thetaSteps[k][j];
+                }
+            }
+            for (std::size_t i = 0; i < d; ++i) {
+                ws.x0Vars(static_cast<Eigen::Index>(i)) = x0(static_cast<Eigen::Index>(i));
+            }
+            ws.path.states[0].col(0) = ws.x0Vars;
+            for (std::size_t k = 0; k < nSteps; ++k) {
+                simulator.template stepPath<var>(ws.path.states[k], ws.path.states[k + 1], k,
+                                                 pathIndex, source, drift, diffusion,
+                                                 ws.thetaVars[k], ws.z, ws.uniforms, ws.scratch);
+            }
+            var y = payoff.template operator()<var>(ws.path);
+            y.grad();
+            samples.values[offset] = y.val();
+            for (std::size_t k = 0; k < nSteps; ++k) {
+                for (std::size_t j = 0; j < p; ++j) {
+                    ws.grad(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(k)) =
+                        ws.thetaVars[k][j].adj();
+                }
+            }
+            for (std::size_t i = 0; i < d; ++i) {
+                samples.gradients(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(offset)) =
+                    ws.x0Vars(static_cast<Eigen::Index>(i)).adj();
+            }
+            for (std::size_t jq = 0; jq < q; ++jq) {
+                double acc = 0.0;
+                for (std::size_t k = 0; k < nSteps; ++k) {
+                    for (std::size_t jp = 0; jp < p; ++jp) {
+                        acc += weights[k](static_cast<Eigen::Index>(jp),
+                                          static_cast<Eigen::Index>(jq)) *
+                               ws.grad(static_cast<Eigen::Index>(jp), static_cast<Eigen::Index>(k));
+                    }
+                }
+                samples.gradients(static_cast<Eigen::Index>(d + jq),
+                                  static_cast<Eigen::Index>(offset)) = acc;
+            }
+        });
+    return samples;
+}
+
+/// Convenience: full path range, reduced contracted estimate.
+template <typename Scheme, typename DriftF, typename DiffusionF, typename Source, typename Payoff,
+          typename Contraction>
+    requires Drift<DriftF, double> && Diffusion<DiffusionF, double> && RandomSource<Source> &&
+             (Scheme::uniformStreams == 0 || UniformRandomSource<Source>) && PathPayoff<Payoff>
+GradientEstimate
+simulateContractedGradient(const SdeSimulator<double, Scheme>& simulator, const Eigen::VectorXd& x0,
+                           const DriftF& drift, const DiffusionF& diffusion, const Source& source,
+                           const Payoff& payoff, const Contraction& contraction, std::size_t nPaths,
+                           Schedule schedule = Schedule::Sequential) {
+    return reduceGradientSamples(simulateContractedGradientSamples(
+        simulator, x0, drift, diffusion, source, payoff, contraction, 0, nPaths, schedule));
 }
 
 } // namespace quantape::mc

@@ -99,6 +99,7 @@ simulateGradientForwardSamples(const SdeSimulator<double, Scheme>& simulator,
     if (nPaths == 0) {
         throw std::invalid_argument("simulateGradientForwardSamples: nPaths must be positive");
     }
+    requireSharedTheta(simulator.theta(), theta);
     const std::size_t d = static_cast<std::size_t>(x0.size());
     const std::size_t p = theta.size();
     if (d + p != N) {

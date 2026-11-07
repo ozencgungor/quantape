@@ -88,6 +88,7 @@ GradientSamples simulateGradientStanForwardSamples(const SdeSimulator<double, Sc
     if (nPaths == 0) {
         throw std::invalid_argument("simulateGradientStanForwardSamples: nPaths positive");
     }
+    requireSharedTheta(simulator.theta(), theta);
     const std::size_t d = static_cast<std::size_t>(x0.size());
     const std::size_t p = theta.size();
     const std::size_t nParameters = d + p;

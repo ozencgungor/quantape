@@ -46,6 +46,39 @@ namespace quantape::mc {
  * All work buffers are local to a call (re-entrant, thread-safe); the
  * block loop is the natural parallelization point later.
  */
+/**
+ * @brief Reject a per-interval model at the shared-parameter entry points
+ *
+ * `simulateGradient*` builds one `var` leaf per parameter and reuses it at
+ * every step, which differentiates the constant-parameter model
+ * `theta |-> X_{k+1} = Phi_k(X_k; theta)`. If the simulator carries a
+ * *per-interval* theta the two models differ silently, so this throws instead.
+ *
+ * The remaining convention (a simulator with an empty per-step theta falls back
+ * to the process members) cannot be checked here because the process is not
+ * visible; it is documented on `SdeSimulator` and callers must pass the same
+ * values they configured the process with. `simulateIntervalGradient` is the
+ * entry point for time-dependent parameters, and it takes its values from the
+ * simulator so the two models cannot disagree.
+ */
+inline void requireSharedTheta(const std::vector<std::vector<double>>& thetaSteps,
+                               const std::vector<double>& theta) {
+    if (thetaSteps.empty()) {
+        return;
+    }
+    for (std::size_t k = 1; k < thetaSteps.size(); ++k) {
+        if (thetaSteps[k] != thetaSteps[0]) {
+            throw std::invalid_argument(
+                "simulateGradient: the simulator carries a per-interval theta; use "
+                "simulateIntervalGradient for time-dependent parameters");
+        }
+    }
+    if (!thetaSteps[0].empty() && thetaSteps[0] != theta) {
+        throw std::invalid_argument(
+            "simulateGradient: theta does not match the simulator's per-interval theta");
+    }
+}
+
 template <typename Scalar = double, typename Scheme = Euler>
 class SdeSimulator {
 public:

@@ -42,12 +42,15 @@ using quantape::mc::driftOf;
 using quantape::mc::Euler;
 using quantape::mc::GradientEstimate;
 using quantape::mc::IidGaussianSource;
+using quantape::mc::IntervalGradientEstimate;
 using quantape::mc::Milstein;
 using quantape::mc::MomentMatching1D;
 using quantape::mc::PathBlock;
 using quantape::mc::Schedule;
 using quantape::mc::SdeSimulator;
+using quantape::mc::simulateContractedGradient;
 using quantape::mc::simulateGradient;
+using quantape::mc::simulateIntervalGradient;
 using quantape::mc::StateMatrix;
 using quantape::mc::TimeGrid;
 
@@ -1287,4 +1290,332 @@ TEST_F(SdeShardingTest, mergedSamplesReduceBitwise) {
     EXPECT_TRUE(bitwiseEqual(estMerged.valueStdError, estFull.valueStdError));
     EXPECT_TRUE((estMerged.gradient.array() == estFull.gradient.array()).all());
     EXPECT_TRUE((estMerged.stdErrors.array() == estFull.stdErrors.array()).all());
+}
+
+// ── Time-dependent parameters: per-interval gradients ──
+//
+// The engine applies one parameter vector per grid interval. The shared-theta
+// entry points differentiate the constant-parameter model, so for a piecewise
+// model they are wrong by construction; `simulateIntervalGradient` returns
+// dV/dtheta_k for every k from a single sweep.
+//
+// Gate: piecewise-sigma GBM has a closed form. With dS = sigma(t) S dW,
+// mu = 0, S0 = K, zero rates, the terminal logarithmic variance is
+// V = sum_k sigma_k^2 dt, so
+//     C = Black(sqrt(V)),      dC/dsigma_k = vega(sqrt(V)) sigma_k dt / sqrt(V)
+// and     sum_k dC/dsigma_k = vega(sqrt(V)) (sum_k sigma_k dt) / sqrt(V)
+// (the *uniform-shift* derivative, not the vega of an equivalent constant
+// model — those differ whenever the sigma_k are not all equal).
+namespace {
+
+struct PiecewiseGbmPayoff {
+    double strike = 1.0;
+    template <typename Scalar>
+    Scalar operator()(const PathBlock<Scalar>& path) const {
+        const Scalar s = path.states.back()(0, 0);
+        return s > Scalar(strike) ? s - Scalar(strike) : Scalar(0.0);
+    }
+};
+
+double blackCallAtm(double totalVariance) {
+    const double sd = std::sqrt(totalVariance);
+    return 2.0 * 0.5 * std::erfc(-sd * 0.5 * M_SQRT1_2) - 1.0;
+}
+
+} // namespace
+
+TEST_F(SdeGradientGbmTest, intervalGradientsMatchPiecewiseBlack) {
+    const std::size_t nSteps = 32;
+    const std::size_t nPaths = 400000;
+    const double dt = 1.0 / static_cast<double>(nSteps);
+    const TimeGrid grid(1.0, nSteps);
+    std::vector<std::vector<double>> theta(nSteps);
+    double totalVariance = 0.0;
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        const double sigma = k < nSteps / 2 ? 0.20 : 0.40;
+        theta[k] = {0.0, sigma};
+        totalVariance += sigma * sigma * dt;
+    }
+    const SdeSimulator<double, Euler> simulator(grid, theta, Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 1.0);
+    const IidGaussianSource<> source(1, 5150);
+
+    const IntervalGradientEstimate estimate =
+        simulateIntervalGradient(simulator, x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                 source, PiecewiseGbmPayoff{}, nPaths);
+    ASSERT_EQ(estimate.nParameters, 2u);
+    ASSERT_EQ(estimate.nSteps, nSteps);
+
+    // Value first: the same paths must price the piecewise model.
+    const double analyticPrice = blackCallAtm(totalVariance);
+    CHECK_CLOSE("piecewise value", estimate.value, analyticPrice,
+                4.0 * estimate.valueStdError + 1e-3);
+
+    // Per-interval vega, every interval, against the closed form.
+    const double sd = std::sqrt(totalVariance);
+    const double d1 = sd * 0.5;
+    const double vega = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
+    double sum = 0.0;
+    double sumError = 0.0;
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        const double sigma = theta[k][1];
+        const double exact = vega * sigma * dt / sd;
+        // The closed form is the continuous-time limit; the Euler step leaves an
+        // O(dt) gap in the vega (~4% at 32 steps), so this is a structure check.
+        const double tol =
+            4.0 * estimate.stdError(1, static_cast<Eigen::Index>(k)) + 0.06 * std::fabs(exact);
+        SCOPED_TRACE(::testing::Message() << "interval " << k << " sigma " << sigma);
+        CHECK_CLOSE("d C / d sigma_k", estimate.mean(1, static_cast<Eigen::Index>(k)), exact, tol);
+        sum += estimate.mean(1, static_cast<Eigen::Index>(k));
+        sumError += estimate.stdError(1, static_cast<Eigen::Index>(k));
+    }
+    // Sum rule: the derivative under shifting every interval by the same amount.
+    double sigmaSum = 0.0;
+    for (const auto& stepTheta : theta) {
+        sigmaSum += stepTheta[1] * dt;
+    }
+    const double exactSum = vega * sigmaSum / sd;
+    CHECK_CLOSE("sum_k dC/dsigma_k", sum, exactSum, 4.0 * sumError + 0.02 * std::fabs(exactSum));
+
+    // The decisive check: AD against a CRN central difference of the *same*
+    // discrete model, which removes the discretisation gap entirely.
+    auto payoffAt = [&](const PathBlock<double>& block, Eigen::Index p) {
+        return std::max(block.states.back()(0, p) - 1.0, 0.0);
+    };
+    auto centralDiff = [&](std::size_t k) {
+        const double h = 1e-3;
+        std::vector<std::vector<double>> plus = theta;
+        std::vector<std::vector<double>> minus = theta;
+        plus[k][1] += h;
+        minus[k][1] -= h;
+        const SdeSimulator<double, Euler> simPlus(grid, plus, Euler{});
+        const SdeSimulator<double, Euler> simMinus(grid, minus, Euler{});
+        const IidGaussianSource<> srcPlus(1, 5150);
+        const IidGaussianSource<> srcMinus(1, 5150);
+        const auto blocksPlus = simPlus.simulate(x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                                 srcPlus, nPaths, 8192);
+        const auto blocksMinus = simMinus.simulate(x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                                   srcMinus, nPaths, 8192);
+        double sumDiff = 0.0;
+        double sumDiffSq = 0.0;
+        std::size_t n = 0;
+        for (std::size_t b = 0; b < blocksPlus.size(); ++b) {
+            const Eigen::Index cols = blocksPlus[b].states.back().cols();
+            for (Eigen::Index p = 0; p < cols; ++p) {
+                const double d =
+                    (payoffAt(blocksPlus[b], p) - payoffAt(blocksMinus[b], p)) / (2.0 * h);
+                sumDiff += d;
+                sumDiffSq += d * d;
+                ++n;
+            }
+        }
+        const double mean = sumDiff / static_cast<double>(n);
+        const double se =
+            std::sqrt(std::max(0.0, sumDiffSq / static_cast<double>(n) - mean * mean) / n);
+        return std::pair<double, double>(mean, se);
+    };
+    for (std::size_t k : {std::size_t(1), std::size_t(15), std::size_t(16), std::size_t(30)}) {
+        const auto [fd, fdSe] = centralDiff(k);
+        const double ad = estimate.mean(1, static_cast<Eigen::Index>(k));
+        SCOPED_TRACE(::testing::Message() << "CRN FD at interval " << k);
+        CHECK_CLOSE("AD vs CRN finite difference", ad, fd, 4.0 * fdSe + 0.002 * std::fabs(fd));
+    }
+
+    // The drift parameter has a non-zero interval derivative even at mu = 0:
+    // dC/dmu = T * Phi(sqrt(V)/2) at S0 = K, so each interval contributes
+    // dt times that (the drift acts linearly over its own interval).
+    const double exactMuPerInterval = dt * 0.5 * std::erfc(-sd * 0.5 * M_SQRT1_2);
+    double muSum = 0.0;
+    double muSumError = 0.0;
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        SCOPED_TRACE(::testing::Message() << "mu interval " << k);
+        CHECK_CLOSE("d C / d mu_k", estimate.mean(0, static_cast<Eigen::Index>(k)),
+                    exactMuPerInterval,
+                    4.0 * estimate.stdError(0, static_cast<Eigen::Index>(k)) +
+                        0.06 * std::fabs(exactMuPerInterval));
+        muSum += estimate.mean(0, static_cast<Eigen::Index>(k));
+        muSumError += estimate.stdError(0, static_cast<Eigen::Index>(k));
+    }
+    CHECK_CLOSE("sum_k dC/dmu_k", muSum, nSteps * dt * 0.5 * std::erfc(-sd * 0.5 * M_SQRT1_2),
+                4.0 * muSumError +
+                    0.06 * std::fabs(nSteps * dt * 0.5 * std::erfc(-sd * 0.5 * M_SQRT1_2)));
+}
+
+TEST_F(SdeGradientGbmTest, sharedEntryPointsRejectPerIntervalTheta) {
+    const std::size_t nSteps = 8;
+    const TimeGrid grid(1.0, nSteps);
+    std::vector<std::vector<double>> varying(nSteps);
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        varying[k] = {0.0, k < nSteps / 2 ? 0.2 : 0.4};
+    }
+    const SdeSimulator<double, Euler> simulator(grid, varying, Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 1.0);
+    const IidGaussianSource<> source(1, 7);
+    const std::vector<double> shared = {0.0, 0.2};
+
+    EXPECT_THROW(simulateGradient(simulator, x0, shared, driftOf(GbmModel{}),
+                                  diffusionOf(GbmModel{}), source, PiecewiseGbmPayoff{}, 64),
+                 std::invalid_argument);
+    EXPECT_THROW(simulateGradientCheckpointed(simulator, x0, shared, driftOf(GbmModel{}),
+                                              diffusionOf(GbmModel{}), source, PiecewiseGbmPayoff{},
+                                              64),
+                 std::invalid_argument);
+    // A constant model stays admissible.
+    const SdeSimulator<double, Euler> constant(
+        grid, std::vector<std::vector<double>>(nSteps, shared), Euler{});
+    EXPECT_NO_THROW(simulateGradient(constant, x0, shared, driftOf(GbmModel{}),
+                                     diffusionOf(GbmModel{}), source, PiecewiseGbmPayoff{}, 64));
+}
+
+// ── Checkpointed mode must refuse path-dependent payoffs ──
+namespace {
+
+/// Path-dependent: averages the spot over every recorded state.
+struct RunningAveragePayoff {
+    template <typename Scalar>
+    Scalar operator()(const PathBlock<Scalar>& path) const {
+        Scalar sum = Scalar(0.0);
+        for (const auto& state : path.states) {
+            sum += state(0, 0);
+        }
+        return sum / Scalar(static_cast<double>(path.states.size()));
+    }
+};
+
+} // namespace
+
+TEST_F(SdeGradientGbmTest, checkpointedRejectsPathDependentPayoff) {
+    const std::size_t nSteps = 16;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<double> theta = {0.05, 0.2};
+    const SdeSimulator<double, Euler> simulator(
+        grid, std::vector<std::vector<double>>(nSteps, theta), Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 100.0);
+    const IidGaussianSource<> source(1, 99);
+
+    // Checkpointing seeds the adjoint from the terminal state only, so a
+    // path-dependent payoff must be rejected rather than silently returning the
+    // terminal-only gradient.
+    EXPECT_THROW(simulateGradientCheckpointed(simulator, x0, theta, driftOf(GbmModel{}),
+                                              diffusionOf(GbmModel{}), source,
+                                              RunningAveragePayoff{}, 256),
+                 std::invalid_argument);
+    // The full-tape mode differentiates the same payoff correctly.
+    const GradientEstimate full =
+        simulateGradient(simulator, x0, theta, driftOf(GbmModel{}), diffusionOf(GbmModel{}), source,
+                         RunningAveragePayoff{}, 256);
+    EXPECT_TRUE(full.gradient.allFinite());
+}
+
+// ── Mode B: per-path contraction (correct standard errors) ──
+//
+// The raw per-interval gradient is p x nSteps per path, which is infeasible to
+// store at production shapes, so a parameterisation theta_k = f_k(phi) is
+// contracted inside the kernel: h = sum_k W_k^T G[:,k] with W_k = df_k/dphi.
+// Contracting per path is what makes the standard error correct, because
+// Var(sum_k c_k g_k) is not sum_k c_k^2 Var(g_k).
+
+TEST_F(SdeGradientGbmTest, contractionWithIdentityReproducesTheSharedGradient) {
+    const std::size_t nSteps = 16;
+    const std::size_t nPaths = 20000;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<double> theta = {0.05, 0.2};
+    const SdeSimulator<double, Euler> simulator(
+        grid, std::vector<std::vector<double>>(nSteps, theta), Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 100.0);
+    const PiecewiseGbmPayoff payoff{100.0};
+
+    // W_k = I for every interval: phi == theta, so the contraction must
+    // reproduce the shared-parameter gradient.
+    const auto identity = [](std::size_t) -> Eigen::MatrixXd {
+        return Eigen::MatrixXd::Identity(2, 2);
+    };
+    const IidGaussianSource<> srcContracted(1, 31337);
+    const GradientEstimate contracted =
+        simulateContractedGradient(simulator, x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                   srcContracted, payoff, identity, nPaths);
+    const IidGaussianSource<> srcShared(1, 31337);
+    const GradientEstimate shared =
+        simulateGradient(simulator, x0, theta, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                         srcShared, payoff, nPaths);
+
+    CHECK_CLOSE_REL("contracted value", contracted.value, shared.value, 1e-12);
+    for (Eigen::Index i = 0; i < shared.gradient.size(); ++i) {
+        CHECK_CLOSE_REL("contracted vs shared gradient", contracted.gradient(i), shared.gradient(i),
+                        1e-10);
+    }
+}
+
+TEST_F(SdeGradientGbmTest, contractionSplitsTheTermStructure) {
+    const std::size_t nSteps = 32;
+    const std::size_t nPaths = 400000;
+    const double dt = 1.0 / static_cast<double>(nSteps);
+    const TimeGrid grid(1.0, nSteps);
+    std::vector<std::vector<double>> theta(nSteps);
+    double totalVariance = 0.0;
+    for (std::size_t k = 0; k < nSteps; ++k) {
+        const double sigma = k < nSteps / 2 ? 0.20 : 0.40;
+        theta[k] = {0.0, sigma};
+        totalVariance += sigma * sigma * dt;
+    }
+    const SdeSimulator<double, Euler> simulator(grid, theta, Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 1.0);
+    const IidGaussianSource<> source(1, 5150);
+
+    // Two-factor term structure: phi_0 shifts sigma over the first half, phi_1
+    // over the second. W_k picks the matching column.
+    const auto twoFactor = [&](std::size_t k) -> Eigen::MatrixXd {
+        Eigen::MatrixXd w = Eigen::MatrixXd::Zero(2, 2); // p = {mu, sigma}, q = 2
+        w(1, k < nSteps / 2 ? 0 : 1) = 1.0;
+        return w;
+    };
+    const GradientEstimate estimate =
+        simulateContractedGradient(simulator, x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                   source, PiecewiseGbmPayoff{}, twoFactor, nPaths);
+
+    // Closed form: each factor moves half the intervals.
+    const double sd = std::sqrt(totalVariance);
+    const double d1 = sd * 0.5;
+    const double vega = std::exp(-0.5 * d1 * d1) / std::sqrt(2.0 * M_PI);
+    const auto perInterval = [&](double sigma) { return vega * sigma * dt / sd; };
+    const double exactFirst = 0.5 * nSteps * perInterval(0.20);
+    const double exactSecond = 0.5 * nSteps * perInterval(0.40);
+
+    // The sample layout is (d + q): row 0 is dV/dx0, rows 1..2 are the factors.
+    ASSERT_EQ(estimate.nStateDims, 1u);
+    ASSERT_EQ(estimate.nParameters, 2u);
+    const Eigen::Index first = 1;
+    const Eigen::Index second = 2;
+    CHECK_CLOSE("term-structure factor 0", estimate.gradient(first), exactFirst,
+                4.0 * estimate.stdErrors(first) + 0.06 * std::fabs(exactFirst));
+    CHECK_CLOSE("term-structure factor 1", estimate.gradient(second), exactSecond,
+                4.0 * estimate.stdErrors(second) + 0.06 * std::fabs(exactSecond));
+    EXPECT_GT(estimate.stdErrors(first), 0.0);
+    EXPECT_GT(estimate.stdErrors(second), 0.0);
+}
+
+TEST_F(SdeGradientGbmTest, contractionRejectsMalformedWeights) {
+    const std::size_t nSteps = 8;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<double> theta = {0.0, 0.2};
+    const SdeSimulator<double, Euler> simulator(
+        grid, std::vector<std::vector<double>>(nSteps, theta), Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 1.0);
+    const IidGaussianSource<> source(1, 3);
+    const auto wrongRows = [](std::size_t) -> Eigen::MatrixXd {
+        return Eigen::MatrixXd::Identity(3, 1);
+    };
+    EXPECT_THROW(simulateContractedGradient(simulator, x0, driftOf(GbmModel{}),
+                                            diffusionOf(GbmModel{}), source, PiecewiseGbmPayoff{},
+                                            wrongRows, 16),
+                 std::invalid_argument);
+    // A per-interval model is fine here; an empty one is not.
+    const SdeSimulator<double, Euler> empty(grid, std::vector<std::vector<double>>(nSteps),
+                                            Euler{});
+    const auto identity = [](std::size_t) -> Eigen::MatrixXd {
+        return Eigen::MatrixXd::Identity(2, 2);
+    };
+    EXPECT_THROW(simulateContractedGradient(empty, x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                            source, PiecewiseGbmPayoff{}, identity, 16),
+                 std::invalid_argument);
 }

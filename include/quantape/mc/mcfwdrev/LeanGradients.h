@@ -117,6 +117,7 @@ simulateGradientLeanSamples(const SdeSimulator<double, Scheme>& simulator,
     if (nPaths == 0) {
         throw std::invalid_argument("simulateGradientLeanSamples: nPaths must be positive");
     }
+    requireSharedTheta(simulator.theta(), theta);
     const std::size_t d = static_cast<std::size_t>(x0.size());
     const std::size_t p = theta.size();
     const std::size_t nSteps = simulator.timeGrid().nSteps();
