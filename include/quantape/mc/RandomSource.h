@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 namespace quantape::mc {
 /**
@@ -17,26 +18,38 @@ namespace quantape::mc {
  *
  * ## Keyed counter-based streams (reproducibility specification)
  *
- * Every logical normal draw is addressed by four indices
- * (seed, path p, step k, factor j). Writing
+ * Every logical draw is addressed by (seed, path p, step k, index i) and turned
+ * into a 64-bit key by the single mixing function `keyForIndex`:
  *
- *     normalIndex(k, j) = k * q + j
- *     key(seed, p, k, j) = splitmix64( seed XOR
- *                                      splitmix64(p * PHI + normalIndex(k, j)) )
- *     u_m = splitmix64(key + m * PSI),   m = 0, 1, 2, ...        (PSI = counter salt)
+ *     key(seed, p, i) = splitmix64( seed XOR (p * kPathSalt) XOR (i * kIndexSalt) )
+ *     u_m             = splitmix64( key + m * kCounterSalt ),  m = 1, 2, ...   (retries)
  *
- * the draw is `z_j^{(p)}(t_k) = S(u_0, u_1, ...)` where S is a rejection
- * sampler (Ziggurat/McFarland). The rejection loop consumes a *variable*
- * number m of uniforms, but all of them come from that one normal's own
- * counter stream, so the draw is a pure function of (seed, p, k, j):
+ * Gaussian draws and uniform streams use **disjoint index spaces**:
  *
- *     z(seed, p, k, j)  ==  path p of any block run  (bitwise)
+ *     normal  (k, j) -> i = k * q + j                              (j < q)
+ *     uniform (k, s) -> i = kUniformIndexTag + k * Stride + s      (tag = 2^63)
+ *
+ * The uniform indices occupy the upper half of the 64-bit index space while
+ * Gaussian indices are `k*q + j`, so the two sets cannot intersect for any
+ * factor count, step count or number of uniform streams. This is load-bearing:
+ * `qeSample` reads its uniform only on the QE exponential branch, so an aliased
+ * uniform would silently make the uniform of step k the *normal* of step k+1 —
+ * which removes the independence the scheme's martingale correction assumes.
+ * The uniform layout is reproducible too: a fixed stride (not the call's stream
+ * count) makes `(step, stream) -> index` injective for every call pattern.
+ *
+ * The draw itself is `z = S(key, u_1, ...)` where S is a rejection sampler
+ * (Ziggurat/McFarland). The loop consumes a *variable* number of words, but all
+ * come from that one key, so the draw is a pure function of (seed, p, k, i):
+ *
+ *     draw(seed, p, k, i)  ==  the same value in any block run  (bitwise)
  *
  * independently of block size, path order and thread count. This is the
- * "keyed stream" idea: independence across draws is by *key*, not by
- * position in a shared sequence — required because rejection sampling
- * rules out O(1) skip-ahead on a shared sequential stream (PCG advance()
- * cannot know the variable consumption).
+ * "keyed stream" idea: independence across draws is by *key*, not by position
+ * in a shared sequence — required because rejection sampling rules out O(1)
+ * skip-ahead on a shared sequential stream (PCG advance() cannot know the
+ * variable consumption). Because a key is a bijection of the index, disjoint
+ * index sets give independent draws.
  *
  * Mixer quality is load-bearing: SplitMix64 is full-width and well mixed,
  * and the samplers use the full 64-bit word (including the sign bit) to
@@ -88,18 +101,40 @@ private:
     std::uint64_t m_counter = 0;
 };
 
-/// Key derivation for one logical normal: (seed, path, step, factor) ->
-/// `splitmix64(seed XOR path * PHI XOR normalIndex * PSI)` (one mix; both
-/// operands are odd-constant-spread before the XOR, then fully mixed).
-inline std::uint64_t keyFor(std::uint64_t seed, std::size_t pathIndex, std::size_t step,
-                            std::size_t factor, std::size_t factorCount) {
+/// Key derivation from a raw draw index. The single definition of the
+/// index -> key map; `keyFor` (Gaussian) and `uniformKey` (uniform streams)
+/// are the two documented ways to form the index.
+inline std::uint64_t keyForIndex(std::uint64_t seed, std::size_t pathIndex, std::uint64_t index) {
     constexpr std::uint64_t kPathSalt = 0x9E3779B97F4A7C15ULL;
     constexpr std::uint64_t kIndexSalt = 0xBF58476D1CE4E5B9ULL;
-    const std::uint64_t normalIndex =
-        static_cast<std::uint64_t>(step) * static_cast<std::uint64_t>(factorCount) +
-        static_cast<std::uint64_t>(factor);
     return splitmix64(seed ^ (static_cast<std::uint64_t>(pathIndex) * kPathSalt) ^
-                      (normalIndex * kIndexSalt));
+                      (index * kIndexSalt));
+}
+
+/// Key for gaussian factor `factor` at `step` of path `pathIndex`:
+/// index `step * factorCount + factor`.
+inline std::uint64_t keyFor(std::uint64_t seed, std::size_t pathIndex, std::size_t step,
+                            std::size_t factor, std::size_t factorCount) {
+    return keyForIndex(seed, pathIndex, static_cast<std::uint64_t>(step) * factorCount + factor);
+}
+
+/// Uniform indices are tagged into the upper half of the 64-bit index space.
+/// A gaussian index is `step * factorCount + factor`, far below this tag for
+/// any representable grid, so the two index sets are disjoint by construction
+/// and a uniform stream can never be generated from a normal's key.
+inline constexpr std::uint64_t kUniformIndexTag = 1ULL << 63;
+
+/// Fixed per-step stride for uniform streams (maximum streams per step). Fixed
+/// rather than taken from the call so that `(step, stream) -> index` is
+/// injective for every call pattern, including calls that request fewer streams.
+inline constexpr std::uint64_t kUniformStreamStride = 64;
+
+/// Key for uniform stream `stream` at `step` of path `pathIndex`.
+inline std::uint64_t uniformKey(std::uint64_t seed, std::size_t pathIndex, std::size_t step,
+                                std::size_t stream) {
+    return keyForIndex(seed, pathIndex,
+                       kUniformIndexTag + static_cast<std::uint64_t>(step) * kUniformStreamStride +
+                           stream);
 }
 
 /// Map a 64-bit key to a double uniform in [0, 1) (53-bit construction)
@@ -198,19 +233,21 @@ public:
         }
     }
 
-    /// Uniform streams for moment-matching schemes: disjoint key space
-    /// (factor indices beyond the Gaussian factors), one draw per
-    /// (path, step, stream).
+    /// Uniform streams for moment-matching schemes: disjoint key space (see the
+    /// file header), one draw per (path, step, stream), `U(0,1)`. The index is
+    /// `kUniformIndexTag + step*kUniformStreamStride + stream`, so it can never
+    /// coincide with a gaussian index `step*factorCount + factor`.
     void fillUniform(std::size_t step, std::size_t pathBegin, std::size_t nPaths,
                      std::size_t streamBegin, std::size_t uniformStreams,
                      Eigen::MatrixXd& out) const {
+        if (streamBegin + uniformStreams > kUniformStreamStride) [[unlikely]] {
+            throw std::out_of_range("IidGaussianSource: at most 64 uniform streams per step");
+        }
         out.resize(static_cast<Eigen::Index>(uniformStreams), static_cast<Eigen::Index>(nPaths));
         for (std::size_t s = 0; s < uniformStreams; ++s) {
             for (std::size_t j = 0; j < nPaths; ++j) {
-                const std::uint64_t key =
-                    keyFor(m_seed, pathBegin + j, step, m_factorCount + 1 + streamBegin + s,
-                           m_factorCount);
-                out(static_cast<Eigen::Index>(s), static_cast<Eigen::Index>(j)) = toUniform(key);
+                out(static_cast<Eigen::Index>(s), static_cast<Eigen::Index>(j)) =
+                    toUniform(uniformKey(m_seed, pathBegin + j, step, streamBegin + s));
             }
         }
     }

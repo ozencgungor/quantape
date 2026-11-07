@@ -464,9 +464,15 @@ TEST_F(HestonMcTest, qeStepConvergenceExtreme) {
     };
     const double bias64 = priceAt(process, x0, theta, 2.0, 64, 1.0, 999) - exact;
     const double bias256 = priceAt(process, x0, theta, 2.0, 256, 1.0, 999) - exact;
-    EXPECT_TRUE(bias64 < 0.0 && bias256 < 0.0);
-    EXPECT_TRUE(std::fabs(bias256) < 0.75 * std::fabs(bias64));
-    EXPECT_TRUE(std::fabs(bias256) < 2e-2);
+    // This corner is where the uniform/normal key collision used to bite hardest:
+    // with aliased uniforms the scheme carried a systematic -1.7e-2 bias at 64
+    // steps (-13.7% of the 0.125 price) and -1.0e-2 at 256, i.e. a martingale
+    // violation masquerading as discretisation. With independent uniforms both
+    // resolutions sit at the Monte Carlo noise floor (se ~2e-3 at 2^14 paths), so
+    // the gate asserts accuracy at both resolutions rather than a bias ratio,
+    // which is meaningless below the noise. The biased scheme failed this by 3x.
+    CHECK_CLOSE("QE bias at 64 steps", bias64, 0.0, 6e-3);
+    CHECK_CLOSE("QE bias at 256 steps", bias256, 0.0, 6e-3);
 }
 
 TEST_F(HestonMcTest, qeStepConvergenceModerateAndDeReference) {
@@ -527,4 +533,59 @@ TEST_F(HestonMcTest, qeStepConvergenceModerateAndDeReference) {
     const double biasModerate =
         priceAt(procM, y0, thetaOf(procM), 1.0, 64, 1.0, 555) - model.call(moderate, market1);
     EXPECT_TRUE(std::fabs(biasModerate) < 2e-3);
+}
+
+// ── Uniform/normal independence: a martingale and price gate that fail if the
+//    QE branch uniform aliases a Gaussian key ──
+//
+// `qeSample` reads its uniform only on the exponential branch, so an aliased
+// uniform is invisible for Feller-satisfied parameters and shows up only when
+// the variance visits the low region. This case is a deliberately ordinary
+// Feller-violating equity calibration (2*kappa*theta = 0.16 < eta^2 = 0.25) on
+// a weekly grid: exactly the regime that exercises the branch.
+TEST_F(HestonMcTest, qeMartingaleAndPriceOnWeeklyEquityGrid) {
+    // Feller violated: the exponential branch fires, so the uniform is consumed.
+    const HestonProcess process{0.0, 2.0, 0.04, 0.50, -0.70};
+    const quantape::models::HestonParams params{0.04, 2.0, 0.04, 0.50, -0.70};
+    const quantape::models::HestonMarket market{100.0, 100.0, 0.0, 0.0, 1.0};
+    const double analyticPrice = quantape::models::HestonModel{}.call(params, market);
+
+    const std::size_t nSteps = 52; // weekly
+    const std::size_t nPaths = 400000;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<std::vector<double>> theta(nSteps, thetaOf(process));
+    const SdeSimulator<double, HestonQeProcess<HestonProcess>> simulator(
+        grid, theta, HestonQeProcess<HestonProcess>{process, true});
+    const Eigen::VectorXd x0 = (Eigen::Vector2d() << std::log(100.0), params.v0).finished();
+    const IidGaussianSource<> source(2, 9091);
+    const auto blocks = simulator.simulate(x0, driftOf(process), diffusionOf(process), source,
+                                           nPaths, 8192, Schedule::Sequential);
+
+    double sumS = 0.0, sumS2 = 0.0, sumPay = 0.0, sumPay2 = 0.0;
+    std::size_t n = 0;
+    for (const auto& b : blocks) {
+        const auto& x = b.states.back();
+        for (Eigen::Index p = 0; p < x.cols(); ++p) {
+            const double s = std::exp(x(0, p));
+            const double pay = s > 100.0 ? s - 100.0 : 0.0;
+            sumS += s;
+            sumS2 += s * s;
+            sumPay += pay;
+            sumPay2 += pay * pay;
+            ++n;
+        }
+    }
+    const double N = static_cast<double>(n);
+    const double meanS = sumS / N;
+    const double meanPay = sumPay / N;
+    const double seS = std::sqrt(std::max(0.0, sumS2 / N - meanS * meanS) / N);
+    const double sePay = std::sqrt(std::max(0.0, sumPay2 / N - meanPay * meanPay) / N);
+
+    // Martingale: with mu = 0 the discounted spot is a martingale, so
+    // E[S_T] = S_0. The scheme's own correction enforces this only if the
+    // uniform is independent of the past; a collision broke it by ~8 se here.
+    CHECK_CLOSE("QE martingale with the exponential branch live", meanS, 100.0, 4.0 * seS);
+    // And the price must sit at the discretisation level, not 1.6% off it.
+    CHECK_CLOSE("QE weekly Feller-violating call vs analytic", meanPay, analyticPrice,
+                4.0 * sePay + 1.5e-2);
 }

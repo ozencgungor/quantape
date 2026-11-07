@@ -20,7 +20,10 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <ostream>
+#include <set>
+#include <stdexcept>
 #include <vector>
 
 #include "support/GtestSupport.h"
@@ -143,27 +146,94 @@ INSTANTIATE_TEST_SUITE_P(Table, MomentMatchingTest, ::testing::ValuesIn(kQeCases
                              return info.param.id;
                          });
 
-TEST(MomentMatching, uniformStreamContract) {
-    IidGaussianSource<> source(2, 77);
+// The uniform stream contract, stated so that a collision would fail it.
+//
+// `qeSample` reads its uniform only on the exponential branch, so a uniform
+// that aliases a Gaussian key is invisible in most parameter regimes and shows
+// up as a wrong price elsewhere. The invariant is therefore asserted
+// structurally (disjoint index sets, not "the values differ at one step") and
+// pinned reproducibly (block == per-path, fixed golden).
+TEST(MomentMatching, uniformKeysAreDisjointFromGaussianKeys) {
+    // Sweep the factor count and the stream count: a layout that is disjoint for
+    // one (q, U) but not another is still wrong.
+    for (std::size_t q : {1u, 2u, 3u, 5u}) {
+        for (std::size_t streams : {1u, 2u, 3u, 5u}) {
+            SCOPED_TRACE(::testing::Message() << "q=" << q << " streams=" << streams);
+            std::set<std::uint64_t> gaussian;
+            for (std::size_t step = 0; step < 4096; ++step) {
+                for (std::size_t j = 0; j < q; ++j) {
+                    gaussian.insert(quantape::mc::keyFor(2024, 3, step, j, q));
+                }
+            }
+            for (std::size_t step = 0; step < 4096; ++step) {
+                for (std::size_t s = 0; s < streams; ++s) {
+                    EXPECT_EQ(gaussian.count(quantape::mc::uniformKey(2024, 3, step, s)), 0u);
+                }
+            }
+        }
+    }
+    // Uniform streams must also be disjoint from each other across steps: a
+    // stride taken from the call's stream count would alias stream s of step k
+    // with stream s' of step k' once the counts differ.
+    std::set<std::uint64_t> uniforms;
+    for (std::size_t step = 0; step < 4096; ++step) {
+        for (std::size_t s = 0; s < 2; ++s) {
+            EXPECT_TRUE(uniforms.insert(quantape::mc::uniformKey(2024, 3, step, s)).second);
+        }
+    }
+}
+
+TEST(MomentMatching, uniformStreamIsReproducible) {
+    const IidGaussianSource<> source(2, 2024);
+
+    // Values in [0,1), and a block fill is bitwise equal to per-path fills.
     Eigen::MatrixXd block;
     source.fillUniform(3, 5, 4, 0, 1, block);
-    EXPECT_TRUE(block.rows() == 1 && block.cols() == 4);
+    ASSERT_TRUE(block.rows() == 1 && block.cols() == 4);
     for (Eigen::Index p = 0; p < 4; ++p) {
-        EXPECT_TRUE(block(0, p) >= 0.0 && block(0, p) < 1.0);
+        EXPECT_GE(block(0, p), 0.0);
+        EXPECT_LT(block(0, p), 1.0);
         Eigen::MatrixXd single;
         source.fillUniform(3, 5 + static_cast<std::size_t>(p), 1, 0, 1, single);
         EXPECT_EQ(single(0, 0), block(0, p));
     }
-    // normals and uniforms occupy disjoint key spaces
-    Eigen::MatrixXd z;
-    source.fill(3, 5, 4, z);
-    bool allDifferent = true;
-    for (Eigen::Index p = 0; p < 4; ++p) {
-        if (z(0, p) == block(0, p)) {
-            allDifferent = false;
+
+    // Reject a stream request the fixed stride cannot serve.
+    Eigen::MatrixXd tooMany;
+    EXPECT_THROW(source.fillUniform(0, 0, 1, 0, quantape::mc::kUniformStreamStride + 1, tooMany),
+                 std::out_of_range);
+}
+
+// The reproducibility contract for BOTH streams: a fixed (seed, path, step,
+// index) must keep producing the same double forever. These constants change
+// only if the key map or the sampler changes, and that changes every simulated
+// price — so the test is deliberately a hard pin, not a tolerance.
+TEST(MomentMatching, keyedStreamsMatchTheirGoldens) {
+    auto fnv = [](std::uint64_t h, const double v) {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &v, sizeof bits);
+        for (int b = 0; b < 8; ++b) {
+            h ^= (bits >> (8 * b)) & 0xFF;
+            h *= 0x100000001B3ULL;
+        }
+        return h;
+    };
+    const IidGaussianSource<> source(2, 2024);
+    std::uint64_t hNormal = 0xcbf29ce484222325ULL;
+    std::uint64_t hUniform = 0xd6e8feb86659fd93ULL;
+    Eigen::MatrixXd z, u;
+    for (std::size_t k = 0; k < 8; ++k) {
+        for (std::size_t p : {0u, 1u, 2u}) {
+            source.fill(k, p, 1, z);
+            hNormal = fnv(hNormal, z(0, 0));
+            hNormal = fnv(hNormal, z(1, 0));
+            source.fillUniform(k, p, 1, 0, 2, u);
+            hUniform = fnv(hUniform, u(0, 0));
+            hUniform = fnv(hUniform, u(1, 0));
         }
     }
-    EXPECT_TRUE(allDifferent);
+    EXPECT_EQ(hNormal, 0xe95dca772fa07cfbULL) << "gaussian key map / sampler changed";
+    EXPECT_EQ(hUniform, 0xa5f4a8912e55d72dULL) << "uniform key map changed";
 }
 
 class CirMomentMatchingTest : public ::testing::TestWithParam<StepsParam> {};
