@@ -301,10 +301,15 @@ QuoteRisk transformQuoteRisk(const CurveT& curve, const std::vector<CurvePillar>
  * `HVdZeros` is the `n x n` row-major Hessian `d^2 V / dz_i dz_j` over curve
  * nodes (node 0 fixed; only rows/columns 1..n-1 are used). The transform is
  * `H_r = 0.5 (J^T H_zeta J + (J^T H_zeta J)^T)` with `J = F^{-1}`, so the
- * returned matrix is exactly symmetric (Gauss-Newton approximation; the
- * bootstrap-curvature term `sum_i dV/dz_i * d^2 z_i / dr^2` is omitted, which
- * is the standard approximation for smooth curves and is reported as an error
- * bar in the fuller report).
+ * returned matrix is exactly symmetric.
+ *
+ * This is the **Gauss-Newton** form: the bootstrap-curvature term
+ * `sum_i dV/dz_i * d^2 z_i / dr^2` is omitted. That term is material, not an
+ * error bar — on a six-node OIS fixture it changes individual entries by O(1)
+ * and flips signs — so use `markets::stackQuoteGamma` for the full transform on
+ * a curve stack (it re-assembles the instrument Jacobian at bumped inputs and
+ * costs roughly `2 * nNodes` full Jacobian assemblies). The two are not
+ * interchangeable, and no error bar is reported for the omission here.
  */
 template <typename CurveT>
 QuoteGamma transformQuoteGamma(const CurveT& curve, const std::vector<CurvePillar>& pillars,
