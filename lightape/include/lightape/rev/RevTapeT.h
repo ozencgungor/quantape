@@ -73,11 +73,15 @@ using std::sqrt;
 
 /// Sweep zero-skip predicate. A node is skipped only when *every* component
 /// of its adjoint is zero, so a nested AD scalar whose primal adjoint is zero
-/// but whose derivative adjoint is live still sweeps. A payload type can
-/// supply a componentwise `isZero()`; otherwise full-object equality `== T{}`
-/// is used (the `double` case, where the two coincide). The nested
-/// `RevScalar` must get `isZero()` before `RevTapeT<RevScalar>` is enabled:
-/// its `operator==` compares the primal only.
+/// but whose derivative adjoint is live still sweeps.
+///
+/// A payload type must supply a componentwise `isZero()`; the `t == T{}` form is
+/// reserved for arithmetic scalars, where full-object equality *is* a
+/// componentwise test. Any richer payload whose `operator==` compares only part
+/// of its state (notably `RevScalar`, whose `==` compares the primal alone)
+/// would have live adjoints silently skipped, so the fallback is restricted to
+/// arithmetic types and the rest is a compile-time error rather than a wrong
+/// answer.
 template <typename T>
 constexpr bool revTapeZero(const T& t) {
     if constexpr (requires {
@@ -85,6 +89,9 @@ constexpr bool revTapeZero(const T& t) {
                   }) {
         return static_cast<bool>(t.isZero());
     } else {
+        static_assert(std::is_arithmetic_v<T>,
+                      "revTapeZero: a non-arithmetic payload must provide a componentwise "
+                      "isZero(); operator== may compare only part of the adjoint state");
         return t == T{};
     }
 }
