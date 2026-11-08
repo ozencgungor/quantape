@@ -1619,3 +1619,67 @@ TEST_F(SdeGradientGbmTest, contractionRejectsMalformedWeights) {
                                             source, PiecewiseGbmPayoff{}, identity, 16),
                  std::invalid_argument);
 }
+
+// The per-interval standard errors are the standard error of the mean, so
+// multiplying the path count by 4 halves them. Every other gate in this file
+// uses a tolerance that is a multiple of the reported SE and therefore cannot
+// detect a systematic scale error here.
+TEST_F(SdeGradientGbmTest, intervalStandardErrorScalesAsInverseSqrtPaths) {
+    const std::size_t nSteps = 16;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<double> theta = {0.05, 0.2};
+    const SdeSimulator<double, Euler> simulator(
+        grid, std::vector<std::vector<double>>(nSteps, theta), Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 100.0);
+    const auto run = [&](std::size_t nPaths) {
+        const IidGaussianSource<> source(1, 4242);
+        return simulateIntervalGradient(simulator, x0, driftOf(GbmModel{}), diffusionOf(GbmModel{}),
+                                        source, PiecewiseGbmPayoff{100.0}, nPaths);
+    };
+    const auto small = run(20000);
+    const auto large = run(80000);
+    ASSERT_GT(small.valueStdError, 0.0);
+    ASSERT_GT(large.valueStdError, 0.0);
+    // 4x the paths -> half the standard error (within sampling noise).
+    CHECK_CLOSE_REL("value SE ratio for 4x paths", small.valueStdError / large.valueStdError, 2.0,
+                    0.15);
+    // Per-interval SEs follow the same rule.
+    for (Eigen::Index k = 0; k < small.stdError.cols(); ++k) {
+        SCOPED_TRACE(::testing::Message() << "interval " << k);
+        CHECK_CLOSE_REL("interval SE ratio for 4x paths",
+                        small.stdError(1, k) / large.stdError(1, k), 2.0, 0.20);
+    }
+}
+
+namespace {
+/// A terminal payoff whose `double` and `var` evaluations differ by ~1 ulp, as
+/// any multiply-add does when the compiler contracts one and not the other.
+struct UlpSplitTerminalPayoff {
+    template <typename Scalar>
+    Scalar operator()(const PathBlock<Scalar>& path) const {
+        const Scalar s = path.states.back()(0, 0);
+        if constexpr (std::is_same_v<Scalar, double>) {
+            return s * (1.0 + 1e-15);
+        } else {
+            return s;
+        }
+    }
+};
+} // namespace
+
+TEST_F(SdeGradientGbmTest, checkpointedAcceptsTerminalPayoffWithinOneUlp) {
+    const std::size_t nSteps = 16;
+    const TimeGrid grid(1.0, nSteps);
+    const std::vector<double> theta = {0.05, 0.2};
+    const SdeSimulator<double, Euler> simulator(
+        grid, std::vector<std::vector<double>>(nSteps, theta), Euler{});
+    const Eigen::VectorXd x0 = Eigen::VectorXd::Constant(1, 100.0);
+    const IidGaussianSource<> source(1, 7);
+    // The value difference is ~1e-13 relative: a terminal payoff, so the guard
+    // must accept it: the check is a relative tolerance, not exact equality.
+    GradientEstimate estimate;
+    EXPECT_NO_THROW(estimate = simulateGradientCheckpointed(
+                        simulator, x0, theta, driftOf(GbmModel{}), diffusionOf(GbmModel{}), source,
+                        UlpSplitTerminalPayoff{}, 64));
+    EXPECT_TRUE(estimate.gradient.allFinite());
+}

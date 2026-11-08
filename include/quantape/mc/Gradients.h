@@ -352,11 +352,17 @@ GradientSamples simulateGradientCheckpointedSamples(
                 // so it is exact only when the payoff is terminal. Evaluate the
                 // payoff on the seed block and compare with the value taken from
                 // the full forward path: a path-dependent payoff differs and is
-                // rejected here instead of silently returning the terminal-only
-                // gradient. (Poisoning the block with NaN would not work: a
-                // linear payoff still receives finite adjoints, because adjoints
-                // do not depend on intermediate values.)
-                if (!(pi.val() == samples.values[offset])) {
+                // rejected here. The comparison is a relative tolerance because
+                // the two evaluations are the same expression through different
+                // scalar types and may differ in the last bit (FMA contraction).
+                // Re-detecting path dependence by poisoning the block is not an
+                // option: adjoints do not depend on intermediate values, so a
+                // linear payoff still receives finite adjoints.
+                const double seedValue = pi.val();
+                const double pathValue = samples.values[offset];
+                if (!(std::fabs(seedValue - pathValue) <=
+                      1e-12 *
+                          std::max(1.0, std::max(std::fabs(seedValue), std::fabs(pathValue))))) {
                     throw std::invalid_argument(
                         "simulateGradientCheckpointed: the payoff depends on non-terminal "
                         "states; use simulateGradient (full tape) instead");
@@ -574,17 +580,21 @@ IntervalGradientEstimate simulateIntervalGradient(const SdeSimulator<double, Sch
     const double n = static_cast<double>(nPaths);
     estimate.mean /= n;
     estimate.value /= n;
+    // `estimate.*StdError` holds the sum of squares here; `m` is the mean.
+    // The standard error of the mean is sqrt(sampleVar / n) with
+    // sampleVar = (sumSq - n*m^2)/(n - 1) = n*popVar/(n - 1), which collapses to
+    // sqrt(popVar / (n - 1)) -- the population variance divided by n - 1.
     estimate.valueStdError = nPaths > 1
                                  ? std::sqrt(std::max(0.0, estimate.valueStdError / n -
                                                                estimate.value * estimate.value) /
-                                             (n - 1.0) / n)
+                                             (n - 1.0))
                                  : 0.0;
     for (Eigen::Index j = 0; j < estimate.mean.rows(); ++j) {
         for (Eigen::Index k = 0; k < estimate.mean.cols(); ++k) {
             const double m = estimate.mean(j, k);
-            const double second = estimate.stdError(j, k) / n;
+            const double popVar = estimate.stdError(j, k) / n - m * m;
             estimate.stdError(j, k) =
-                nPaths > 1 ? std::sqrt(std::max(0.0, (second - m * m) / (n - 1.0)) / n) : 0.0;
+                nPaths > 1 ? std::sqrt(std::max(0.0, popVar) / (n - 1.0)) : 0.0;
         }
     }
     return estimate;
