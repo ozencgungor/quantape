@@ -20,6 +20,7 @@ quantape_add_gtest(qta_test_mc_ad
             test_sde_gradients.cpp
             test_sde_qmc.cpp
             test_sde_evaluate_ad.cpp
+            test_forward_scalar.cpp
     STAN
     LABELS unit mc ad slow)
 

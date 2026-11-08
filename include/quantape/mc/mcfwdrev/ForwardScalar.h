@@ -76,9 +76,13 @@ inline Tangent<S, N>& operator*=(Tangent<S, N>& a, const Tangent<S, N>& b) {
 
 template <typename S, std::size_t N>
 inline Tangent<S, N>& operator/=(Tangent<S, N>& a, const Tangent<S, N>& b) {
+    // Quotient rule, matching the binary operator/: after the primal update
+    // a.value is the quotient q, so d(a/b) = (a.d - q * b.d) / b.value. Both
+    // the numerator and the denominator tangents therefore contribute.
     a.value /= b.value;
+    const S inv = S(1.0) / b.value;
     for (std::size_t i = 0; i < N; ++i) {
-        a.d[i] /= b.value;
+        a.d[i] = (a.d[i] - a.value * b.d[i]) * inv;
     }
     return a;
 }
