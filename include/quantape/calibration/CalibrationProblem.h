@@ -282,8 +282,8 @@ CalibrationDerivatives assembleCalibration(const P& problem, const Eigen::Vector
 /// Diagnostics of a calibration IFT solve.
 struct CalibrationIftDiagnostics {
     double condition = 0.0;
-    double ridge = 0.0;
-    bool regularized = false;
+    double ridge = 0.0;       ///< ridge actually applied (0 = none)
+    bool regularized = false; ///< a ridge was actually applied
     bool pseudoInverse = false;
     std::size_t rank = 0;
     std::vector<std::size_t> activeInequalities;
@@ -294,7 +294,9 @@ struct CalibrationIftOptions {
                                   ///< solvers' feasibility exits: SLSQP ~1e-7,
                                   ///< AUGLAG ~1e-9, on constraints of scale O(1))
     double lambdaTol = 1e-10;     ///< multiplier > tol counts as strictly active
-    double ridge = 0.0;           ///< explicit ridge (0 = automatic minimum)
+    double ridge = 0.0;           ///< explicit ridge (0 = automatic); applied
+                                  ///< as given on the first attempt and only
+                                  ///< when H is not already positive definite
     int maxRidgeTries = 30;
 };
 
@@ -307,19 +309,28 @@ struct CalibrationIftResult {
 
 namespace detail {
 
-/// Solve H X = B for symmetric H; minimal ridge escalation when H is not
-/// positive definite (same policy as ImplicitFunction.h).
+/// Solve H X = B for symmetric H; a ridge is applied only when H is not
+/// positive definite (same policy as ImplicitFunction.h). An explicit
+/// `options.ridge` is applied as given on the first attempt and escalated by a
+/// factor of ten only if it still fails; a positive-definite H is solved
+/// un-ridged, with `regularized`/`ridge` reporting exactly what happened.
 inline void solveSymmetricRidge(const Eigen::MatrixXd& H, const Eigen::MatrixXd& B,
                                 Eigen::MatrixXd& X, const CalibrationIftOptions& options,
                                 CalibrationIftDiagnostics& out) {
     const Eigen::Index n = H.rows();
     Eigen::MatrixXd Hr = H;
-    double ridge = options.ridge;
+    double ridge = 0.0; ///< actually applied (0 = none)
+    bool firstAttempt = true;
     int tries = 0;
     Eigen::LLT<Eigen::MatrixXd> llt(Hr);
     while (llt.info() != Eigen::Success && tries < options.maxRidgeTries) {
         ++tries;
-        if (ridge <= 0.0) {
+        if (firstAttempt && options.ridge > 0.0) {
+            // Honour the caller's value exactly on the first attempt.
+            ridge = options.ridge;
+        } else if (ridge > 0.0) {
+            ridge *= 10.0;
+        } else {
             Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hr);
             const double lmin = es.eigenvalues().minCoeff();
             double scale = 0.0;
@@ -327,9 +338,8 @@ inline void solveSymmetricRidge(const Eigen::MatrixXd& H, const Eigen::MatrixXd&
                 scale = std::max(scale, std::fabs(H(i, i)));
             }
             ridge = std::max(1e-14 * std::max(1.0, scale), -lmin * (1.0 + 1e-6));
-        } else {
-            ridge *= 10.0;
         }
+        firstAttempt = false;
         Hr = H;
         Hr.diagonal().array() += ridge;
         llt.compute(Hr);
@@ -481,10 +491,13 @@ CalibrationIftResult calibrationIft(const P& problem, const Eigen::VectorXd& bHa
     K.topLeftCorner(static_cast<Eigen::Index>(nB), static_cast<Eigen::Index>(nB)) = lagrangianH;
     for (std::size_t k = 0; k < mA; ++k) {
         const std::size_t row = result.diagnostics.activeInequalities[k];
-        K.topRightCorner(static_cast<Eigen::Index>(nB), 1).col(static_cast<Eigen::Index>(k)) =
-            activeGradients[k];
-        K.bottomLeftCorner(1, static_cast<Eigen::Index>(nB)).row(static_cast<Eigen::Index>(k)) =
-            (lambda[row] * activeGradients[k]).transpose();
+        // The KKT coupling blocks span every active inequality: J_A^T is
+        // nB x mA (one column per constraint) and diag(lambda) J_A is mA x nB
+        // (one row per constraint).
+        K.topRightCorner(static_cast<Eigen::Index>(nB), static_cast<Eigen::Index>(mA))
+            .col(static_cast<Eigen::Index>(k)) = activeGradients[k];
+        K.bottomLeftCorner(static_cast<Eigen::Index>(mA), static_cast<Eigen::Index>(nB))
+            .row(static_cast<Eigen::Index>(k)) = (lambda[row] * activeGradients[k]).transpose();
     }
     R.topRows(static_cast<Eigen::Index>(nB)) = -d.mixedBA;
 

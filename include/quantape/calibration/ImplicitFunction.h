@@ -65,15 +65,17 @@ struct IftOptions {
     double feasibilityTol = 1e-6;
     double lambdaTol = 1e-10; ///< multiplier > tol => strictly active
     double boundTol = 1e-8;   ///< |x - bound| <= tol*scale => active bound
-    double ridge = 0.0;       ///< explicit ridge for H (0 = automatic)
+    double ridge = 0.0;       ///< explicit ridge for H (0 = automatic); applied
+                              ///< as given on the first attempt and only when
+                              ///< H is not already positive definite
     int maxRidgeTries = 30;   ///< ridge escalation attempts
 };
 
 /// Diagnostics of an IFT solve
 struct IftResult {
     double conditionNumber = 0.0;                ///< lambda_max/lambda_min or 1/rcond(K)
-    double ridgeUsed = 0.0;                      ///< regularization added to H (0 = none)
-    bool regularized = false;                    ///< H was not positive definite
+    double ridgeUsed = 0.0;                      ///< ridge actually added to H (0 = none)
+    bool regularized = false;                    ///< a ridge was actually applied
     bool pseudo_inverse = false;                 ///< KKT system used the pseudo-inverse path
     std::size_t rank = 0;                        ///< rank used by the pseudo-inverse solve
     std::vector<std::size_t> activeInequalities; ///< indices of active inequality rows
@@ -130,23 +132,35 @@ void mixedHessian(const F2& f2, const std::vector<double>& x, const std::vector<
 }
 
 /// Solve H X = B for a symmetric H; LLT (Cholesky) fails unless H is
-/// positive definite, so a failure triggers the automatic ridge escalation.
-/// The ridge is chosen to be MINIMAL: the eigen gap below zero, times
-/// (1 + 1e-6) — enough to flip the smallest eigenvalue positive without
-/// distorting the well-conditioned part. The eigendecomposition (computed
-/// once, after the solve) supplies the condition number.
+/// positive definite, so a failure triggers ridge regularization.
+///
+/// An explicit `options.ridge` is applied **as given on the first attempt**
+/// (never pre-multiplied); only if it still fails to make H positive definite
+/// is it escalated by a factor of ten. With no explicit ridge the automatic
+/// choice is MINIMAL: the eigen gap below zero, times (1 + 1e-6) — enough to
+/// flip the smallest eigenvalue positive without distorting the
+/// well-conditioned part. When H is already positive definite no ridge is
+/// applied, and `regularized`/`ridgeUsed` report exactly that (false/0), even
+/// if the caller configured a ridge. The eigendecomposition (computed once,
+/// after the solve) supplies the condition number.
 /// Returns the ridge actually used (0 = none).
 inline double solvePositiveDefinite(const Eigen::MatrixXd& H, const Eigen::MatrixXd& B,
                                     Eigen::MatrixXd& X, const IftOptions& options, IftResult& out) {
     const std::size_t n = H.rows();
     Eigen::MatrixXd Hr = H;
-    double ridge = options.ridge;
+    double ridge = 0.0; ///< actually applied (0 = none)
 
+    bool firstAttempt = true;
     int tries = 0;
     Eigen::LLT<Eigen::MatrixXd> llt(Hr);
     while (llt.info() != Eigen::Success && tries < options.maxRidgeTries) {
         ++tries;
-        if (ridge <= 0.0) {
+        if (firstAttempt && options.ridge > 0.0) {
+            // Honour the caller's value exactly on the first attempt.
+            ridge = options.ridge;
+        } else if (ridge > 0.0) {
+            ridge *= 10.0;
+        } else {
             // Minimal distortion: flip the most negative eigenvalue positive
             Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hr);
             const double lmin = es.eigenvalues().minCoeff();
@@ -155,9 +169,8 @@ inline double solvePositiveDefinite(const Eigen::MatrixXd& H, const Eigen::Matri
                 scale = std::max(scale, std::fabs(H(i, i)));
             }
             ridge = std::max(1e-14 * std::max(1.0, scale), -lmin * (1.0 + 1e-6));
-        } else {
-            ridge *= 10.0;
         }
+        firstAttempt = false;
         Hr = H;
         for (std::size_t i = 0; i < n; ++i) {
             Hr(i, i) += ridge;
@@ -185,8 +198,10 @@ inline double solvePositiveDefinite(const Eigen::MatrixXd& H, const Eigen::Matri
  * @brief Unconstrained first-order IFT: dp/dm = -H^{-1} G
  *
  * H = d^2 f / dx^2 at (x_hat, m) via n exact HVPs; G = d^2 f / dx dm via
- * forward-over-reverse seeds on m. If H is not positive definite an
- * automatic ridge escalation regularizes it (reported via `out`).
+ * forward-over-reverse seeds on m. If H is not positive definite the solver
+ * applies the configured ridge (or an automatic minimal one) and reports the
+ * ridge it actually used via `out`; a positive-definite H is solved un-ridged
+ * and reported as not regularized.
  *
  * @param[out] dp_dm row-major n x M Jacobian of the optimum
  */

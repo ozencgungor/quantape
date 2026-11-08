@@ -14,6 +14,7 @@
 
 #include "quantape/math/StanMath.h"
 
+#include "quantape/calibration/CalibrationProblem.h"
 #include "quantape/calibration/ImplicitFunction.h"
 #include "quantape/math/Optimization/AugLag.h"
 #include "quantape/math/Optimization/LBFGS.h"
@@ -193,6 +194,46 @@ struct UnitDisk {
         out.clear();
         out.push_back(x[0] * x[0] + x[1] * x[1] - Sx(1.0));
     }
+};
+
+// Scalar quadratic f = scale/2 * (x - m)^2: H = scale, G = -scale, so the
+// un-ridged dp/dm is exactly 1 for any nonzero scale.
+struct Quadratic {
+    double scale;
+
+    template <typename Sx, typename Sm>
+    auto operator()(const std::vector<Sx>& x, const std::vector<Sm>& m) const {
+        using S = decltype(x[0] + m[0]);
+        const S d = x[0] - S(m[0]);
+        return S(0.5 * scale) * d * d;
+    }
+};
+
+// Minimal assembled calibration problem whose Hessian and mixed block are set
+// directly, so the ridge policy can be exercised without an optimizer:
+//   hessianBB = value * curvature, mixedBA = value * mixed.
+struct RidgePolicyProblem {
+    double value = 1.0;
+    double curvature = 1.0;
+    double mixed = -1.0;
+
+    std::size_t numModelParams() const { return 1; }
+    std::size_t numMarketParams() const { return 1; }
+    std::size_t numQuotes() const { return 1; }
+    std::size_t numInequalities() const { return 0; }
+
+    void fillResidual(std::size_t, const Eigen::VectorXd&, const Eigen::VectorXd&,
+                      quantape::math::CalibrationOrder,
+                      quantape::math::CalibrationResidualBlock& block) const {
+        block.value = value;
+        block.gradientB = Eigen::VectorXd::Zero(1);
+        block.gradientA = Eigen::VectorXd::Zero(1);
+        block.hessianBB = Eigen::MatrixXd::Identity(1, 1) * curvature;
+        block.hessianBA = Eigen::MatrixXd::Identity(1, 1) * mixed;
+    }
+
+    void fillInequality(std::size_t, const Eigen::VectorXd&,
+                        quantape::math::CalibrationInequalityBlock&) const {}
 };
 
 } // namespace
@@ -674,4 +715,66 @@ TEST_F(IftUnconstrainedTest, ridgeEscalationAndFlatPositiveDefinite) {
     EXPECT_TRUE(!ift2.regularized);
     CHECK_CLOSE("flat-PD dp0/dm0", dp2[0], 1.0, 1e-12);
     CHECK_CLOSE("flat-PD dp1/dm1", dp2[3], 1.0, 1e-12);
+}
+
+// Ridge reporting contract: `regularized`/`ridgeUsed` describe the ridge that
+// was actually applied (0/false when H is already positive definite), and an
+// explicit ridge is applied as given on the first attempt (not pre-scaled).
+TEST_F(IftUnconstrainedTest, explicitRidgeIsAppliedAsGivenAndReportedHonestly) {
+    // PD Hessian (H = 1): the configured ridge is not needed and must not be
+    // reported; dp/dm stays the un-ridged 1.
+    {
+        quantape::math::IftOptions options;
+        options.ridge = 0.01;
+        quantape::math::IftResult ift;
+        std::vector<double> dp_dm;
+        quantape::math::iftUnconstrained(Quadratic{1.0}, {1.0}, {1.0}, dp_dm, ift, options);
+        EXPECT_FALSE(ift.regularized);
+        CHECK_CLOSE("PD ridge not reported", ift.ridgeUsed, 0.0, 1e-15);
+        CHECK_CLOSE("PD dp/dm un-ridged", dp_dm[0], 1.0, 1e-12);
+    }
+    // Indefinite Hessian (lambda_min = -1e-3): the configured 0.01 is applied
+    // exactly, giving H + 0.01 = 0.009 and dp/dm = -1e-3 / 0.009 = -1/9.
+    {
+        quantape::math::IftOptions options;
+        options.ridge = 0.01;
+        quantape::math::IftResult ift;
+        std::vector<double> dp_dm;
+        quantape::math::iftUnconstrained(Quadratic{-1e-3}, {1.0}, {1.0}, dp_dm, ift, options);
+        EXPECT_TRUE(ift.regularized);
+        CHECK_CLOSE("indefinite ridge as given", ift.ridgeUsed, 0.01, 1e-15);
+        CHECK_CLOSE("indefinite dp/dm uses the reported ridge", dp_dm[0], -1.0 / 9.0, 1e-12);
+    }
+}
+
+TEST_F(IftUnconstrainedTest, calibrationIftRidgeIsAppliedAsGivenAndReportedHonestly) {
+    const Eigen::VectorXd b = Eigen::VectorXd::Ones(1);
+    const Eigen::VectorXd a = Eigen::VectorXd::Ones(1);
+
+    // PD Hessian (H = 1), mixed block -1: db/da = -H^{-1} G = 1, un-ridged.
+    {
+        RidgePolicyProblem problem;
+        problem.curvature = 1.0;
+        quantape::math::CalibrationIftOptions options;
+        options.ridge = 0.01;
+        const quantape::math::CalibrationIftResult result =
+            quantape::math::calibrationIft(problem, b, a, {}, options);
+        EXPECT_FALSE(result.diagnostics.regularized);
+        CHECK_CLOSE("PD calibration ridge not reported", result.diagnostics.ridge, 0.0, 1e-15);
+        CHECK_CLOSE("PD calibration db/da un-ridged", result.dbda(0, 0), 1.0, 1e-12);
+    }
+    // Indefinite Hessian (lambda_min = -1e-3): ridge 0.01 gives
+    // db/da = 1 / (-1e-3 + 0.01) = 1 / 0.009.
+    {
+        RidgePolicyProblem problem;
+        problem.curvature = -1e-3;
+        quantape::math::CalibrationIftOptions options;
+        options.ridge = 0.01;
+        const quantape::math::CalibrationIftResult result =
+            quantape::math::calibrationIft(problem, b, a, {}, options);
+        EXPECT_TRUE(result.diagnostics.regularized);
+        CHECK_CLOSE("indefinite calibration ridge as given", result.diagnostics.ridge, 0.01, 1e-15);
+        CHECK_CLOSE_REL("indefinite calibration db/da uses the reported ridge", result.dbda(0, 0),
+                        1.0 / 0.009, 1e-12);
+    }
 }
