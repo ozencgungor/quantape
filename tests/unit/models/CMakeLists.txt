@@ -4,6 +4,7 @@
 
 quantape_add_gtest(qta_test_models
     SOURCES test_heston_analytic.cpp
+            test_heston_gradient.cpp
     LIBS TBB::tbb
     LABELS unit models mc slow)
 

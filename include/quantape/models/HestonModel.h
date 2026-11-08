@@ -48,12 +48,14 @@ using ::quantape::util::kPi;
  *
  * Pricing the Lewis integral by truncation at `uMax` with an arbitrary-order
  * Gauss–Legendre rule (`math/Integrals/GaussLegendre.h`) or the 64-node
- * exponentially fitted Gauss–Laguerre rule (default). The control-variate
- * volatility is the CF-matched
+ * exponentially fitted Gauss–Laguerre rule (default). An explicit
+ * `HestonControlVariate::CfMatched` uses the CF-matched
  * `sigma_BS^2 = -(8/T) ln Re phi(-i/2)` (fallback: variance-matched
- * `(1-e^{-kT})(v0-th)/(kT) + th`), and `sigma_BS` is **held fixed** during
- * differentiation so the complex-step gradient needs no complex normal CDF
- * (the identity holds for any control volatility).
+ * `(1-e^{-kT})(v0-th)/(kT) + th`); the default `Auto` selects the asymptotic
+ * reference in the slow-decay regime and the variance-matched Black–Scholes
+ * reference otherwise. `sigma_BS` is **held fixed** during differentiation so
+ * the complex-step gradient needs no complex normal CDF (the identity holds
+ * for any control volatility).
  *
  * ## Complex-step Jacobians
  *
@@ -267,16 +269,24 @@ public:
     }
 
     /// Complex-step gradient on the full 9-parameter point.
+    ///
+    /// The strike/spot steps are relative: both enter `mu = log(S/K) + ...`,
+    /// so an absolute imaginary step comparable to a tiny strike makes
+    /// `Im(mu)` O(1) and the `e^{-u Im(mu)}` factor overflow. Scaling the step
+    /// with the component keeps `Im(mu)` at the relative step size.
     Eigen::Matrix<double, 1, 9> fullGradient(const HestonFullPoint& point, double tMax) const {
         const auto xc = toComplexFull(point);
         const CvState cv = cvState(xc, tMax);
-        const double h = 1e-8;
         Eigen::Matrix<double, 1, 9> out;
         for (int j = 0; j < 9; ++j) {
+            const std::size_t index = static_cast<std::size_t>(j);
+            const double magnitude = std::fabs(point[index]);
+            const bool priceCoordinate = (j == HESTON_SPOT || j == HESTON_STRIKE);
+            const double h = 1e-8 * (priceCoordinate ? magnitude : std::max(magnitude, 1.0));
             auto up = xc;
             auto down = xc;
-            up[static_cast<std::size_t>(j)] += std::complex<double>(0.0, h);
-            down[static_cast<std::size_t>(j)] -= std::complex<double>(0.0, h);
+            up[index] += std::complex<double>(0.0, h);
+            down[index] -= std::complex<double>(0.0, h);
             out(0, j) = (priceComplex(up, tMax, cv).imag() - priceComplex(down, tMax, cv).imag()) /
                         (2.0 * h);
         }
@@ -368,8 +378,12 @@ private:
     };
 
     /// Effective control variate: `Auto` follows QuantLib's
-    /// optimalControlVariate rule (asymptotic when the CF decays slowly and
-    /// the first-order phase is small; Black-Scholes CF-matched otherwise).
+    /// optimalControlVariate rule — the asymptotic reference when the CF
+    /// decays slowly and the first-order phase is small, otherwise a
+    /// Black-Scholes reference. The `Auto` fallback pairs that reference with
+    /// the **variance-matched** volatility below; only an explicit
+    /// `HestonControlVariate::CfMatched` requests the CF-matched volatility.
+    /// The choice is pinned at the primal point (fixed under differentiation).
     HestonControlVariate effectiveCv(const std::array<std::complex<double>, 5>& p,
                                      double tMax) const {
         if (m_config.controlVariate != HestonControlVariate::Auto) {
@@ -436,8 +450,11 @@ private:
         return cv;
     }
 
-    /// CF-matched or variance-matched control volatility from the
-    /// *real* parts of the parameters (held fixed under differentiation).
+    /// Control volatility from the *real* parts of the parameters (held fixed
+    /// under differentiation). An explicit `CfMatched` uses
+    /// `sigma_BS^2 = -(8/T) ln Re phi(-i/2)` when that is in (0,1), falling
+    /// back to the variance-matched form; `Auto`, `VarianceMatched` and that
+    /// fallback use `(1-e^{-kT})(v0-th)/(kT) + th`.
     double controlVolatility(const std::array<std::complex<double>, 5>& p, double tMax) const {
         if (m_config.controlVariate == HestonControlVariate::None) {
             return 0.0;
