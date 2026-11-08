@@ -21,7 +21,7 @@ include/quantape/      public headers (namespace quantape::)
     pricing/           pricers (Black-Scholes, FX spot/forward/swap) and AD primitives
     scenario/          Monte Carlo scenario machinery
 src/                   implementation files (model/simulator/curve/risk .cpp)
-tests/                 correctness gates (exit code 0); 62 registered targets
+tests/                 correctness gates (exit code 0); 24 gtest executables, 916 cases
 benchmarks/            timing harnesses (not correctness gates); `bench_curve`, `bench_sde`, `bench_risk` and `bench_fx`
 examples/              usage demos
 docs/                  Doxyfile + docs/index.html entry point (generated HTML gitignored)
@@ -40,14 +40,14 @@ umbrella is `quantape/math/NumericalMethods.h`, and the AD umbrella is
 | Module | Contents                                                                                                                                                                                                                                                                                                                                                                                             |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `quantape/math/` | Integrators (Trapezoid, Simpson, Gauss-Lobatto, Gauss-Legendre, Tanh-Sinh, Ooura double-exponential, exponentially fitted Gauss–Laguerre (tabular rule)), in-house double-double arithmetic (`Precision/`) and oscillatory special functions Si/Ci (`SpecialFunctions/`), 1-D solvers (Bisection, Brent, Secant, Ridder, False Position, Newton), tridiagonal solver, interpolators (Linear, Log-Linear, Cubic, Monotone cubic, Hyman-filtered spline, tension spline, Bilinear, Bicubic), HVP utility, RNG (`Random/`: PCG, ziggurat, McFarland, Sobol generator + quality)                                                                                                  |
-| `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), dense active-set QP, SLSQP and augmented Lagrangian with final-multiplier export |
+| `quantape/math/Optimization/` | Optimizers: result codes, stop criteria, `Optimizer<DoubleT, Impl>` base, exact AD gradient / HVP / constraint-Jacobian helpers, strong-Wolfe line search, L-BFGS (AD or AD-free double `f(x, grad)` mode), truncated Newton (exact HVP), two-phase QP (L1 Phase I then a primal active set, gated on primal/dual feasibility and stationarity), SLSQP and augmented Lagrangian with final-multiplier export |
 | `quantape/calibration/` | Calibration use of the optimizer stack: scalar-generic `CalibrationProblem` concept (double / `var` / `fvar<var>` residuals through `make_callback_var` pricing), assembled LS derivatives + `calibrationIft` (db/da, dlambda/da, calibrator-agnostic multiplier recovery), `CalibrationChain` (instrument-Jacobian route, `propagateMarketRisks`) and the AD twins `CalibrationChainKkt` / `ImplicitFunction` (minimizeDifferential, iftKkt), plus the Heston adapter (`HestonCalibration.h`) |
 | `quantape/math/*/StanPrimitives.h` | AD dispatch layers: one-pass weighted rule extraction for integrals, implicit-function-theorem gradients for roots, AD-weight/fast-path interpolation, forward-over-reverse HVP                                                                                                                                                                                                                      |
 | `quantape/instruments/` | Plain-data instrument vocabulary: scalar-templated `CashflowT<ScalarT>` with an inline currency, and dated FX `FxSpot` / `FxForward` / `FxSwap` records (`FxInstruments.h`) with settlement-lag factories, date resolution and cashflow materialization |
-| `quantape/markets/` | Multi-curve IR/FX stack: `DiscountCurve` / `SpreadCurve` zero-node curves in zero/log-discount spaces with linear, Akima, tension-spline, monotone-cubic, Hyman-filtered and mixed schemes; sequential exact-fit bootstrap of deposits/repos/FRAs/exchange-traded futures (simple, compounded and averaged RFR styles)/par OIS/IRS/basis pillars, escalating to a whole-grid fixed point for off-node cashflows and stencil schemes; shifted-lognormal FRA and Hull-White futures convexity; synthetic money-market index quotes from the overnight curve plus integrated basis (cross-tenor strips) and quote-strip extrapolation; turn-of-year overlay (persistent turns and funding bumps); xccy basis bootstrap (constant and MtM-resetting notionals) and FX forward-points/collateral bootstrap; external JSON config (document schema in `CurveConfig.h`) with `buildStack` parent/discount/forecast trees; analytic quote deltas, Gauss-Newton quote gamma and exact (bootstrap-curvature corrected) stack gamma, stack/tree risk with xccy rows, factor and turn buckets, risk reports and hedge solve; volatility (IR, EQ, FX) still a stub |
+| `quantape/markets/` | Multi-curve IR/FX stack: `DiscountCurve` / `SpreadCurve` zero-node curves in zero/log-discount spaces with linear, Akima, tension-spline, monotone-cubic, Hyman-filtered and mixed schemes; sequential exact-fit bootstrap of deposits/repos/FRAs/exchange-traded futures (simple, compounded and averaged RFR styles)/par OIS/IRS/basis pillars, escalating to a whole-grid fixed point for off-node cashflows and stencil schemes; shifted-lognormal FRA and Hull-White futures convexity; synthetic money-market index quotes from the overnight curve plus integrated basis (cross-tenor strips) and quote-strip extrapolation; turn-of-year overlay (persistent turns and funding bumps); xccy basis bootstrap (constant and MtM-resetting notionals; a basis-quoted pillar needs a foreign forecast curve distinct from the foreign discount curve, so a self-forecast ladder is FX-points-only) and FX forward-points/collateral bootstrap; external JSON config (document schema in `CurveConfig.h`) with `buildStack` parent/discount/forecast trees; analytic quote deltas, Gauss-Newton quote gamma and exact (bootstrap-curvature corrected) stack gamma, stack/tree risk with xccy rows, factor and turn buckets, risk reports and hedge solve; volatility (IR, EQ, FX) still a stub |
 | `quantape/mc/processes/` | SDE process bundles (GBM, OU, CIR, Heston; Heston QE moment-matching)                                                                                                                                                                                                                                                                                                                                                                |
 | `quantape/models/` | Model layer: characteristic functions and analytic pricers with instrument gradients (`HestonModel.h`: Gatheral CF, Lewis + Black–Scholes/asymptotic control variates, EFGL quadrature, full 9-parameter complex-step gradient/Hessian, quote surrogates, single-node callback-var AD prices in `HestonStanPrimitives.h`); no FX models/vol yet |
-| `quantape/mc/` | SDE simulation engine: time grids, piecewise-constant parameters, blocked/streamed simulation, TBB schedules, keyed reproducible Gaussian/uniform draws, **Sobol/QMC source** (jump-ahead points, digital-shift replicas, layouts documented in `SobolSource.h`), schemes (Euler, predictor-corrector, Milstein, moment-matching QE), Monte Carlo estimator; pathwise AD: **Stan-backed defaults** (reverse `Gradients.h`, forward `ForwardStan.h`, state derivatives `StateDerivatives.h`), opt-in accelerated scalar types under `mc/mcfwdrev/` (fixed-size forward dual, lean reverse tape), checkpointed gluing for long horizons, multiprocessing sharding (bitwise-mergeable samples) |
+| `quantape/mc/` | SDE simulation engine: time grids, piecewise-constant parameters, blocked/streamed simulation, TBB schedules, keyed reproducible Gaussian/uniform draws, **Sobol/QMC source** (jump-ahead points, digital-shift replicas, layouts documented in `SobolSource.h`), schemes (Euler, predictor-corrector, Milstein, moment-matching QE), Monte Carlo estimator; pathwise AD: **Stan-backed defaults** (reverse `Gradients.h`, forward `ForwardStan.h`, state derivatives `StateDerivatives.h`), opt-in accelerated scalar types under `mc/mcfwdrev/` (fixed-size forward dual, lean reverse tape), checkpointed gluing for long horizons, per-interval and contracted pathwise gradients for time-dependent parameters, multiprocessing sharding (bitwise-mergeable samples) |
 | `quantape/payoffs/` | Payoff helpers: branchless smoothed indicators for pathwise-differentiable digital/barrier payoffs |
 | `quantape/scenario/` | Monte Carlo scenario machinery                                                                                                                                                                                                                                                                                                                                                                       |
 | `quantape/pricing/` | Pricers: Black-Scholes and FX spot/forward/swap (`Fx.h`, scalar-templated with analytic or AD spot greeks) plus AD primitives                                                                                                                                                                                                                                                                        |
@@ -84,7 +84,8 @@ cmake --build build --target format-check
 cmake --build build --target docs
 ```
 
-Requires C++20 (tested with Homebrew LLVM 20). Eigen and Stan Math 4.9 are
+Requires C++20. The reference tree (`build/release`) is AppleClang 17 on arm64;
+CI also builds Debug and Release on Ubuntu 24.04 with GCC. Eigen and Stan Math 4.9 are
 fetched into `third-party/` by `repo_tools/fetch_third_party.sh` (SHA256-pinned;
 also run by `repo_tools/setup_dev.sh`); Boost, oneTBB, SUNDIALS, quill, zmij and
 nlohmann/json are fetched by CMake's FetchContent at configure time. The static
@@ -93,9 +94,10 @@ transitively. Third-party licenses are listed in `NOTICE`.
 
 ## Tests
 
-62 correctness gates are registered with CTest; every gate must exit `0`. Run
-one target directly, or the whole suite through CTest (presets build into
-`build/debug` and `build/release`).
+The suite is 24 `qta_test_*` executables aggregating 92 test sources, registered
+case-by-case with CTest (916 cases); every one must exit `0`. Run one executable
+directly, or the whole suite through CTest (presets build into `build/debug` and
+`build/release`).
 
 ```bash
 ./build/release/<target>  # single correctness gate
@@ -103,13 +105,18 @@ ctest --preset release    # all registered tests
 ctest --test-dir build    # plain configure tree
 ```
 
-| Target | Validates |
+Coverage by test source (each row is one file; the area `CMakeLists.txt`
+aggregates them into the executables above):
+
+| Test source | Validates |
 |---|---|
 | `test_math` | Integrators + solvers at double precision |
+| `test_integrators` | Quadrature edge cases: Gauss–Laguerre exactness up to n=128 and its extreme weights, Gauss–Lobatto zero integrals / reversed bounds / zero width, Tanh–Sinh honest error reporting and non-throwing failure |
 | `test_solvers` | Solver golden roots, error handling, Brent interpolation regression (evaluation counts) |
 | `test_interpolation` | Interpolation values at double precision |
 | `test_math_utils` | Shared math utilities and interpolation/tridiagonal AD paths (`var` / `fvar<var>`) |
 | `test_markets` | Discount/survival curve construction and shapes |
+| `test_volatility` | Vol surface axes: FX and EQD bicubic node reproduction, non-square grids, non-transposed layout |
 | `test_curve` | Curve construction/evaluation: interpolation spaces × schemes, analytic node weights vs FD, extrapolation, exact fit |
 | `test_bootstrap_validation` | Cross-scheme bootstrap invariants: exact fit, off-node fixed point, positivity/arbitrage, stubs and negative rates |
 | `test_curve_config` | JSON curve config: parsing/validation, parent/discount/forecast trees, xccy and FX spots, error cases |
@@ -121,7 +128,7 @@ ctest --test-dir build    # plain configure tree
 | `test_curve_ad` | Curve-stack AD: evaluation, solver-derived bootstrap sensitivities (`var`/`fvar<var>`), turn overlays |
 | `test_curve_risk` | Analytic quote deltas/gamma, stack/tree risk, turn overlay risk, dual pricing/risk scheme, buckets vs FD |
 | `test_curve_risk_report` | Risk reports: kind/end/year buckets, hedge QR conditioning and the hedge solve |
-| `test_xccy` | Xccy basis bootstrap (constant and MtM resetting notionals), analytic rows vs FD, coupled re-solve |
+| `test_xccy` | Xccy basis bootstrap (constant and MtM resetting notionals), analytic rows vs FD for every quoted/reset combination, coupled re-solve, and the rejection of a basis-quoted pillar without a foreign forecast |
 | `test_hull_white_convexity` | Hull-White futures convexity against the affine bond-algebra reference |
 | `test_fx_quote` | FX quote envelopes, point/outright conversion, annualized premium, joint-calendar spot settlement |
 | `test_fx_pricing` | FX pricers (double/`var`/`fvar<var>`), reset-aware xccy rows, FX stack risk and greeks |
@@ -141,22 +148,32 @@ ctest --test-dir build    # plain configure tree
 | `test_sde_moment_matching` | QE sampler: exact conditional moments, positivity across regimes, uniform-stream contract, CIR terminal moments |
 | `test_sde_processes` | Process bundles (GBM/OU/CIR/Heston) and Heston QE: moments, reference prices, Feller-violating safety |
 | `test_heston_analytic` | Heston model: trap-free CF, Lewis+BS/asymptotic CV pricer, EFGL vs Gauss-Legendre identity, low-order node stability, deterministic-variance limit, QE/Sobol martingale + cross-check, full 9-parameter complex-step gradient/Hessian vs FD, surrogate Taylor, Euler homogeneity |
+| `test_heston_gradient` | Heston full gradient: complex-step policy for the price coordinates, finite strike gradient down to K=1e-8 |
 | `test_heston_stan` | Heston Stan wiring: `make_callback_var` `var` adjoint == analytic gradient (1-node tape), `fvar<var>` Hessian == analytic Hessian (2-node tape), FD cross-checks |
 | `test_heston_mc` | Theta-driven Heston QE (`theta = {mu, kappa, level, eta, rho}`): bitwise theta-vs-member path equivalence, QE+Sobol catalog vs analytic, pathwise `simulateGradient` greeks vs analytic + engine-FD cross-check |
 | `test_heston_ift` | Generic calibration/IFT layer: KKT vs bump-recalibrate Richardsons, product-risk propagation, instrument-route cross-check, calibrator-agnostic multiplier recovery, Feller-active dlambda/da, a second model (Black-Scholes) through the same concept, and the Stan interop (`LBFGS<var>`, `minimizeDifferential`/`iftKkt` == analytic chain to 1e-13) |
 | `test_heston_calibration` | 10-quote synthetic Heston calibration shoot-out: exact-gradient L-BFGS (price/vega/IV/log space), LM Gauss-Newton, exact-Newton, `LBFGS<var>` callback — noiseless recovery to 1e-9, noisy agreement, hard-start robustness, 9-parameter Jacobian condition/identifiability, model+r and model+S+r+q joint fits, and Feller-constrained AUGLAG vs SLSQP vs a sigma=sqrt(2 kappa theta) boundary reference (binding/inactive KKT multipliers) |
+| `test_forward_scalar` | Forward-mode `Tangent` arithmetic: quotient rule and compound assignment matching the binary operators |
 | `test_sde_qmc` | Sobol source contract and engine invariants (bitwise), QMC vs i.i.d. RMSE at equal N (one-step call, closed form), multi-step Euler moment gates, QE with Sobol uniforms, AD modes agreeing under QMC |
-| `test_sde_gradients` | Pathwise AD: finite-difference wiring, GBM greeks vs Black-Scholes, exact-moment derivatives, forward/checkpointed/lean modes all gate-equal, state derivatives, smoothed digitals, shard merge, schedule determinism |
+| `test_sde_gradients` | Pathwise AD: finite-difference wiring, GBM greeks vs Black-Scholes, exact-moment derivatives, forward/checkpointed/lean modes all gate-equal, per-interval and contracted gradients with time-dependent parameters, standard-error scaling, state derivatives, smoothed digitals, shard merge, schedule determinism |
 | `test_market_risk_ift` | Calibration chains: KKT vs instrument-Jacobian routes, bump-recalibrate, instrument exactness, end-to-end SDE gradient -> IFT |
 | `test_ziggurat` / `test_mcfarland` | Ziggurat / McFarland normal samplers: correctness and throughput |
 | `test_tanh_sinh` | Tanh-Sinh quadrature value + AD gradients/Hessians |
-| `test_black76` | Black-76 / GBS analytical Greeks (1st and 2nd order) vs finite differences and Stan AD |
+| `test_black76` | Black-76 / GBS analytical Greeks (1st and 2nd order) vs finite differences and Stan AD, deep out-of-the-money put wing, temporary-functor AD lifetime |
 | `test_mixed_hessian` | Mixed 1st/2nd-order AD through a pricing chain (analytical Greeks where available, AD fallback): mixed Hessian blocks vs FD |
 | `test_pricer_hessian` | Pricer-hierarchy Hessian architecture: nested analytical AD paths per product vs FD |
-| `test_precision` | In-house double-double (~32 digits): error-free arithmetic, sqrt/exp/log/sin/cos, Si anchors, Ooura double-exponential oscillatory integrals vs closed forms |
-| `test_sobol_generator` | Sobol generator: dimension-1 semantics, digital-net exactness, digital shifts/replicas, 32/64-bit storage parity, jump-ahead (gray order), thread equivalence, mmap asset vs text table, engine integration |
+| `test_precision` | In-house double-double (~32 digits): error-free arithmetic, IEEE propagation for non-finite inputs, sqrt/exp/log/sin/cos, log near 1, Si anchors, Ooura double-exponential oscillatory integrals vs closed forms |
+| `test_special_functions` | Complex Si/Ci across the whole plane: series / compensated series / optimally truncated asymptotic / reflection branches against 260-digit references |
+| `test_sobol_generator` | Sobol generator: dimension-1 semantics, digital-net exactness, digital shifts/replicas, 32/64-bit storage parity, jump-ahead to an arbitrary point index, thread equivalence, mmap asset vs text table, engine integration |
 | `test_sobol_quality` | Sobol table quality battery: exactness, discrepancy and integration criteria |
 | `test_sobol_tools` | Table tooling: extend/refine/verify round-trips and failure modes |
+| `test_normal` / `test_normal_stan` / `test_quantile_derivatives` / `test_quantile_ad` | Normal pdf/cdf/quantile and their 2nd-order derivative packs; AD quantile values and inverse-density adjoints |
+| `test_beta` / `test_gamma` / `test_student_t` / `test_lognormal_exponential` / `test_inverse_gaussian` / `test_chi_square_poisson` | The scalar distribution families: value and derivative packs vs high-precision references, deep-tail behaviour, large-shape incomplete gamma |
+| `test_bivariate_normal` / `test_trivariate_normal` / `test_bessel` | Multivariate normal derivatives, Bessel I/K values and order derivatives across series and asymptotic regimes |
+| `test_noncentral_chi_square` / `test_noncentral_beta` | Noncentral mixtures: bulk and deep-tail CDF/CCDF, quantiles vs high-precision references |
+| `test_frozen_market` / `test_numeraire` / `test_state_curve` / `test_state_curve_ad` | SDE market layer: frozen-market lookup, collateral-account numeraire and its deflated martingale, Gaussian state curve moments |
+| `test_sde_evaluate` / `test_sde_evaluate_ad` / `test_sde_recording` / `test_sde_transition` | SDE evaluation and recording: payoff evaluation, path recording, transition kernels, AD twins |
+| `test_ir_instruments` / `test_config_factories` / `test_paper_eur_curves` | IR instrument vocabulary on `var` curves, JSON config factories, and the paper-curve replication suite |
 | `test_date` / `test_daycount` / `test_calendar` / `test_schedule` | Datetime layer: dates, day counts, calendars and schedule generation |
 | `test_logging` / `test_number_format` / `test_util` | Logging facade, number formatting and shared check/numeric helpers |
 
