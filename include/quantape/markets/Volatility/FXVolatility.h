@@ -54,7 +54,7 @@ public:
 
         // Create interpolator for vol surface (use Bicubic with Spline)
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -65,7 +65,7 @@ public:
           m_deltaType(other.m_deltaType), m_expiries(other.m_expiries), m_deltas(other.m_deltas),
           m_volSurface(other.m_volSurface) {
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -80,7 +80,7 @@ public:
             m_deltas = other.m_deltas;
             m_volSurface = other.m_volSurface;
             m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-                m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+                m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
         }
         return *this;
     }
@@ -93,7 +93,9 @@ public:
      * @return Implied volatility
      */
     DoubleT vol(DoubleT expiry, DoubleT delta, bool allowExtrapolation = true) const {
-        return (*m_interpolator)(expiry, delta, allowExtrapolation);
+        // BicubicInterpolation indexes z[y][x]; our surface is z[expiry][delta],
+        // so x = delta and y = expiry.
+        return (*m_interpolator)(delta, expiry, allowExtrapolation);
     }
 
     /**
@@ -172,7 +174,7 @@ public:
         }
         // Recreate interpolator with scaled surface
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -187,7 +189,7 @@ public:
         }
         // Recreate interpolator with shifted surface
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -203,7 +205,7 @@ public:
         }
         // Recreate interpolator with transformed surface
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -222,7 +224,7 @@ public:
         m_volSurface[expiryIndex][deltaIndex] = m_volSurface[expiryIndex][deltaIndex] + bumpSize;
         // Recreate interpolator
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**
@@ -240,7 +242,7 @@ public:
         }
         // Recreate interpolator
         m_interpolator = std::make_unique<quantape::math::BicubicInterpolation<DoubleT>>(
-            m_expiries, m_deltas, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
+            m_deltas, m_expiries, m_volSurface, quantape::math::CubicDerivativeApprox::Spline);
     }
 
     /**

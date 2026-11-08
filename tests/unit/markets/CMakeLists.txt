@@ -8,6 +8,7 @@ quantape_add_gtest(qta_test_markets
             test_forecast_pillars.cpp
             test_futures.cpp
             test_instrument_options.cpp
+            test_volatility.cpp
     LABELS unit markets fast)
 
 # test_markets instantiates `fvar<var>` for the survival-probability curve and
