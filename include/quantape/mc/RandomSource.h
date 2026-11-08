@@ -7,6 +7,7 @@
 
 #include <Eigen/Dense>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -57,7 +58,8 @@ namespace quantape::mc {
  *
  * Two sampler policies are provided: McFarland (consumes the KeyedStream
  * directly; the existing generator is templated on the RNG) and Ziggurat
- * (takes a keyed seed and owns its internal PCG stream).
+ * (takes a keyed seed, owns its internal xoshiro stream and reads one shared
+ * process-wide ziggurat table).
  *
  * ## Extension protocol
  *
@@ -151,10 +153,76 @@ struct McFarlandSampler {
     }
 };
 
+/// The process-wide ziggurat table (256 layers + fast-path tables), built once
+/// on first use. A function-local `static const` gives thread-safe one-time
+/// initialization (C++11 magic statics); `generateZigguratTables()` costs
+/// ~0.4 ms (64 bisections x 254 recurrence steps with erfc/log/sqrt) and must
+/// never run per draw.
+inline const quantape::math::mc::ZigguratTables& zigguratTables() {
+    static const quantape::math::mc::ZigguratTables tables =
+        quantape::math::mc::generateZigguratTables();
+    return tables;
+}
+
+namespace detail {
+/// Exponential-tail sampler, mirroring `ZigguratNormal::sampleTail()` exactly
+/// (same draw order and arithmetic) so the keyed stream stays bitwise stable.
+inline double zigguratTail(const quantape::math::mc::ZigguratTables& tab,
+                           quantape::math::mc::Xoshiro256ss& rng) {
+    const double r = tab.r;
+    while (true) {
+        const double u1 = rng.uniform01();
+        const double u2 = rng.uniform01();
+        const double tailX = -std::log(u1) / r + r;
+        if (-2.0 * std::log(u2) >= (tailX - r) * (tailX - r)) {
+            return tailX;
+        }
+    }
+}
+
+/// One standard normal from `key`, mirroring `ZigguratNormal::operator()`
+/// bit-for-bit but reading the shared table instead of regenerating one per
+/// draw. Any edit here must keep that identity, which
+/// `MomentMatching.zigguratDrawsMatchPerDrawTablePath` pins.
+inline double zigguratDraw(const quantape::math::mc::ZigguratTables& tab, std::uint64_t key) {
+    quantape::math::mc::Xoshiro256ss rng(key);
+    while (true) {
+        const std::uint64_t u = rng();
+        const int i = static_cast<int>(u & 0xFF);
+        const auto s = static_cast<std::int64_t>(u);
+        const double x = static_cast<double>(s) * tab.wtab[i];
+
+        // Fast path: |s| < ktab[i]
+        const auto absS = static_cast<std::uint64_t>(s < 0 ? -s : s);
+        if (absS < tab.ktab[i]) {
+            return x;
+        }
+
+        // Slow path: base-layer tail, then interior/top rejection.
+        if (i == 0) {
+            const double absX = std::abs(x);
+            if (absX < tab.r) {
+                return x; // under the curve in the base rectangle
+            }
+            const double tailX = zigguratTail(tab, rng);
+            return (s < 0) ? -tailX : tailX;
+        }
+        const double absX = std::abs(x);
+        const double yLo = tab.y[i - 1];
+        const double yHi = (i < quantape::math::mc::ZigguratTables::N - 1) ? tab.y[i] : 1.0;
+        const double yTest = yLo + rng.uniform01() * (yHi - yLo);
+        if (yTest < std::exp(-0.5 * absX * absX)) {
+            return x;
+        }
+    }
+}
+} // namespace detail
+
 struct ZigguratSampler {
-    // ZigguratNormal takes a seed and owns a PCG stream internally: the
-    // keyed seed makes each normal's stream independent and reproducible.
-    static double sample(std::uint64_t key) { return quantape::math::mc::ZigguratNormal(key)(); }
+    // The 0.4 ms ziggurat table is shared (built once); only the per-key
+    // xoshiro stream is constructed per draw, so this is a usable sampler
+    // instead of rebuilding the whole table for every normal.
+    static double sample(std::uint64_t key) { return detail::zigguratDraw(zigguratTables(), key); }
 };
 
 /**

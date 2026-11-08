@@ -10,6 +10,7 @@
 //     negatives, reproducible across runs
 //
 // Stan-free.
+#include "quantape/math/Random/ZigguratNormal.h"
 #include "quantape/mc/MomentMatching.h"
 #include "quantape/mc/RandomSource.h"
 #include "quantape/mc/SdePrimitives.h"
@@ -234,6 +235,81 @@ TEST(MomentMatching, keyedStreamsMatchTheirGoldens) {
     }
     EXPECT_EQ(hNormal, 0xe95dca772fa07cfbULL) << "gaussian key map / sampler changed";
     EXPECT_EQ(hUniform, 0xa5f4a8912e55d72dULL) << "uniform key map changed";
+}
+
+// ── Ziggurat policy: one shared table, unchanged keyed stream ──
+//
+// `ZigguratSampler::sample` used to construct a `ZigguratNormal` per draw,
+// which regenerated the 256-layer table every time (~0.4 ms/draw). It now
+// reads one process-wide table; the draw itself must stay bit-for-bit the old
+// table-per-draw stream, so this compares the two paths directly and pins a
+// hard golden hash of the keyed stream.
+TEST(MomentMatching, zigguratDrawsMatchPerDrawTablePath) {
+    std::size_t mismatches = 0;
+    for (std::size_t i = 0; i < 5000; ++i) {
+        const std::uint64_t key = quantape::mc::splitmix64(
+            0x1234ULL + static_cast<std::uint64_t>(i) * 0x9E3779B97F4A7C15ULL);
+        const double perDrawTable = quantape::math::mc::ZigguratNormal(key)();
+        const double sharedTable = quantape::mc::ZigguratSampler::sample(key);
+        if (std::memcmp(&perDrawTable, &sharedTable, sizeof(double)) != 0) {
+            ++mismatches;
+            if (mismatches == 1) {
+                ADD_FAILURE() << "key " << key << ": per-draw table " << perDrawTable
+                              << " vs shared table " << sharedTable;
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0u) << "the shared-table ziggurat changed the keyed stream";
+}
+
+TEST(MomentMatching, zigguratStreamMatchesItsGolden) {
+    auto fnv = [](std::uint64_t h, const double v) {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &v, sizeof bits);
+        for (int b = 0; b < 8; ++b) {
+            h ^= (bits >> (8 * b)) & 0xFF;
+            h *= 0x100000001B3ULL;
+        }
+        return h;
+    };
+    std::uint64_t h = 0xcbf29ce484222325ULL;
+    for (std::size_t i = 0; i < 1000; ++i) {
+        h = fnv(h, quantape::mc::ZigguratSampler::sample(quantape::mc::keyForIndex(2024, 0, i)));
+    }
+    EXPECT_EQ(h, 0x656e51ef4b274afcULL) << "ziggurat key map / shared table changed";
+}
+
+TEST(MomentMatching, zigguratTableIsBuiltOnce) {
+    // Function-local `static const`: every call must hand out the same table
+    // object, and that object must be the canonical generated table (so the
+    // draw matches a fresh `ZigguratNormal`'s). A per-draw rebuild would fail
+    // neither check on its own, but together with the two gates above it pins
+    // "shared table, unchanged values".
+    EXPECT_EQ(&quantape::mc::zigguratTables(), &quantape::mc::zigguratTables());
+    const quantape::math::mc::ZigguratTables fresh = quantape::math::mc::generateZigguratTables();
+    EXPECT_EQ(quantape::mc::zigguratTables().r, fresh.r);
+    EXPECT_EQ(quantape::mc::zigguratTables().A, fresh.A);
+    EXPECT_EQ(quantape::mc::zigguratTables().ktab[0], fresh.ktab[0]);
+    EXPECT_EQ(quantape::mc::zigguratTables().wtab[quantape::math::mc::ZigguratTables::N - 1],
+              fresh.wtab[quantape::math::mc::ZigguratTables::N - 1]);
+}
+
+TEST(MomentMatching, zigguratSourceFillsMatchDirectDraws) {
+    quantape::mc::IidGaussianSource<quantape::mc::ZigguratSampler> source(2, 2024);
+    Eigen::MatrixXd block;
+    source.fill(3, 5, 4, block);
+    ASSERT_TRUE(block.rows() == 2 && block.cols() == 4);
+    for (std::size_t p = 0; p < 4; ++p) {
+        Eigen::MatrixXd single;
+        source.fill(3, 5 + p, 1, single);
+        for (std::size_t j = 0; j < 2; ++j) {
+            EXPECT_EQ(single(static_cast<Eigen::Index>(j), 0),
+                      block(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)));
+            EXPECT_EQ(
+                block(static_cast<Eigen::Index>(j), static_cast<Eigen::Index>(p)),
+                quantape::mc::ZigguratSampler::sample(quantape::mc::keyFor(2024, 5 + p, 3, j, 2)));
+        }
+    }
 }
 
 class CirMomentMatchingTest : public ::testing::TestWithParam<StepsParam> {};
