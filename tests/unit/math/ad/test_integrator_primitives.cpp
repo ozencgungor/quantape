@@ -215,3 +215,19 @@ TEST_F(IntegratorPrimitivesTest, gaussLegendre20) {
 TEST_F(IntegratorPrimitivesTest, tanhSinh) {
     runIntegrator("tanh-sinh", tanh_sinh, 1e-8, 1e-6);
 }
+
+TEST_F(IntegratorPrimitivesTest, gaussLobattoZeroIntegralAndReversedBounds) {
+    // GaussLobattoIntegrator through the frozen-rule (RuleScalar) extraction:
+    // a zero integral is handled by the absolute tolerance, and reversed
+    // bounds negate the integral (and its gradient).
+    auto integ = lobatto(quantape::math::ScalarTag<var>{});
+    var zero = integ([](auto x) { return x * x * x; }, var(-1.0), var(1.0));
+    CHECK_CLOSE("zero integral, var", zero.val(), 0.0, 1e-12);
+
+    // I(theta) = int_1^0 (x^2 + theta x) dx = -1/3 - theta/2
+    var theta = 3.0;
+    var I = integ([&](auto x) { return x * x + theta * x; }, var(1.0), var(0.0));
+    I.grad();
+    CHECK_CLOSE("reversed bounds value", I.val(), -11.0 / 6.0, effectiveTol(-11.0 / 6.0, 1e-8));
+    CHECK_CLOSE("reversed bounds gradient", theta.adj(), -0.5, effectiveTol(-0.5, 1e-8));
+}

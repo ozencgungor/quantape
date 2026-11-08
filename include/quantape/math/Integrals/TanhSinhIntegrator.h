@@ -44,14 +44,27 @@ namespace quantape::math {
  *   - sech^2 is computed through exp(-2|u|) to avoid cosh overflow;
  *   - nodes whose weight underflows below W_MIN are skipped entirely;
  *   - a boundary guard drops f-values that come back non-finite;
- *   - termination: err_k = |I_k - I_{k-1}| vs max(abs_tol, rel_tol |I_k|),
- *     with min/max level counts and thrashing detection;
+ *   - termination: the level differences must have halved for TWO
+ *     consecutive refinements (a super-algebraically convergent rule) and the
+ *     conservative bound max(4 |I_k - I_{k-1}|, endpoint truncation) must be
+ *     within max(abs_tol, rel_tol |I_k|). A jump in the difference sequence
+ *     means the coarser rule under-resolved the integrand, so that difference
+ *     is not an error bound and refinement continues. The endpoint
+ *     truncation term is the mass hidden below the plain path's COMP_MIN cut,
+ *     extrapolated from the integrand values just above the cut (for
+ *     x^{-3/4} on [0,1] that floor is ~6e-4, and no level refinement can
+ *     remove it). A run that cannot meet the tolerance reports its honest
+ *     error and fails integrationSuccess(); it never throws for a legitimate
+ *     integrand;
  *   - the COMPLEMENT path (integrateWithComplement) implements Boost's
  *     two-argument functor: f receives the abscissa x and its signed
  *     distance d to the nearer endpoint (d = x -/+ 1), computed stably
  *     from the transform — for endpoint-singular integrands write
  *     f(x, d) in terms of d ((1 - x)^alpha -> (-d)^alpha near +1) to keep
  *     full precision where the plain x argument has already collapsed.
+ *     It resolves the endpoint analytically, so its truncation floor is set
+ *     by W_MIN (~1e-20 normalized distance) rather than COMP_MIN, and the
+ *     same two-point sliver estimate is applied there.
  *
  * @tparam DoubleT Numeric type (double, stan::math::var, stan::math::`fvar<var>`)
  */
@@ -124,7 +137,7 @@ public:
                 return DoubleT(0.0);
             return fx * DoubleT(w * m_half);
         };
-        return integrateImpl(nodeEval, a, b);
+        return integrateImpl(nodeEval, a, b, complementTailEstimate(f, a, b));
     }
 
     /**
@@ -178,7 +191,7 @@ protected:
                 return DoubleT(0.0); // boundary guard: pull the endpoint in
             return fx * DoubleT(w * m_half);
         };
-        return integrateImpl(nodeEval, a, b);
+        return integrateImpl(nodeEval, a, b, endpointTailEstimate(f, a, b));
     }
 
 private:
@@ -207,6 +220,20 @@ private:
     /// O(sqrt(eps)) ~ 1e-8 for square-root singularities.
     static constexpr double COMP_MIN = 4.0 * std::numeric_limits<double>::epsilon();
     static constexpr double LEVEL0_STEP = 1.0;
+    /// Conservative multiplier on the level-to-level difference: for a
+    /// super-algebraically convergent rule the next correction is a fraction
+    /// of the last difference, so the scale factor covers the neglected tail.
+    static constexpr double ERROR_SAFETY = 4.0;
+    /// Each refinement must at least halve the level difference, for two
+    /// consecutive levels, before the difference is trusted as a bound. A
+    /// jump in the sequence means the coarser rule was under-resolved (e.g.
+    /// an interior peak narrower than the node spacing).
+    static constexpr double DECAY_RATIO = 0.5;
+    /// Below this local power-law exponent the endpoint sliver is treated as
+    /// bounded (the estimate is then max|f| * distance, a rounding floor).
+    static constexpr double MIN_SINGULAR_EXPONENT = 0.05;
+    /// "No bound available" sentinel (keeps ERROR_SAFETY * value finite).
+    static constexpr double HUGE_ERROR = 1e300;
 
     /// Recursive primal extraction: double -> itself, var -> .val(),
     /// `fvar<var>` -> .val().val()
@@ -233,12 +260,132 @@ private:
     }
 
     /**
+     * @brief Two-point extrapolation of the mass hidden in the endpoint
+     *        sliver left unresolved by the plain path's COMP_MIN cut.
+     *
+     * The plain path never evaluates the integrand closer than
+     * `d1 = half * COMP_MIN` to an endpoint, so the integral over that
+     * sliver is missing. For a bounded integrand the missing mass is at most
+     * `max|f| * d1` (a rounding floor); for an integrable endpoint
+     * singularity `f ~ C d^{-alpha}` it is the analytic tail
+     * `C d1^{1-alpha}/(1-alpha) = f(d1) d1/(1-alpha)`, which no amount of
+     * level refinement can remove. `alpha` is estimated from the values at
+     * d1 and 4 d1 (both already inside the region the rule samples).
+     */
+    double endpointTailEstimate(const FunctionType& f, DoubleT a, DoubleT b) const {
+        double av = value(a);
+        double bv = value(b);
+        if (!(av < bv)) {
+            std::swap(av, bv);
+        }
+        const double half = 0.5 * (bv - av);
+        const double d1 = half * COMP_MIN;
+        if (!(d1 > 0.0)) {
+            return 0.0;
+        }
+        const double d2 = 4.0 * d1;
+        double tail = 0.0;
+        // Lower endpoint. If the probe point rounds onto the endpoint the
+        // integrand cannot be resolved in double at all; contribute nothing
+        // rather than a spurious huge tail.
+        if (av + d1 > av) {
+            tail += tailSliver(f, av + d1, av + d2, d1, d2);
+        }
+        if (bv - d1 < bv) {
+            tail += tailSliver(f, bv - d1, bv - d2, d1, d2);
+        }
+        return tail;
+    }
+
+    /**
+     * @brief Endpoint sliver estimate for the complement path.
+     *
+     * The complement path skips transformed nodes whose weight drops below
+     * W_MIN, which happens at normalized complement `comp_cut` (solved below
+     * from w(comp) = W_MIN); the hidden physical mass is therefore below
+     * `d1 = half * comp_cut`. The complement functor takes the signed
+     * distance to the nearer endpoint directly, so the sliver is probed with
+     * (a + d, +d) / (b - d, -d) without any abscissa collapse.
+     */
+    double complementTailEstimate(const ComplementFunctionType& f, DoubleT a, DoubleT b) const {
+        double av = value(a);
+        double bv = value(b);
+        if (!(av < bv)) {
+            std::swap(av, bv);
+        }
+        const double half = 0.5 * (bv - av);
+        const double d1 = half * complementCutComplement();
+        if (!(d1 > 0.0)) {
+            return 0.0;
+        }
+        const double d2 = 4.0 * d1;
+        double tail = 0.0;
+        if (av + d1 > av) {
+            tail += tailSliverValues(value(f(DoubleT(av + d1), d1)), value(f(DoubleT(av + d2), d2)),
+                                     d1, d2);
+        }
+        if (bv - d1 < bv) {
+            tail += tailSliverValues(value(f(DoubleT(bv - d1), -d1)),
+                                     value(f(DoubleT(bv - d2), -d2)), d1, d2);
+        }
+        return tail;
+    }
+
+    /// Normalized complement (1 - |x|) at which the transformed weight
+    /// crosses W_MIN: solve w(comp) = W_MIN with
+    /// w ~= 2 HALF_PI cosh(t) comp and comp ~= 2 exp(-2u), u = HALF_PI sinh(t)
+    /// (a few fixed-point steps converge immediately).
+    static double complementCutComplement() {
+        double comp = W_MIN;
+        for (int iteration = 0; iteration < 8; ++iteration) {
+            const double u = 0.5 * std::log(2.0 / comp);
+            const double sinhT = u / HALF_PI;
+            const double coshT = std::sqrt(1.0 + sinhT * sinhT);
+            comp = W_MIN / (2.0 * HALF_PI * coshT);
+        }
+        return comp;
+    }
+
+    /// One endpoint's sliver estimate; `x1` is the closer abscissa.
+    template <typename F>
+    static double tailSliver(const F& f, double x1, double x2, double d1, double d2) {
+        return tailSliverValues(value(f(DoubleT(x1))), value(f(DoubleT(x2))), d1, d2);
+    }
+
+    /// Shared sliver bound from the two integrand values just above the cut.
+    static double tailSliverValues(double f1, double f2, double d1, double d2) {
+        const double a1 = std::fabs(f1);
+        const double a2 = std::fabs(f2);
+        if (!isFiniteFastMathProof(a1) || !isFiniteFastMathProof(a2)) {
+            // The integrand is not even finite above the cut: the hidden mass
+            // cannot be bounded, so the run must not report success.
+            return std::numeric_limits<double>::infinity();
+        }
+        const double bounded = std::max(a1, a2) * d1;
+        if (a2 > 0.0 && a1 > a2) {
+            const double alpha = std::log(a1 / a2) / std::log(d2 / d1);
+            if (alpha >= 1.0) {
+                // Divergent (or faster than 1/d) sliver: no finite bound.
+                return std::numeric_limits<double>::infinity();
+            }
+            if (alpha > MIN_SINGULAR_EXPONENT) {
+                return std::max(bounded, a1 * d1 / (1.0 - alpha));
+            }
+        }
+        return bounded;
+    }
+
+    /**
      * @brief Adaptive level loop shared by the plain and complement paths.
      * @param nodeEval t -> weighted contribution (already includes phi'(t)
      *                 and the affine jacobian; 0 for skipped nodes)
+     * @param tailEstimate hidden endpoint mass from endpointTailEstimate()
+     *                 (plain path, COMP_MIN cut) or complementTailEstimate()
+     *                 (complement path, W_MIN cut at a far smaller distance)
      */
     template <typename NodeEval>
-    DoubleT integrateImpl(const NodeEval& nodeEval, DoubleT a, DoubleT b) const {
+    DoubleT integrateImpl(const NodeEval& nodeEval, DoubleT a, DoubleT b,
+                          double tailEstimate) const {
         double av = value(a);
         double bv = value(b);
         if (av == bv) {
@@ -256,17 +403,19 @@ private:
         double h = LEVEL0_STEP;
         DoubleT I_prev = DoubleT(0.0);
         DoubleT I = DoubleT(0.0);
-        const double BIG = std::numeric_limits<double>::max();
-        double err = BIG;
-        double prev_err = BIG;
-        int worsening = 0;
+        // |I_k - I_{k-1}| and its two predecessors; HUGE_ERROR means unset.
+        double delta = HUGE_ERROR;
+        double delta_prev = HUGE_ERROR;
+        double delta_prev2 = HUGE_ERROR;
+        double err = HUGE_ERROR;
+        bool haveError = false;
 
         for (size_t level = 0; level <= m_maxLevels; ++level) {
             if (level == 0) {
                 DoubleT sum = nodeEval(0.0);
                 const size_t n_tail = static_cast<size_t>(std::ceil(T_MAX / h));
                 for (size_t j = 1; j <= n_tail; ++j) {
-                    const double t = j * h;
+                    const double t = static_cast<double>(j) * h;
                     sum += nodeEval(t) + nodeEval(-t);
                 }
                 I = DoubleT(h) * sum;
@@ -275,45 +424,64 @@ private:
                 // doubling property: only the NEW odd-indexed nodes
                 DoubleT odd_sum = DoubleT(0.0);
                 for (size_t m = 0;; ++m) {
-                    const double t = (2.0 * m + 1.0) * h;
+                    const double t = (2.0 * static_cast<double>(m) + 1.0) * h;
                     if (t > T_MAX)
                         break;
                     odd_sum += nodeEval(t) + nodeEval(-t);
                 }
                 I = DoubleT(0.5) * I_prev + DoubleT(h) * odd_sum;
-                err = std::abs(value(I) - value(I_prev));
+                delta_prev2 = delta_prev;
+                delta_prev = delta;
+                delta = std::fabs(value(I) - value(I_prev));
             }
 
-            if (this->numberOfEvaluations() > this->maxEvaluations())
-                throw std::runtime_error(
-                    "TanhSinhIntegrator: max number of function evaluations reached");
+            if (this->numberOfEvaluations() > this->maxEvaluations()) {
+                // Out of budget on a legitimate integrand: report the best
+                // value with a failing bound.
+                err = (level > 0)
+                          ? std::max(ERROR_SAFETY * std::max(delta, delta_prev), tailEstimate)
+                          : HUGE_ERROR;
+                haveError = true;
+                break;
+            }
 
             if (level > 0) {
-                // convergence first: accept as soon as we are within tolerance
-                if (level >= m_minLevels) {
-                    const double tol =
-                        std::max(this->absoluteAccuracy(), m_relAccuracy * std::abs(value(I)));
-                    if (err <= tol)
-                        break;
+                const double tol =
+                    std::max(this->absoluteAccuracy(), m_relAccuracy * std::fabs(value(I)));
+                // The unresolved endpoint sliver dominates the level
+                // differences: refinement cannot remove it, so stop and
+                // report the honest (failing) floor.
+                if (tailEstimate > tol && tailEstimate > 2.0 * delta) {
+                    err = ERROR_SAFETY * delta + tailEstimate;
+                    haveError = true;
+                    break;
                 }
-                // thrashing detection: abort only when the error gets
-                // SUBSTANTIALLY worse repeatedly — at the rounding-noise
-                // floor the level-to-level change wobbles randomly, and
-                // aborting on any increase would stop refinement far too
-                // early for tight tolerances.
-                if (err > 1.5 * prev_err) {
-                    if (++worsening >= 3)
-                        break;
-                } else {
-                    worsening = 0;
+                // Failure status when the level contributions are not
+                // decaying: the coarser rule missed structure, so its
+                // difference is not an error bound and the run must not be
+                // certified. Requiring two consecutive halvings enforces the
+                // expected super-algebraic convergence.
+                const bool decaying =
+                    delta <= DECAY_RATIO * delta_prev && delta_prev <= DECAY_RATIO * delta_prev2;
+                const double bound = std::max(ERROR_SAFETY * delta, tailEstimate);
+                if (level >= m_minLevels && decaying && bound <= tol) {
+                    err = bound;
+                    haveError = true;
+                    break;
                 }
-                prev_err = err;
             }
 
             I_prev = I;
             h *= 0.5;
         }
 
+        if (!haveError) {
+            // Levels exhausted without meeting the gate: report a conservative
+            // bound over the last two differences plus the endpoint floor.
+            err = (delta < HUGE_ERROR)
+                      ? std::max(ERROR_SAFETY * std::max(delta, delta_prev), tailEstimate)
+                      : HUGE_ERROR;
+        }
         this->setAbsoluteError(err);
         return reversed ? -I : I;
     }

@@ -62,6 +62,19 @@ public:
 
 protected:
     DoubleT integrate(const FunctionType& f, DoubleT a, DoubleT b) const override {
+        // Zero-width interval: the integral is exactly zero and there is no
+        // interior point to subdivide.
+        if (value(a) == value(b)) {
+            this->setNumberOfEvaluations(0);
+            this->setAbsoluteError(0.0);
+            return DoubleT(0.0);
+        }
+        // Reversed bounds integrate to the negated integral, consistent with
+        // Trapezoid/Simpson (and with tanh-sinh); the adaptive terminal test
+        // `mll <= a || b <= mrr` is only meaningful for a < b.
+        if (value(a) > value(b)) {
+            return -integrate(f, b, a);
+        }
         this->setNumberOfEvaluations(0);
         const double calcAbsTolerance = calculateAbsTolerance(f, a, b);
 
@@ -116,9 +129,16 @@ private:
 
         this->increaseNumberOfEvaluations(13);
 
-        double acc_val = value(acc);
-        if (acc_val == 0.0 && (value(f1) != 0.0 || value(f2) != 0.0 || value(f3) != 0.0 ||
-                               value(f4) != 0.0 || value(f5) != 0.0 || value(f6) != 0.0)) {
+        const double acc_val = value(acc);
+        const double scale = std::fabs(acc_val);
+        // A zero scale only makes RELATIVE accuracy meaningless. In
+        // absolute-only mode (m_relAccuracy == 0) the absolute tolerance is
+        // well defined even for a vanishing estimate (odd integrands on
+        // symmetric intervals); the relative target scales with |acc| so it is
+        // sign-independent.
+        if (m_relAccuracy != 0.0 && scale == 0.0 &&
+            (value(f1) != 0.0 || value(f2) != 0.0 || value(f3) != 0.0 || value(f4) != 0.0 ||
+             value(f5) != 0.0 || value(f6) != 0.0)) {
             throw std::runtime_error("Cannot calculate absolute accuracy from relative accuracy");
         }
 
@@ -140,7 +160,7 @@ private:
         }
 
         if (m_relAccuracy != 0.0) {
-            return std::min(this->absoluteAccuracy(), acc_val * relTol) / (r * EPSILON);
+            return std::min(this->absoluteAccuracy(), scale * relTol) / (r * EPSILON);
         } else {
             return this->absoluteAccuracy() / (r * EPSILON);
         }
