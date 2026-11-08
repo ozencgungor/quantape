@@ -906,11 +906,11 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
         }
         maturityDates[i] = maturity;
     }
-    // The trial curves are constructed from raw times, so their zero clock is
-    // the times-constructor default (ACT/365F); the whole-grid check runs on a
-    // date-constructed curve and uses the caller's clock. Precomputing both
-    // keeps the solve and the check on their original clocks.
-    const datetime::DayCounter trialZeroDayCounter(datetime::DayCount::Actual365Fixed);
+    // The solve instruments, the knot times and the whole-grid check all use
+    // the caller's zero clock: the knots sit at yf_zeroClock(date) while the
+    // times-constructed trial curve evaluates in raw time, so an instrument
+    // built on any other clock would be solved against a different point of the
+    // same curve.
     std::vector<DiscountInstrument> solveInstruments;
     std::vector<DiscountInstrument> checkInstruments;
     solveInstruments.reserve(count);
@@ -918,7 +918,7 @@ bootstrapDiscountCurve(const datetime::Date& referenceDate,
     std::vector<double> solveTargets(count);
     std::vector<double> checkTargets(count);
     for (std::size_t i = 0; i < count; ++i) {
-        solveInstruments.push_back(toInstrument(pillars[i], referenceDate, trialZeroDayCounter));
+        solveInstruments.push_back(toInstrument(pillars[i], referenceDate, zeroDayCounter));
         solveTargets[i] = solveInstruments.back().target();
         checkInstruments.push_back(toInstrument(pillars[i], referenceDate, zeroDayCounter));
         checkTargets[i] = checkInstruments.back().target();

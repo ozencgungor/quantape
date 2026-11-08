@@ -245,3 +245,35 @@ TEST(BootstrapValidation, rejectsUnsortedPillarsAndZeroTenorSchedule) {
                                           calendar),
                  std::invalid_argument);
 }
+
+// The knot times, the solve instruments and the verification must all use the
+// caller's zero clock. The instruments were prepared on ACT/365F regardless, so
+// the solver evaluated the trial curve at yf_365 while its knots sat at
+// yf_caller: any non-ACT/365F clock failed to converge.
+TEST(BootstrapValidation, fitsANonAct365ZeroClock) {
+    const datetime::Calendar calendar = datetime::Calendar::noHolidays();
+    const std::vector<datetime::DayCounter> clocks{
+        datetime::DayCounter(datetime::DayCount::Actual365Fixed),
+        datetime::DayCounter(datetime::DayCount::Actual360),
+        datetime::DayCounter(datetime::DayCount::Actual364)};
+    for (const datetime::DayCounter& clock : clocks) {
+        SCOPED_TRACE(::testing::Message() << "zero clock " << clock.name());
+        const std::vector<datetime::Date> dates{kReference.plusMonths(3), kReference.plusMonths(6),
+                                                kReference.plusYears(1)};
+        std::vector<CurvePillar> pillars;
+        for (const datetime::Date& maturity : dates) {
+            CurvePillar pillar;
+            pillar.maturity = maturity;
+            pillar.kind = PillarKind::Deposit;
+            pillar.quote = 0.03;
+            pillar.quoteDayCounter = clock;
+            pillar.calendar = calendar;
+            pillars.push_back(pillar);
+        }
+        const DiscountCurve<double> curve = markets::bootstrapDiscountCurve(
+            kReference, clock, markets::InterpolationSpace::LogDiscount,
+            markets::InterpolationScheme::Linear, pillars, 1e-14);
+        checkExactFit("non-act365 clock", curve, pillars);
+        checkCurveSanity(curve, true);
+    }
+}
