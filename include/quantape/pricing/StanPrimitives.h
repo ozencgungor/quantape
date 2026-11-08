@@ -26,7 +26,11 @@ inline stan::math::var Black76<stan::math::var>::price() const {
     const double D0 = DF.val(), F0 = F.val(), K0 = K.val(), vol0 = vol.val();
     auto res = black76Analytical(D0, F0, K0, vol0, T, type);
 
-    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
+    // Capture the `var` handles by value rather than `this`: a `var` copy
+    // shares the underlying `vari`, so the adjoints land on the caller's nodes,
+    // and the callback stays valid for the whole expression even when the
+    // functor is a temporary that dies before `grad()` runs.
+    return make_callback_var(res.price, [DF = DF, F = F, K = K, vol = vol, g1 = res.g1](auto& vi) {
         const double adj = vi.adj();
         DF.adj() += adj * g1.dV_dDF;
         F.adj() += adj * g1.dV_dF;
@@ -97,14 +101,15 @@ inline stan::math::var GBS<stan::math::var>::price() const {
 
     auto res = gbsAnalytical(S0, K0, rDisc0, b0, vol0, T, type);
 
-    return make_callback_var(res.price, [this, g1 = res.g1](auto& vi) {
-        const double adj = vi.adj();
-        S.adj() += adj * g1.dV_dS;
-        K.adj() += adj * g1.dV_dK;
-        rDisc.adj() += adj * g1.dV_drDisc;
-        b.adj() += adj * g1.dV_db;
-        vol.adj() += adj * g1.dV_dvol;
-    });
+    return make_callback_var(
+        res.price, [S = S, K = K, rDisc = rDisc, b = b, vol = vol, g1 = res.g1](auto& vi) {
+            const double adj = vi.adj();
+            S.adj() += adj * g1.dV_dS;
+            K.adj() += adj * g1.dV_dK;
+            rDisc.adj() += adj * g1.dV_drDisc;
+            b.adj() += adj * g1.dV_db;
+            vol.adj() += adj * g1.dV_dvol;
+        });
 }
 
 // ============================================================================

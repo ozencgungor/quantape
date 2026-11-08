@@ -260,9 +260,18 @@ TEST_F(FxInstrumentsTest, pvParity) {
     const inst::FxSpot spotTrade =
         inst::makeFxSpot(kEurUsd, kReference, spot, notional, kWeekends, kWeekends, 2, 2);
     const double spotTime = kZeroDc.yearFraction(kReference, spotTrade.valueDate);
+    // A spot trade is a forward struck at spot: its PV is N*spot*(D_base -
+    // D_quote), and it must agree with the cashflow valuation of the same trade.
     CHECK_CLOSE("spot pv parity",
                 mk::fxSpotPv(spotTrade, curves, kReference, kZeroDc, spot, notional),
-                mk::fxSpotPv(spot, notional) * baseCurve.discount(spotTime), 1e-12);
+                mk::fxSpotPv(spot, notional) *
+                    (baseCurve.discount(spotTime) - quoteCurve.discount(spotTime)),
+                1e-12);
+    const std::vector<inst::CashflowT<double>> spotFlows =
+        mk::fxCashflows(spotTrade, notional, kReference, kWeekends, kWeekends);
+    CHECK_CLOSE("spot cashflow pv parity",
+                mk::fxSpotPv(spotTrade, curves, kReference, kZeroDc, spot, notional),
+                mk::fxCashflowPv(kEurUsd, spotFlows, spot, kReference, kZeroDc, curves), 1e-9);
 
     const inst::FxForward forward =
         inst::makeFxForward(kEurUsd, kReference, dt::Period(1, dt::TimeUnit::Years), spot, 1.12,

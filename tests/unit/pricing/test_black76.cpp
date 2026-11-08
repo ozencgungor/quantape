@@ -141,7 +141,6 @@ void checkB76StanVar(double DF0, double F0, double K0, double vol0, double T, Op
     row("dV/dK", K.adj(), res.g1.dV_dK);
     row("dV/dvol", vol.adj(), res.g1.dV_dvol);
     ::testing::Test::RecordProperty("b76_stan_var_err", quantape::util::num(max_err, 6));
-    stan::math::recover_memory();
 }
 
 struct B76Functor {
@@ -355,4 +354,56 @@ TEST_F(Black76Test, adScalarValueAndAdjoint) {
     x.vi_->adj_ = 0.5;
     y.vi_->adj_ = 0.5;
     CHECK_AD_CLOSE("util var value+adj", x, y, 0.0);
+}
+
+// The analytical adjoint must stay valid when the functor is a temporary: it
+// dies at the end of the full expression, and `grad()` runs after that.
+TEST_F(Black76Test, temporaryFunctorSurvivesGrad) {
+    using stan::math::var;
+    var q = quantape::pricing::Black76<var>{0.95, 100.0, 100.0,
+                                            0.2,  1.0,   quantape::pricing::OptionType::Call}
+                .price();
+    q.grad();
+    CHECK_CLOSE("temporary Black76 price", q.val(),
+                quantape::pricing::black76Analytical(0.95, 100.0, 100.0, 0.2, 1.0,
+                                                     quantape::pricing::OptionType::Call)
+                    .price,
+                1e-12);
+}
+
+TEST_F(Black76Test, gbsTemporaryFunctorSurvivesGrad) {
+    using stan::math::var;
+    var q =
+        quantape::pricing::GBS<var>{
+            100.0, 100.0, 0.05, 0.0, 0.2, 1.0, quantape::pricing::OptionType::Call}
+            .price();
+    q.grad();
+    CHECK_CLOSE("temporary GBS price", q.val(),
+                quantape::pricing::gbsAnalytical(100.0, 100.0, 0.05, 0.0, 0.2, 1.0,
+                                                 quantape::pricing::OptionType::Call)
+                    .price,
+                1e-12);
+}
+
+// Deep out-of-the-money put wing: 1 - Phi(z) cancels to zero exactly where the
+// put's value lives, so the price must be formed from the erfc complementary
+// CDF and stay positive. Reference values are mpmath at 60 digits for F=100,
+// vol=0.2, T=1, DF=1.
+TEST_F(Black76Test, deepOutOfTheMoneyPutWingKeepsRelativeAccuracy) {
+    const struct {
+        double K;
+        double expected;
+    } cases[] = {{30.0, 1.5035646042795e-09},
+                 {25.0, 2.8766814863250e-12},
+                 {20.0, 4.5505769201969e-16},
+                 {15.0, 9.5852483370779e-22}};
+    for (const auto& item : cases) {
+        SCOPED_TRACE(::testing::Message() << "K=" << item.K);
+        const double price =
+            quantape::pricing::Black76<double>{1.0, 100.0, item.K,
+                                               0.2, 1.0,   quantape::pricing::OptionType::Put}
+                .price();
+        EXPECT_GT(price, 0.0) << "a put price must never be negative";
+        CHECK_CLOSE_REL("deep otm put", price, item.expected, 1e-9);
+    }
 }

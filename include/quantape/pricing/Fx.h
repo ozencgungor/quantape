@@ -269,7 +269,10 @@ auto fxSpotPv(const instruments::FxSpot& trade, const FxSet<BaseT, QuoteT>& curv
             ? trade.valueDate
             : trade.resolveValueDate(referenceDate, trade.baseCalendar, trade.quoteCalendar);
     const double t = zeroDayCounter.yearFraction(referenceDate, payDate);
-    return fxSpotPv(ScalarT(marketSpot), ScalarT(baseNotional)) * ScalarT(curves.base(t));
+    // A spot trade's own cashflows are +N base and -N*spot quote on the same
+    // date, so its PV is N*spot*(D_base - D_quote).
+    return fxSpotPv(ScalarT(marketSpot), ScalarT(baseNotional)) *
+           (ScalarT(curves.base(t)) - ScalarT(curves.quote(t)));
 }
 
 /// PV of a dated forward: the formula-level forward value with base and quote

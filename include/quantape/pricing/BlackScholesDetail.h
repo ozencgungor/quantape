@@ -114,12 +114,17 @@ inline Black76Result black76Analytical(double DF, double F, double K, double vol
 
     const double Ndp = quantape::math::detail::Phi(dp);
     const double Ndm = quantape::math::detail::Phi(dm);
+    // P(Z > z) via erfc, not 1 - Phi(z): in the deep out-of-the-money put wing
+    // both d+ and d- are large and positive, so 1 - Phi(z) cancels to zero (and
+    // can go negative) exactly where the put's value lives.
+    const double ccdfDp = math::detail::normalCcdfDouble(dp, 0.0, 1.0);
+    const double ccdfDm = math::detail::normalCcdfDouble(dm, 0.0, 1.0);
     const double ndp = quantape::math::detail::phi(dp);
     // Identity F n(d+) = K n(d-): avoids a second exp/sqrt in the hot path
     const double ndm = (F / K) * ndp;
 
     const double call_undsc = F * Ndp - K * Ndm;
-    const double put_undsc = K * (1.0 - Ndm) - F * (1.0 - Ndp);
+    const double put_undsc = K * ccdfDm - F * ccdfDp;
 
     const bool is_call = (type == OptionType::Call);
     const double V_undsc = is_call ? call_undsc : put_undsc;
@@ -127,7 +132,7 @@ inline Black76Result black76Analytical(double DF, double F, double K, double vol
 
     // 1st order
     const double dVu_dF = is_call ? Ndp : (Ndp - 1.0);
-    const double dVu_dK = is_call ? -Ndm : (1.0 - Ndm);
+    const double dVu_dK = is_call ? -Ndm : ccdfDm;
     const double dVu_dvol = F * ndp * sqrtT;
 
     Black76Greeks1 g1;
@@ -172,9 +177,10 @@ inline double Black76<double>::price() const {
 
     if (type == OptionType::Call) {
         return DF * (F * Ndp - K * Ndm);
-    } else {
-        return DF * (K * (1.0 - Ndm) - F * (1.0 - Ndp));
     }
+    // erfc form: 1 - Phi(z) cancels in the deep put wing (and can go negative).
+    return DF * (K * math::detail::normalCcdfDouble(dm, 0.0, 1.0) -
+                 F * math::detail::normalCcdfDouble(dp, 0.0, 1.0));
 }
 
 // ============================================================================
