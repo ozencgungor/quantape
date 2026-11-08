@@ -1,5 +1,6 @@
-// test_numeraire.cpp — numeraire view: deterministic limit, deflation
-// identity, rejection rules and AD state gradients
+// test_numeraire.cpp — numeraire view: deterministic limit, collateral
+// deflation (Z = V/N = V*D, N = 1/D), zero-vol martingality, rejection rules
+// and AD state gradients
 #include "quantape/math/StanMath.h" // must be first (Eigen plugin ordering)
 
 #include "quantape/markets/Curves/Curve.h"
@@ -81,6 +82,16 @@ sde::GaussianStateCurve makeMap() {
                                               makeLoadings());
 }
 
+/// Zero-vol (deterministic loading block) map: every bond is the base curve
+/// ratio P0(T_j)/P0(t_k) exactly, so a zero state is a deterministic model.
+sde::GaussianStateCurve makeDeterministicMap() {
+    sde::GaussianStateCurve::Loadings loadings;
+    loadings.factor.assign(2, std::vector<double>(kNObs * kNPay, 0.0));
+    loadings.correlation = {1.0, 0.0, 0.0, 1.0};
+    return sde::GaussianStateCurve::fromCurve(makeOisCurve(), obsTimes(), payTimes(),
+                                              std::move(loadings));
+}
+
 sde::MeasureSpec riskNeutralSpec() {
     return sde::MeasureSpec{};
 }
@@ -130,17 +141,19 @@ TEST(Numeraire, zeroStateReproducesDeterministicCurves) {
     const std::span<const double> zeroState;
     const DiscountCurve<double> ois = makeOisCurve();
     const sde::Numeraire<DiscountCurve<double>> discountNumeraire(ois);
+    // The numeraire is the collateral account N = 1/D, not the discount.
     for (const double t : {0.5, 1.0, 2.0, 3.5}) {
-        CHECK_CLOSE("numeraire value is the curve discount, bit-exact",
-                    discountNumeraire.numeraireValue(t, zeroState), ois.discount(t), 0.0);
+        CHECK_CLOSE("numeraire value is the inverse curve discount, bit-exact",
+                    discountNumeraire.numeraireValue(t, zeroState), 1.0 / ois.discount(t), 0.0);
     }
 
     const auto parent = std::make_shared<const DiscountCurve<double>>(makeOisCurve());
     const SpreadCurve<double> spread = makeSpreadCurve(parent);
     const sde::Numeraire<SpreadCurve<double>> spreadNumeraire(spread);
-    CHECK_CLOSE("roll ratio equals D(t1)/D(t2), bit-exact",
+    // rollRatio(t1,t2) = N(t1)/N(t2) = D(t2)/D(t1): the forward discount.
+    CHECK_CLOSE("roll ratio is the forward discount D(t2)/D(t1), bit-exact",
                 spreadNumeraire.rollRatio(1.0, 3.0, zeroState),
-                spread.discount(1.0) / spread.discount(3.0), 0.0);
+                spread.discount(3.0) / spread.discount(1.0), 0.0);
 }
 
 TEST(Numeraire, deflatedTimesNumeraireRecoversValue) {
@@ -149,7 +162,7 @@ TEST(Numeraire, deflatedTimesNumeraireRecoversValue) {
     const sde::Numeraire<DiscountCurve<double>> numeraire(ois);
     const double value = 250.0;
     const double t = 2.5;
-    CHECK_CLOSE("deflated value times N(t) recovers the value",
+    CHECK_CLOSE("deflated value times the account numeraire recovers the value",
                 numeraire.deflated(value, t, zeroState) * numeraire.numeraireValue(t, zeroState),
                 value, kTol);
 }
@@ -198,9 +211,12 @@ TEST(Numeraire, crossCurrencyCollateralRoundTripsWithDeterministicFx) {
     ASSERT_TRUE(collateral.hasFxPair);
 
     // Covered interest parity with deterministic curves: the forward FX quotes
-    // the ratio of the collateral-currency zero bonds.
+    // the ratio of the collateral-currency zero bonds, spot * D_usd/D_eur,
+    // which is spot * N_eur/N_usd with the account numeraire N = 1/D.
     const double fxForward =
         fxSpot * eurNumeraire.numeraireValue(t, state) / usdNumeraire.numeraireValue(t, state);
+    CHECK_CLOSE_REL("CIP forward FX is spot * D_usd(0,t)/D_eur(0,t)", fxForward,
+                    fxSpot * usdOis.discount(t) / eurOis.discount(t), 1e-15);
     CHECK_CLOSE_REL("forward FX times the USD collateral numeraire equals spot times EUR",
                     fxForward * usdNumeraire.numeraireValue(t, state),
                     fxSpot * eurNumeraire.numeraireValue(t, state), 1e-15);
@@ -225,10 +241,53 @@ TEST(Numeraire, deflationAppliesExactlyOneDiscountFactor) {
 
     CHECK_CLOSE("N(0) is one, so the final PV needs no extra scaling",
                 numeraire.numeraireValue(0.0, state), 1.0, 0.0);
-    const double raw = numeraire.deflated(payoff, t, state) * numeraire.numeraireValue(t, state);
-    CHECK_CLOSE("deflated payoff times the numeraire is the raw payoff", raw, payoff, kTol);
-    const double withSecondDiscount = raw * ois.discount(t);
-    EXPECT_GT(std::abs(withSecondDiscount - payoff), kTol);
+    // Z(t) = V(t)/N(t) = V(t)*D(0,t): exactly one discount factor.
+    CHECK_CLOSE("deflated payoff applies exactly one discount factor",
+                numeraire.deflated(payoff, t, state), payoff * ois.discount(t), 0.0);
+    CHECK_CLOSE("numeraire value is the reciprocal discount", numeraire.numeraireValue(t, state),
+                1.0 / ois.discount(t), 0.0);
+}
+
+TEST(Numeraire, unitCashflowPricesToDiscount) {
+    const std::span<const double> state;
+    const DiscountCurve<double> ois = makeOisCurve();
+    const sde::Numeraire<DiscountCurve<double>> numeraire(ois);
+    // A unit cashflow at T has time-T value 1; its T-deflated value is the
+    // risk-neutral PV D(0,T) (not 1/D(0,T), the inverted-units defect).
+    for (const double t : {0.5, 1.0, 2.0, 2.5, 3.5, 5.0}) {
+        CHECK_CLOSE("unit cashflow at T deflates to D(0,T), bit-exact",
+                    numeraire.deflated(1.0, t, state), ois.discount(t), 0.0);
+    }
+}
+
+// The gate the old convention failed: with the collateral account as the
+// numeraire, a zero-vol model's deflated value is a martingale and prices to
+// the trade's own discount curve. Every path carries the same state, so
+// E[Z_k] = Z_k and the identity is exact.
+TEST(Numeraire, zeroVolDeflatedValueIsMartingale) {
+    const sde::GaussianStateCurve map = makeDeterministicMap();
+    const sde::Numeraire<sde::GaussianStateCurve> numeraire(map);
+    const std::array<double, 2> zeroStateValues{0.0, 0.0};
+    const std::span<const double> state(zeroStateValues);
+    const std::span<const double> obs = map.obsTimes();
+    const std::span<const double> pay = map.payTimes();
+    const std::size_t jT = 3; // T = 2.0, on both grids
+    const double T = pay[jT];
+    const double pv = makeOisCurve().discount(T);
+
+    // Z(0) = V(0) = P(0,T) is the PV and needs no extra N(0) scaling.
+    const double z0 = numeraire.deflated(map.bond(0, jT, state), 0.0, state);
+    CHECK_CLOSE("Z(0) is the PV D(0,T), bit-exact", z0, pv, 0.0);
+
+    for (std::size_t k = 0; k < obs.size(); ++k) {
+        const double valueAtK = map.bond(k, jT, state); // P(t_k, T); 1 at T
+        const double zk = numeraire.deflated(valueAtK, obs[k], state);
+        CHECK_CLOSE("zero-vol deflated value is a martingale: Z_k = Z_0", zk, z0, 0.0);
+        CHECK_CLOSE("zero-vol deflated value matches the discount curve", zk, pv, 0.0);
+    }
+    // The terminal point of the same path: P(T,T) = 1 deflates to D(0,T).
+    CHECK_CLOSE("terminal P(T,T)=1 prices to D(0,T)",
+                numeraire.deflated(map.bond(obs.size() - 1, jT, state), T, state), pv, 0.0);
 }
 
 TEST(MeasureAdjustment, requireMeasureSupportPassesForSupportedMeasure) {
@@ -257,8 +316,11 @@ TEST(Numeraire, nullOrUnsetViewThrows) {
     const sde::Numeraire<Ois> unset;
     const std::span<const double> zeroState;
     EXPECT_THROW(unset.numeraireValue(1.0, zeroState), std::invalid_argument);
+    EXPECT_THROW(unset.numeraireValue(0.0, zeroState), std::invalid_argument);
     EXPECT_THROW(unset.deflated(1.0, 1.0, zeroState), std::invalid_argument);
+    EXPECT_THROW(unset.deflated(1.0, 0.0, zeroState), std::invalid_argument);
     EXPECT_THROW(unset.rollRatio(1.0, 2.0, zeroState), std::invalid_argument);
+    EXPECT_THROW(unset.rollRatio(0.0, 0.0, zeroState), std::invalid_argument);
 }
 
 class NumeraireAdTest : public StanTapeTest {};
