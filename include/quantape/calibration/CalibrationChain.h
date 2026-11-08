@@ -27,7 +27,7 @@ namespace quantape::math {
  *   with `ImplicitFunction.h` (`dp/dm`, exact dense-Hessian IFT; handles
  *   constraints, regularisation and best fit).
  * - **Instrument-Jacobian route** (`instrumentCalibrationJacobian`, Savine
- *   *IFT Demystified*): `db/da = (dI/db)^+ (dI/da − dI/dc·dc/da)` with the
+ *   *IFT Demystified*): `db/da = -(dI/db)^+ (dI/da + dI/dc·dc/da)` with the
  *   weighted SVD pseudo-inverse of the model Jacobian `dI/db`. Best-fit,
  *   non-square and near-singular calibrations are safe by construction;
  *   rank/condition are reported instead of silently inverting.
