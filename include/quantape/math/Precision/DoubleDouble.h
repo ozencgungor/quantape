@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace quantape::math {
 
@@ -64,6 +65,13 @@ public:
 
     friend DoubleDouble operator/(const DoubleDouble& a, const DoubleDouble& b) {
         const double q1 = a.hi / b.hi;
+        // IEEE propagation: the three-term correction below is only valid
+        // for finite operands with a non-zero divisor (it forms 0*inf and
+        // inf-inf otherwise). q1 is already the IEEE result for every other
+        // case, so return it directly.
+        if (!std::isfinite(q1) || !std::isfinite(a.hi) || !std::isfinite(b.hi)) {
+            return DoubleDouble(q1, 0.0);
+        }
         DoubleDouble r = a - DoubleDouble(q1) * b;
         const double q2 = r.hi / b.hi;
         r = r - DoubleDouble(q2) * b;
@@ -91,14 +99,27 @@ public:
 };
 
 inline DoubleDouble sqrt(const DoubleDouble& a) {
-    if (a.hi <= 0.0) {
+    if (!(a.hi > 0.0)) {
+        // sqrt(0) = +0, sqrt(-0) = -0, sqrt(x < 0) = NaN; NaN propagates.
         return DoubleDouble(std::sqrt(a.hi));
     }
-    DoubleDouble r(std::sqrt(a.hi));
+    if (!std::isfinite(a.hi)) {
+        return DoubleDouble(std::sqrt(a.hi)); // sqrt(+inf) = +inf
+    }
+    // Scale by an even power of two into [0.25, 2) before iterating: the
+    // compensated residual of each division is ~1e-32 of the numerator, and
+    // keeping the iterates O(1) keeps that residual normal instead of a
+    // precision-starved subnormal.
+    int exponent = 0;
+    std::frexp(a.hi, &exponent);
+    const int halfExponent = exponent / 2;
+    const int scale = -2 * halfExponent;
+    const DoubleDouble scaled(std::ldexp(a.hi, scale), std::ldexp(a.lo, scale));
+    DoubleDouble r(std::sqrt(scaled.hi));
     // Two Newton steps in double-double: the first refines ~1e-16 -> ~1e-32.
-    r = (r + a / r) * DoubleDouble(0.5);
-    r = (r + a / r) * DoubleDouble(0.5);
-    return r;
+    r = (r + scaled / r) * DoubleDouble(0.5);
+    r = (r + scaled / r) * DoubleDouble(0.5);
+    return DoubleDouble(std::ldexp(r.hi, halfExponent), std::ldexp(r.lo, halfExponent));
 }
 
 namespace detail {
@@ -118,6 +139,19 @@ inline const DoubleDouble& log2DD() {
 } // namespace detail
 
 inline DoubleDouble exp(const DoubleDouble& a) {
+    // IEEE propagation: exp(+inf) = +inf, exp(-inf) = +0, NaN propagates.
+    if (!std::isfinite(a.hi)) {
+        return DoubleDouble(std::exp(a.hi));
+    }
+    // Clamp before the reduction below: `nearbyint(a.hi/ln2)` is not
+    // representable as int beyond ~1e18 and exp overflows/underflows well
+    // before that (exp(710) = inf, exp(-746) = 0).
+    if (a.hi > 710.0) {
+        return DoubleDouble(std::numeric_limits<double>::infinity());
+    }
+    if (a.hi < -746.0) {
+        return DoubleDouble(0.0);
+    }
     // a = k ln2 + r, |r| <= ln2/2; exp(r) by Taylor in double-double,
     // then exact scaling by 2^k (both components ldexp'ed).
     const DoubleDouble kf(std::nearbyint(a.hi / detail::log2DD().hi));
@@ -132,12 +166,41 @@ inline DoubleDouble exp(const DoubleDouble& a) {
             break;
         }
     }
-    return DoubleDouble(std::ldexp(sum.hi, k), std::ldexp(sum.lo, k));
+    const DoubleDouble result(std::ldexp(sum.hi, k), std::ldexp(sum.lo, k));
+    if (!std::isfinite(result.hi)) {
+        return DoubleDouble(result.hi); // overflow: keep +inf, drop the low part
+    }
+    return result;
 }
 
 inline DoubleDouble log(const DoubleDouble& a) {
     if (!(a.hi > 0.0)) {
+        // IEEE propagation: log(0) = log(-0) = -inf, log(x < 0) = NaN,
+        // NaN propagates.
         return DoubleDouble(std::log(a.hi));
+    }
+    if (!std::isfinite(a.hi)) {
+        return DoubleDouble(std::log(a.hi)); // log(+inf) = +inf
+    }
+    // Near 1 the frexp reduction below subtracts two ~ln2-sized terms whose
+    // double-double parts cannot represent the tiny result. There use
+    // log(1+d) = 2 atanh(d/(2+d)) with d = a-1 exact in double-double; on
+    // |a-1| <= 1/2 the series argument satisfies |t| <= 1/3.
+    if (std::fabs(a.hi - 1.0) <= 0.5) {
+        const DoubleDouble d = a - DoubleDouble(1.0);
+        const DoubleDouble t = d / (DoubleDouble(2.0) + d);
+        const DoubleDouble t2 = t * t;
+        DoubleDouble term = t;
+        DoubleDouble sum = t;
+        for (int kk = 3; kk < 120; kk += 2) {
+            term = term * t2;
+            const DoubleDouble add = term / DoubleDouble(static_cast<double>(kk));
+            sum = sum + add;
+            if (add.hi == 0.0 && add.lo == 0.0) {
+                break;
+            }
+        }
+        return DoubleDouble(2.0) * sum;
     }
     int exponent = 0;
     const double m = std::frexp(a.hi, &exponent); // a.hi = m * 2^exponent, m in [0.5, 1)

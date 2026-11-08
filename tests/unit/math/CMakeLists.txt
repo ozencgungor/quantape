@@ -8,7 +8,9 @@ quantape_add_gtest(qta_test_math
             test_solvers.cpp
             test_interpolation.cpp
             test_precision.cpp
+            test_special_functions.cpp
             test_ziggurat.cpp
+            test_integrators.cpp
     LABELS unit numerics fast smoke)
 
 quantape_add_gtest(qta_test_math_slow

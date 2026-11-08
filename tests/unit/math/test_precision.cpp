@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
 #include <ostream>
 #include <string>
 
@@ -174,4 +175,130 @@ TEST(Precision, oscillatoryMomentsMatchClosedForm) {
     }
     SCOPED_TRACE("oscillatory moments k=0..8");
     EXPECT_LT(worst, 1e-10);
+}
+
+namespace {
+
+// Independent reference for log(1+d): the direct Maclaurin series
+// d - d^2/2 + d^3/3 - ..., not the 2 atanh(d/(2+d)) form used by the library.
+DoubleDouble log1pSeries(double d) {
+    const DoubleDouble dd(d);
+    const DoubleDouble negD(-d);
+    DoubleDouble term = dd;
+    DoubleDouble sum = dd;
+    for (int k = 2; k < 200; ++k) {
+        term = term * negD;
+        const DoubleDouble add = term / DoubleDouble(static_cast<double>(k));
+        sum = sum + add;
+        if (add.hi == 0.0 && add.lo == 0.0) {
+            break;
+        }
+    }
+    return sum;
+}
+
+// Round-trip helper: scale by a power of two before squaring, so the
+// double-double product's error term stays normal (the unscaled (sqrt(a))^2
+// round trip cannot resolve below ~1e-24 for a ~ 1e-300).
+DoubleDouble scalePow2(const DoubleDouble& a, int exponent) {
+    return DoubleDouble(std::ldexp(a.hi, exponent), std::ldexp(a.lo, exponent));
+}
+
+} // namespace
+
+// IEEE propagation for inf/nan/zero in sqrt, log, exp and division: the
+// compensated corrections are skipped where they would form inf-inf/0*inf,
+// and the IEEE value of the leading component is returned instead.
+TEST(Precision, nonFiniteSemantics) {
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    using quantape::math::sqrt;
+
+    const DoubleDouble sqrtInf = sqrt(DoubleDouble(inf));
+    EXPECT_TRUE(std::isinf(sqrtInf.value()));
+    EXPECT_GT(sqrtInf.hi, 0.0);
+    EXPECT_TRUE(std::isnan(sqrt(DoubleDouble(-inf)).value()));
+    EXPECT_TRUE(std::isnan(sqrt(DoubleDouble(nan)).value()));
+    EXPECT_TRUE(std::isnan(sqrt(DoubleDouble(-1.0)).value()));
+
+    const DoubleDouble logInf = quantape::math::log(DoubleDouble(inf));
+    EXPECT_TRUE(std::isinf(logInf.value()));
+    EXPECT_GT(logInf.hi, 0.0);
+    const DoubleDouble logZero = quantape::math::log(DoubleDouble(0.0));
+    EXPECT_TRUE(std::isinf(logZero.value()));
+    EXPECT_LT(logZero.hi, 0.0);
+    const DoubleDouble logNegZero = quantape::math::log(DoubleDouble(-0.0));
+    EXPECT_TRUE(std::isinf(logNegZero.value()));
+    EXPECT_LT(logNegZero.hi, 0.0);
+    EXPECT_TRUE(std::isnan(quantape::math::log(DoubleDouble(-1.0)).value()));
+    EXPECT_TRUE(std::isnan(quantape::math::log(DoubleDouble(nan)).value()));
+
+    const DoubleDouble expInf = quantape::math::exp(DoubleDouble(inf));
+    EXPECT_TRUE(std::isinf(expInf.value()));
+    EXPECT_GT(expInf.hi, 0.0);
+    const DoubleDouble expNegInf = quantape::math::exp(DoubleDouble(-inf));
+    EXPECT_EQ(expNegInf.value(), 0.0);
+    EXPECT_FALSE(std::signbit(expNegInf.value()));
+    EXPECT_TRUE(std::isnan(quantape::math::exp(DoubleDouble(nan)).value()));
+
+    const DoubleDouble one(1.0);
+    const DoubleDouble zero(0.0);
+    const DoubleDouble divZero = one / zero;
+    EXPECT_TRUE(std::isinf(divZero.value()));
+    EXPECT_GT(divZero.hi, 0.0);
+    const DoubleDouble divNegZero = one / DoubleDouble(-0.0);
+    EXPECT_TRUE(std::isinf(divNegZero.value()));
+    EXPECT_LT(divNegZero.hi, 0.0);
+    EXPECT_TRUE(std::isnan((zero / zero).value()));
+    EXPECT_TRUE(std::isnan((DoubleDouble(inf) / DoubleDouble(inf)).value()));
+    const DoubleDouble divByInf = DoubleDouble(2.0) / DoubleDouble(inf);
+    EXPECT_EQ(divByInf.value(), 0.0);
+    const DoubleDouble infOverTwo = DoubleDouble(inf) / DoubleDouble(2.0);
+    EXPECT_TRUE(std::isinf(infOverTwo.value()));
+    EXPECT_GT(infOverTwo.hi, 0.0);
+    EXPECT_TRUE(std::isnan((DoubleDouble(nan) / one).value()));
+    EXPECT_TRUE(std::isnan((one / DoubleDouble(nan)).value()));
+}
+
+// log near 1: the direct 2 atanh(d/(2+d)) form on d = x-1 in double-double
+// keeps the relative accuracy of the tiny result; the frexp+ln2 reduction is
+// used only away from 1, where its two terms are well separated.
+TEST(Precision, logNearOne) {
+    for (const double d : {1e-15, 1e-20, 1e-30}) {
+        SCOPED_TRACE(::testing::Message() << "d=" << d);
+        const DoubleDouble a = DoubleDouble(1.0) + DoubleDouble(d);
+        const DoubleDouble got = quantape::math::log(a);
+
+        // Relative error against the direct-series reference at the
+        // double-double floor.
+        checkRel("log(1+d) vs direct series", got, log1pSeries(d), 1e-31);
+
+        // Round trip: exp(log(1+d)) - 1 reproduces the increment d.
+        checkRel("exp(log(1+d)) increment", quantape::math::exp(got) - DoubleDouble(1.0),
+                 DoubleDouble(d), 1e-25);
+
+        // log(exp(d)) = d up to the intrinsic d/2 of the second-order term.
+        checkRel("log(exp(d))", quantape::math::log(quantape::math::exp(DoubleDouble(d))),
+                 DoubleDouble(d), 1e-12);
+    }
+}
+
+// sqrt at extreme exponents: the Newton refinement's compensated residual is
+// ~1e-32 of the numerator, so the inputs are scaled by 2^(2m) to keep it
+// normal; the scaled squared round-trip then measures the full precision.
+TEST(Precision, sqrtScaling) {
+    using quantape::math::sqrt;
+    for (const double x : {1e-300, 1e-308, 1e-200, 1e-100, 1e-10, 1e10, 1e100, 1e200, 1e300}) {
+        SCOPED_TRACE(::testing::Message() << "x=" << x);
+        const DoubleDouble a(x);
+        const DoubleDouble r = sqrt(a);
+        int exponent = 0;
+        std::frexp(a.hi, &exponent);
+        const int scale = -2 * (exponent / 2);
+        const DoubleDouble rScaled = scalePow2(r, scale / 2);
+        const DoubleDouble aScaled = scalePow2(a, scale);
+        const double rel =
+            std::fabs((rScaled * rScaled - aScaled).value()) / std::fabs(aScaled.value());
+        EXPECT_LT(rel, 1e-30);
+    }
 }
