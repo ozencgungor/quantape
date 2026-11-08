@@ -46,12 +46,16 @@
  * These feed the double-side Greeks and, later, External payloads; they are
  * independent of any AD scalar type.
  *
- * inv(p) = exp(mu + sigma * inverseNormal(p)) reuses Acklam's rational
- * approximation from Random/InverseNormal.h: maximum relative error ~1.15e-9
- * in the normal quantile (seed-quality; an AS241/Newton refinement is planned).
- * The inverse is double-seeded, so it is exact only to that seed accuracy and
- * carries no derivative information with respect to p. p <= 0 maps to 0 and
- * p >= 1 to +inf via the +-1e10 endpoint clamp.
+ * inv(p) = exp(mu + sigma * inverseNormal(p)) uses the shared AS241 normal
+ * quantile from Random/InverseNormal.h (`detail::normalInvDouble`, ~1e-15
+ * relative). The quantile is finite over the entire subnormal range of p, so
+ * inv(5e-324) = exp(-38.4674) = 1.967e-17 for the standard lognormal. p <= 0
+ * maps to 0 and p >= 1 to +inf via the +-1e10 endpoint clamp.
+ *
+ * The double tier is that closed form. The generic (AD) tier refines the AS241
+ * seed with two taped Newton steps on `Phi(z) = p` in `T`; the seed itself is
+ * off-tape, so those steps are what give the quantile its
+ * `dQ/dp = 1/pdf(Q)`.
  *
  * Edge cases: x <= 0 gives pdf = cdf = 0, logPdf = logCdf = -inf, ccdf = 1,
  * logCcdf = 0; x = +inf gives pdf = 0, cdf = 1, ccdf = 0, logPdf = logCcdf =
@@ -61,7 +65,8 @@
  * Two-tier dispatch (the Normal.h pattern): `T = double` accessors call the
  * named `detail::lognormal*Double` kernels, which forward to the shared
  * templated kernels explicitly instantiated for double; other scalars run the
- * generic kernel path. `inv` keeps its double-seeded solve.
+ * generic kernel path. `inv` keeps its double solve and adds the AD Newton
+ * steps.
  */
 namespace quantape::math {
 using ::quantape::util::kInvSqrt2;
@@ -453,18 +458,47 @@ struct Lognormal {
         return detail::lognormalInvGradHess(mu, sigma, p);
     }
 
-    /// Quantile exp(mu + sigma * inverseNormal(p)); seed-limited to ~1.15e-9
-    /// relative (Acklam), p <= 0 -> 0, p >= 1 -> +inf.
+    /**
+     * @brief Quantile `exp(mu + sigma * inverseNormal(p))`.
+     *
+     * The double tier is the closed form with the AS241 quantile
+     * (`Random/InverseNormal.h`, ~1e-15 relative); `p <= 0 -> 0`,
+     * `p >= 1 -> +inf`. The generic (AD) tier starts from the same AS241
+     * value and performs two taped Newton steps on `Phi(z) = p` in `T`, which
+     * is what puts `p` on the tape: `dQ/dp = 1/pdf(Q) = exp(mu+sigma z) *
+     * sigma / phi(z)`. The seed goes through `detail::scalarValue`, so the
+     * method instantiates for every scalar type. A non-finite/degenerate step
+     * (e.g. the erfc-based `Phi(z)` underflowing below the double range) ends
+     * the refinement, leaving the AS241 value.
+     */
     T inv(T p) const {
         using std::exp;
-        const double z = inverseNormal(static_cast<double>(p));
+        const double z = inverseNormal(detail::scalarValue(p));
         if (z >= 1e10) {
             return std::numeric_limits<T>::infinity();
         }
         if (z <= -1e10) {
             return T(0.0);
         }
-        return exp(mu + sigma * T(z));
+        T zs = T(z);
+        if constexpr (!std::is_same_v<T, double>) {
+            for (int it = 0; it < 2; ++it) {
+                const T phi = exp(-T(0.5) * zs * zs) / T(kSqrt2Pi.hi);
+                const T cdf = detail::lognormalPhi(zs);
+                if (!(phi > T(0))) {
+                    break;
+                }
+                const T step = (cdf - p) / phi;
+                const T next = zs - step;
+                if (!(detail::scalarValue(step) == detail::scalarValue(step)) ||
+                    !(detail::scalarValue(next) == detail::scalarValue(next)) ||
+                    std::isinf(detail::scalarValue(next))) {
+                    break;
+                }
+                zs = next;
+            }
+        }
+        return exp(mu + sigma * zs);
     }
 };
 

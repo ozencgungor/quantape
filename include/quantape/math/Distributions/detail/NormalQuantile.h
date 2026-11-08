@@ -11,8 +11,17 @@
  * rational is fed a well-conditioned argument in the far upper tail.
  *
  * Accuracy ~1e-15 in the central region, degrading gracefully toward the
- * tails; `normalInvDouble` clamps the representable boundary cases to
- * +/-infinity and propagates NaN.
+ * tails. The lower-tail rational is fitted in `r = sqrt(-log p)` from 5 up to
+ * ~27.5, which covers every positive double: the smallest subnormal has
+ * `r = sqrt(-log 5e-324) = 27.28`. `normalInvDouble` therefore evaluates the
+ * finite quantile for every representable `0 < p < 1`, including the whole
+ * subnormal range (e.g. `-38.4674` at `p = 5e-324` and `-37.6725` at
+ * `p = 7e-311`, each to ~1 ulp); only the degenerate `p = 0` / `p = 1`
+ * endpoints map to `-/+infinity`, and NaN propagates.
+ *
+ * `scalarValue` is the matching off-tape view used by the quantile solvers:
+ * the double solve runs on these values and the caller's final Newton step in
+ * the scalar type re-introduces the taping.
  *
  * Shared by `Normal<T>` (portfolio quantile) and `Random/InverseNormal.h`
  * (path-generation transform). std-only, no allocation.
@@ -20,6 +29,7 @@
 
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 namespace quantape::math {
 namespace detail {
@@ -93,6 +103,26 @@ inline double as241(double p) {
     return q < 0.0 ? -val : val;
 }
 
+/**
+ * @brief Double value of a scalar: identity for floating point, `.val()` for
+ * AD scalars, `.value` for the `SecondOrderJet` kernels.
+ *
+ * This is the off-tape view used as the seed of the quantile solvers (the
+ * double solve must not see the tape); the caller then performs its final
+ * Newton steps in the original scalar type so the gradient flows. Defining it
+ * once here keeps every distribution header taped through the same helper.
+ */
+template <class T>
+inline double scalarValue(const T& x) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return static_cast<double>(x);
+    } else if constexpr (requires { x.val(); }) {
+        return scalarValue(x.val());
+    } else {
+        return static_cast<double>(x.value);
+    }
+}
+
 /// standard normal quantile (double); boundaries -> +/-inf, invalid -> NaN.
 inline double normalInvDouble(double p) {
     if (std::isnan(p)) {
@@ -101,7 +131,7 @@ inline double normalInvDouble(double p) {
     if (p < 0.0 || p > 1.0) {
         return std::numeric_limits<double>::quiet_NaN();
     }
-    if (p == 0.0 || p < 8e-311) {
+    if (p == 0.0) {
         return -std::numeric_limits<double>::infinity();
     }
     if (p == 1.0) {

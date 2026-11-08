@@ -35,11 +35,18 @@ namespace quantape::math {
  *
  * `inv(p)` solves the upper tail `ccdf(y) = p` for `p <= 1/2` by safeguarded
  * Newton in `v = log y` (the tail elasticity `y pdf/ccdf -> nu`, so the step
- * is well scaled for all `nu`), seeded by the normal quantile widened by
+ * is well scaled for all `nu`), seeded by the AS241 normal quantile widened by
  * `sqrt(nu/(nu-2))` for `nu > 2`, then mirrors for `p > 1/2`. Relative
  * accuracy is ~1e-12 in the interior; for `nu` very large (>= ~1e5) the
  * `incBeta` argument `1 - z` loses a few digits, leaving ~1e-10 relative in
  * the extreme tails, and quantiles beyond the double range return `+-Inf`.
+ *
+ * The double tier is that solve. The generic (AD) tier runs it off-tape on the
+ * `detail::scalarValue` views (so the method instantiates for every scalar
+ * type) and then performs a final Newton step
+ * `x <- x - (cdf(x) - p)/pdf(x)` in `T`, so `p` enters the tape and the adjoint
+ * is `dQ/dp = 1/pdf(Q)`. The x-space step also covers `p = 1/2` (x = 0),
+ * where the log-space variable degenerates.
  *
  * Accuracy note: `lgamma((nu+1)/2) - lgamma(nu/2)` cancels for very large
  * `nu`, giving ~1e-9 relative pdf error around `nu ~ 1e6`; the cdf is
@@ -409,7 +416,9 @@ inline constexpr int kStudentTBracketSteps = 2000;
  * slope `y pdf/ccdf` is bounded by `~nu` in the power-law tail; a candidate
  * outside the bracket or non-finite is replaced by the bisection midpoint.
  * Termination is a relative step below 1e-13 (estimated quantile relative
- * error ~1e-12).
+ * error ~1e-12). The seed uses the off-tape `detail::scalarValue(p)`, so the
+ * generic scalar path compiles for AD types; `StudentT::inv` then adds the
+ * taped Newton steps.
  */
 template <class T>
 T studentTInvLower(T nu, T p) {
@@ -419,7 +428,7 @@ T studentTInvLower(T nu, T p) {
     using std::sqrt;
     const T inf = std::numeric_limits<T>::infinity();
     const T logP = log(p);
-    T y = T(-inverseNormal(static_cast<double>(p)));
+    T y = T(-inverseNormal(detail::scalarValue(p)));
     if (nu > T(2)) {
         y *= sqrt(nu / (nu - T(2)));
     }
@@ -472,6 +481,34 @@ T studentTInvLower(T nu, T p) {
         }
     }
     return y;
+}
+
+/**
+ * @brief One taped Newton step on `cdf(x) = p`, in place.
+ *
+ * Called by the generic (non-double) `StudentT::inv` after the off-tape double
+ * solve. The step `(cdf(x) - p)/pdf(x)` is zero at the solution, so the value
+ * stays the double quantile while `dQ/dp = 1/pdf(Q)` enters the tape through
+ * `p`. Unlike the power-law log-space iteration of `studentTInvLower` this is
+ * the plain x-space step, which also covers `p = 1/2` (x = 0, where the
+ * log-space variable is degenerate). A single step suffices because the seed
+ * is the converged double quantile: `1/pdf(x_seed)` is within ~1e-12 of
+ * `1/pdf(Q)`. A second step is deliberately not taken: the generic
+ * `studentTCdf` derivative at exactly `x = 0` degenerates (its `t = w/(1+w)`
+ * form squares `x`), which would double the adjoint at `p = 1/2`. A NaN step
+ * or a non-finite candidate ends the refinement.
+ */
+template <class T>
+inline void studentTRefine(T nu, T p, T& x) {
+    using std::exp;
+    const T step = (studentTCdf(nu, x) - p) / exp(studentTLogPdf(nu, x));
+    const T next = x - step;
+    if (!(detail::scalarValue(step) == detail::scalarValue(step)) ||
+        !(detail::scalarValue(next) == detail::scalarValue(next)) ||
+        std::isinf(detail::scalarValue(next))) {
+        return;
+    }
+    x = next;
 }
 
 /// t quantile at double: the exact `StudentT<double>::inv` body (same tail
@@ -635,13 +672,22 @@ T StudentT<T>::inv(T p) const {
     if (p >= T(1)) {
         return inf;
     }
-    if (p == T(0.5)) {
-        return T(0);
+    if constexpr (std::is_same_v<T, double>) {
+        if (p == T(0.5)) {
+            return T(0);
+        }
+        if (p > T(0.5)) {
+            return detail::studentTInvLower(nu, T(1) - p);
+        }
+        return -detail::studentTInvLower(nu, p);
+    } else {
+        // Generic scalar: solve off-tape in double, then the taped Newton
+        // step in `T`. This also covers p = 1/2 (x = 0), where the log-space
+        // variable is degenerate.
+        T x = T(detail::studentTInvDouble(detail::scalarValue(nu), detail::scalarValue(p)));
+        detail::studentTRefine(nu, p, x);
+        return x;
     }
-    if (p > T(0.5)) {
-        return detail::studentTInvLower(nu, T(1) - p);
-    }
-    return -detail::studentTInvLower(nu, p);
 }
 
 template <class T>

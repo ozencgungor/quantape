@@ -21,9 +21,11 @@ namespace quantape::math {
  * scalar-generic `T` handling are exactly those documented in Gamma.h;
  * `ChiSquare<double>` dispatches every method to the named
  * `detail::chiSquare*Double` entry (the Gamma double tier at `df/2`, rate
- * `1/2`), other scalars use the generic `Gamma<T>` path. The double-only
- * derivative packs `detail::chiSquarePdfD1D2` / `detail::chiSquareCdfD1D2`
- * are the Gamma packs at the same parameters.
+ * `1/2`), other scalars use the generic `Gamma<T>` path -- including `inv`'s
+ * double solve followed by the taped final Newton steps (adjoint
+ * `dQ/dp = 1/pdf(Q)`). The double-only derivative packs
+ * `detail::chiSquarePdfD1D2` / `detail::chiSquareCdfD1D2` are the Gamma packs
+ * at the same parameters.
  */
 namespace detail {
 

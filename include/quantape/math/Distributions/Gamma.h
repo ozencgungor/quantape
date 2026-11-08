@@ -40,6 +40,12 @@ namespace quantape::math {
  *     remove (e.g. at `1 - p = 5e-10` for shape 2.5/rate 1.3 the result is
  *     only good to ~1e-9 relative).
  *
+ * That safeguarded solve is the `T = double` tier. The generic (AD) tier runs
+ * the same double solve on the off-tape `detail::scalarValue` views and then
+ * performs two final Newton steps `x <- x - (cdf(x) - p) / pdf(x)` in `T`.
+ * Those steps are a no-op in exact arithmetic; they are what put `p` on the
+ * tape, so the adjoint is `dQ/dp = 1/pdf(Q)`.
+ *
  * Every accessor is `const` and scalar-generic over `T` (double, AD scalars).
  * `Gamma<double>`/`InverseGamma<double>` dispatch each method to its named
  * `detail::...Double` entry (the canonical double tier, built on the named
@@ -253,6 +259,10 @@ T invGammaLogCcdfT(T shape, T scale, T x) {
 }
 
 /// Gamma(shape, rate) quantile, generic scalar (see `Gamma::inv`).
+///
+/// `T = double`: the full safeguarded double solve. Other scalars: the same
+/// solve on the off-tape values, then two Newton steps in `T` that seed the
+/// tape through `p` (adjoint `1/pdf(Q)`, see the file comment).
 template <class T>
 T gammaInvT(T shape, T rate, T p) {
     using std::exp;
@@ -273,60 +283,78 @@ T gammaInvT(T shape, T rate, T p) {
         return detail::positiveInfinity<T>();
     }
 
-    const T a = shape;
-    const T r = rate;
-    const double z = inverseNormal(detail::scalarValue(p));
-    const T w = T(1) - T(1) / (T(9) * a) + T(z) / (T(3) * sqrt(a));
-    T x = w * w * w / r;
-    if (!(x > T(0)) || detail::isPositiveInfinity(x)) {
-        // Small-p surrogate: P(a, x) ~ (rate x)^a / Gamma(a + 1).
-        x = exp((log(p) + lgamma(a + T(1))) / a) / r;
-    }
-    if (!(x > T(0))) {
-        x = (a / r) * T(1e-12);
-    }
+    if constexpr (std::is_same_v<T, double>) {
+        const T a = shape;
+        const T r = rate;
+        const double z = inverseNormal(detail::scalarValue(p));
+        const T w = T(1) - T(1) / (T(9) * a) + T(z) / (T(3) * sqrt(a));
+        T x = w * w * w / r;
+        if (!(x > T(0)) || detail::isPositiveInfinity(x)) {
+            // Small-p surrogate: P(a, x) ~ (rate x)^a / Gamma(a + 1).
+            x = exp((log(p) + lgamma(a + T(1))) / a) / r;
+        }
+        if (!(x > T(0))) {
+            x = (a / r) * T(1e-12);
+        }
 
-    T lo = T(0);
-    T hi = x;
-    T cdfHi = gammaCdfT(shape, rate, hi);
-    for (int expand = 0; cdfHi < p && expand < 200; ++expand) {
-        lo = hi;
-        hi = hi * T(2);
-        cdfHi = gammaCdfT(shape, rate, hi);
-    }
+        T lo = T(0);
+        T hi = x;
+        T cdfHi = gammaCdfT(shape, rate, hi);
+        for (int expand = 0; cdfHi < p && expand < 200; ++expand) {
+            lo = hi;
+            hi = hi * T(2);
+            cdfHi = gammaCdfT(shape, rate, hi);
+        }
 
-    bool converged = false;
-    for (int it = 0; it < 30; ++it) {
-        const T cdfX = gammaCdfT(shape, rate, x);
-        if (cdfX < p) {
-            lo = x;
-        } else {
-            hi = x;
-        }
-        const T step = (cdfX - p) / gammaPdfT(shape, rate, x);
-        const T next = x - step;
-        if (fabs(step) <= T(1e-13) * (x > T(1) ? x : T(1))) {
-            x = next;
-            converged = true;
-            break;
-        }
-        if (!(next > lo && next < hi)) {
-            break;
-        }
-        x = next;
-    }
-    if (!converged) {
-        for (int it = 0; it < 60; ++it) {
-            const T mid = lo + (hi - lo) / T(2);
-            if (gammaCdfT(shape, rate, mid) < p) {
-                lo = mid;
+        bool converged = false;
+        for (int it = 0; it < 30; ++it) {
+            const T cdfX = gammaCdfT(shape, rate, x);
+            if (cdfX < p) {
+                lo = x;
             } else {
-                hi = mid;
+                hi = x;
             }
+            const T step = (cdfX - p) / gammaPdfT(shape, rate, x);
+            const T next = x - step;
+            if (fabs(step) <= T(1e-13) * (x > T(1) ? x : T(1))) {
+                x = next;
+                converged = true;
+                break;
+            }
+            if (!(next > lo && next < hi)) {
+                break;
+            }
+            x = next;
         }
-        x = lo + (hi - lo) / T(2);
+        if (!converged) {
+            for (int it = 0; it < 60; ++it) {
+                const T mid = lo + (hi - lo) / T(2);
+                if (gammaCdfT(shape, rate, mid) < p) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            x = lo + (hi - lo) / T(2);
+        }
+        return x;
+    } else {
+        // Generic scalar: converge off-tape in double, then two taped Newton
+        // steps. The step is a no-op in exact arithmetic, so the value stays
+        // the double quantile while the adjoint becomes 1/pdf(Q).
+        T x = T(gammaInvT<double>(detail::scalarValue(shape), detail::scalarValue(rate),
+                                  detail::scalarValue(p)));
+        for (int it = 0; it < 2; ++it) {
+            const T step = (gammaCdfT(shape, rate, x) - p) / gammaPdfT(shape, rate, x);
+            const T next = x - step;
+            if (!(detail::scalarValue(step) == detail::scalarValue(step)) || !(next > T(0)) ||
+                detail::isPositiveInfinity(next)) {
+                break;
+            }
+            x = next;
+        }
+        return x;
     }
-    return x;
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +761,8 @@ struct Gamma {
      *
      * Wilson-Hilferty seed then safeguarded Newton (`p <= 0 -> 0`,
      * `p >= 1 -> +Inf`, NaN propagates). See the file comment for the
-     * interior accuracy target and the documented tail limitations.
+     * interior accuracy target and the documented tail limitations, and for
+     * the AD path (double solve off-tape + taped final Newton steps).
      */
     T inv(T p) const {
         if constexpr (std::is_same_v<T, double>) {

@@ -2482,3 +2482,29 @@ TEST_F(DistributionAdTest, noncentralChiSquarePdfNodeCounts) {
         RecordProperty("fvar_nccs_logpdf_nodes", static_cast<int>(nodes));
     }
 }
+
+// The AD quantile must agree with the double one and carry 1/phi(z) as its
+// adjoint. Horner starts at the highest coefficient and the denominators are
+// 1 + r*P(r), so the two paths share one rational form.
+TEST(NormalStan, adQuantileMatchesDoubleAndItsAdjoint) {
+    using stan::math::var;
+    const quantape::math::Normal<double> reference{0.0, 1.0};
+    for (double p : {1e-6, 0.01, 0.05, 0.1, 0.25, 0.3, 0.5, 0.6, 0.75, 0.9, 0.99, 1.0 - 1e-6}) {
+        SCOPED_TRACE(::testing::Message() << "p=" << p);
+        var probability(p);
+        var q = quantape::math::Normal<var>{0.0, 1.0}.inv(probability);
+        q.grad();
+        const double expected = reference.inv(p);
+        // Same AS241 formula through `T` arithmetic: agree to a few ulp, not
+        // necessarily bitwise (the old ascending-Horner bug was off by 8x).
+        // The double path switches to a 2e9-complement for p >= 0.9999, which
+        // is itself ~1e-9 relative looser there; 1e-9 relative still catches
+        // the old ascending-Horner bug (which was off by 8x).
+        CHECK_CLOSE("AD quantile vs double", q.val(), expected,
+                    1e-9 * std::max(1.0, std::fabs(expected)));
+        // dQ/dp = 1 / phi(Q); phi(z) = exp(-z^2/2)/sqrt(2 pi).
+        const double phi = std::exp(-0.5 * expected * expected) / std::sqrt(2.0 * M_PI);
+        CHECK_CLOSE("dQ/dp", probability.adj(), 1.0 / phi, 1e-9 * std::max(1.0, 1.0 / phi));
+        stan::math::recover_memory();
+    }
+}

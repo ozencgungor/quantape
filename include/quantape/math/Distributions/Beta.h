@@ -29,12 +29,20 @@ namespace quantape::math {
  *
  * `inv(p)` returns the `p`-quantile: for `p > 1/2` it is mirrored to the
  * small tail, `inv(p;a,b) = 1 - inv(1-p;b,a)`, and the lower-tail solve is
- * safeguarded Newton in `log x` seeded from `inverseNormal`. Relative
- * accuracy is ~1e-12 for `p` in the interior; near the edges the achieved
- * accuracy is limited by the double representation of `x` (for `p < 1e-12`
- * or `p > 1 - 1e-12` the quantile construction degrades gracefully: the
- * returned value is the representable endpoint/nearest value rather than
- * NaN, and quantiles below the double range underflow to 0 or round to 1).
+ * safeguarded Newton in `log x` seeded from the AS241 inverse normal.
+ * Relative accuracy is ~1e-12 for `p` in the interior; near the edges the
+ * achieved accuracy is limited by the double representation of `x` (for
+ * `p < 1e-12` or `p > 1 - 1e-12` the quantile construction degrades
+ * gracefully: the returned value is the representable endpoint/nearest value
+ * rather than NaN, and quantiles below the double range underflow to 0 or
+ * round to 1).
+ *
+ * The double tier is that solve. The generic (AD) tier runs the same solve
+ * off-tape on `detail::scalarValue` views (so the method instantiates for
+ * every scalar type) and then performs two final Newton steps in `T` on
+ * `log I_x(a,b) = log p`, in the small-tail variable so the mirror keeps
+ * working. Those steps are a no-op in exact arithmetic; they are what put `p`
+ * on the tape, so the adjoint is `dQ/dp = 1/pdf(Q)`.
  *
  * Edges and invalid input: `pdf = 0` (`logPdf = -inf`) outside `[0,1]`;
  * singular edges (`a<1` at `x=0`, `b<1` at `x=1`) give `+inf`; `a <= 0` or
@@ -77,7 +85,9 @@ namespace detail {
  * the bracket (or overflowing) is replaced by the bisection midpoint.
  * Termination is a relative step below 1e-13 (estimated quantile relative
  * error ~1e-12+; the `p > 1/2` mirror in `Beta::inv` keeps the solved tail
- * the small one, and the seed never needs to be accurate).
+ * the small one, and the seed never needs to be accurate). The seed uses the
+ * off-tape `detail::scalarValue(p)`, so the generic scalar path compiles for
+ * AD types; `Beta::inv` then adds the taped Newton steps.
  */
 template <class T>
 T betaInvLower(T a, T b, T p) {
@@ -89,7 +99,7 @@ T betaInvLower(T a, T b, T p) {
     const T ab = a + b;
     const T mu = a / ab;
     const T var = a * b / (ab * ab * (ab + T(1)));
-    T x = mu + sqrt(var) * T(inverseNormal(static_cast<double>(p)));
+    T x = mu + sqrt(var) * T(inverseNormal(detail::scalarValue(p)));
     if (!(x > T(0)) || !(x < T(1))) {
         x = mu;
     }
@@ -121,6 +131,39 @@ T betaInvLower(T a, T b, T p) {
         }
     }
     return x;
+}
+
+/**
+ * @brief Two taped Newton steps on `log I_x(a,b) = log p`, in place.
+ *
+ * Called by the generic (non-double) `Beta::inv` after the off-tape double
+ * solve. The step is `dv = -(log I_x - log p) / (x pdf / cdf)` in `v = log x`
+ * (the same formulation as `betaInvLower`, whose elasticity stays O(1) in the
+ * power-law tails); at the solution `dv = 0`, so the value is unchanged to
+ * roundoff while `d x/dp = 1/pdf(x)` becomes visible on the tape. A step that
+ * leaves `(0,1)` or is NaN ends the refinement, leaving the double quantile.
+ */
+template <class T>
+inline void betaRefineLower(T a, T b, T p, T& x) {
+    using std::exp;
+    using std::log;
+    const T logP = log(p);
+    for (int it = 0; it < 2; ++it) {
+        const T lc = incBetaLog(a, b, x);
+        const T slope = exp(log(x) + betaLogPdf(a, b, x) - lc);
+        if (!(slope > T(0))) {
+            break;
+        }
+        const T dv = -(lc - logP) / slope;
+        if (!(dv == dv)) {
+            break;
+        }
+        const T next = x * exp(dv);
+        if (!(next > T(0)) || !(next < T(1))) {
+            break;
+        }
+        x = next;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,10 +358,27 @@ T Beta<T>::inv(T p) const {
     if (p >= T(1)) {
         return T(1);
     }
-    if (p > T(0.5)) {
-        return T(1) - detail::betaInvLower(beta, alpha, T(1) - p);
+    if constexpr (std::is_same_v<T, double>) {
+        if (p > T(0.5)) {
+            return T(1) - detail::betaInvLower(beta, alpha, T(1) - p);
+        }
+        return detail::betaInvLower(alpha, beta, p);
+    } else {
+        // Generic scalar: solve off-tape in double (small tail), then two
+        // taped Newton steps. The `p > 1/2` branch keeps the same mirror, so
+        // the solve always runs on the small `I_x` tail.
+        const double pd = detail::scalarValue(p);
+        if (pd > 0.5) {
+            const T q = T(1) - p;
+            T y = T(detail::betaInvDouble(detail::scalarValue(beta), detail::scalarValue(alpha),
+                                          detail::scalarValue(q)));
+            detail::betaRefineLower(beta, alpha, q, y);
+            return T(1) - y;
+        }
+        T x = T(detail::betaInvDouble(detail::scalarValue(alpha), detail::scalarValue(beta), pd));
+        detail::betaRefineLower(alpha, beta, p, x);
+        return x;
     }
-    return detail::betaInvLower(alpha, beta, p);
 }
 
 template <class T>

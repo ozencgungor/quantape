@@ -20,6 +20,7 @@ quantape_add_gtest(qta_test_distributions
 
 quantape_add_gtest(qta_test_distributions_ad
     SOURCES test_normal_stan.cpp
+            test_quantile_ad.cpp
     STAN
     LABELS unit numerics ad slow
     TIMEOUT 900)

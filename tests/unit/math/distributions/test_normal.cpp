@@ -125,3 +125,24 @@ TEST(NormalDistribution, derivativePacksMatchFiniteDifferences) {
                     (n.cdf(x + h2) - 2.0 * n.cdf(x) + n.cdf(x - h2)) / (h2 * h2), 1e-6);
     }
 }
+
+// ---------------------------------------------------------------------------
+// The AS241 lower-tail rational is fitted in r = sqrt(-log p) up to ~27.5, so
+// the quantile is finite for every representable 0 < p < 1, including the
+// subnormal range (the smallest subnormal has r = 27.28). References: Boost
+// `quantile(normal_distribution<cpp_bin_float_100>{0,1}, p)`.
+// ---------------------------------------------------------------------------
+
+TEST(NormalDistribution, quantileResolvesSubnormalLowerTail) {
+    using quantape::math::detail::normalInvDouble;
+    CHECK_CLOSE_REL("inv(5e-324)", normalInvDouble(5e-324), -38.4674056171443462508, 1e-14);
+    CHECK_CLOSE_REL("inv(7e-311)", normalInvDouble(7e-311), -37.6725226359137007645, 1e-14);
+    CHECK_CLOSE_REL("inv(1e-310)", normalInvDouble(1e-310), -37.6630603319495237319, 1e-14);
+    CHECK_CLOSE_REL("inv(1e-300)", normalInvDouble(1e-300), -37.0470962993611992, 1e-14);
+    // Only the degenerate endpoints are infinite; NaN and out-of-range inputs
+    // propagate NaN.
+    EXPECT_TRUE(std::isinf(normalInvDouble(0.0)) && normalInvDouble(0.0) < 0.0);
+    EXPECT_TRUE(std::isinf(normalInvDouble(1.0)) && normalInvDouble(1.0) > 0.0);
+    EXPECT_TRUE(std::isnan(normalInvDouble(-1e-300)));
+    EXPECT_TRUE(std::isnan(normalInvDouble(std::nextafter(1.0, 2.0))));
+}
