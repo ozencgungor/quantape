@@ -237,6 +237,14 @@ public:
     const std::vector<Entry>& entries() const { return m_entries; }
 
     /// 64-bit uniform bits with the configured shift.
+    ///
+    /// ORDERING: this returns the point at the *natural* (binary) index `point`
+    /// -- it XORs the direction words for the set bits of `point` -- whereas the
+    /// Joe-Kuo reference (`sobol.cc`) and `tools/verify_sobol` enumerate in
+    /// Gray-code order, i.e. `ours[p] == ref[invgray(p)]`. For a power-of-two
+    /// number of points the two enumerations cover the *same set*, so QMC
+    /// estimates over a full block are identical; only prefixes and the index
+    /// meaning differ. Keep this in mind when comparing against external tools.
     std::uint64_t uniformBits(std::uint64_t point, std::uint32_t dim) const {
         return uniformBits(point, dim, m_options.shiftSeed);
     }
@@ -317,8 +325,20 @@ private:
         }
         m_use32 = (wordBytes == 4);
         const std::uint8_t* words = data + detail::kBinaryHeader;
-        m_ext32 = m_use32 ? reinterpret_cast<const std::uint32_t*>(words) : nullptr;
-        m_ext64 = m_use32 ? nullptr : reinterpret_cast<const std::uint64_t*>(words);
+        // The 20-byte header leaves the word array 4-byte aligned, which suits
+        // 32-bit words but not 64-bit ones: interpreting it as `uint64_t*` would
+        // be a misaligned load. That case is copied into an aligned buffer once;
+        // a 32-bit table keeps reading the mapping directly.
+        if (!m_use32 && reinterpret_cast<std::uintptr_t>(words) % alignof(std::uint64_t) != 0) {
+            const std::size_t wordCount = static_cast<std::size_t>(dims) * m_assetBits;
+            m_alignedWords.resize(wordCount);
+            std::memcpy(m_alignedWords.data(), words, wordCount * sizeof(std::uint64_t));
+            m_ext64 = m_alignedWords.data();
+            m_ext32 = nullptr;
+        } else {
+            m_ext32 = m_use32 ? reinterpret_cast<const std::uint32_t*>(words) : nullptr;
+            m_ext64 = m_use32 ? nullptr : reinterpret_cast<const std::uint64_t*>(words);
+        }
         buildFirstWords();
         buildShifts();
     }
@@ -488,6 +508,7 @@ private:
     std::uint32_t m_preparedDimension = 1;
     std::uint32_t m_assetBits = 0;
     bool m_use32 = true;
+    std::vector<std::uint64_t> m_alignedWords; ///< only for a misaligned 64-bit asset
     const std::uint32_t* m_ext32 = nullptr;
     const std::uint64_t* m_ext64 = nullptr;
     std::vector<std::uint32_t> m_words32;
