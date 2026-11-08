@@ -24,8 +24,11 @@
 #include "quantape/math/Optimization/SLSQP.h"
 #include "quantape/math/Optimization/TNewton.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <random>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -314,6 +317,239 @@ double dot(const std::vector<double>& a, const std::vector<double>& b) {
     }
     return sum;
 }
+
+// ── QP solver reference helpers (dense, double-only) ──────────────────────
+
+double qpObjectiveValue(const quantape::math::QpProblem& qp, const std::vector<double>& d) {
+    const std::size_t n = qp.dimension();
+    double f = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        f += qp.g[i] * d[i];
+        for (std::size_t j = 0; j < n; ++j) {
+            f += 0.5 * qp.B[i * n + j] * d[i] * d[j];
+        }
+    }
+    return f;
+}
+
+double qpMaxAbsValue(const std::vector<double>& v) {
+    double m = 0.0;
+    for (double x : v) {
+        m = std::max(m, std::fabs(x));
+    }
+    return m;
+}
+
+/// Primal feasibility with the solver's per-row relative scale:
+///   r_i <= tol (1 + |b_i| + sum_j |A_ij| |d_j|)
+bool qpFeasibleAt(const quantape::math::QpProblem& qp, const std::vector<double>& d, double tol) {
+    const std::size_t n = qp.dimension();
+    const std::size_t m = qp.rows();
+    for (std::size_t i = 0; i < m; ++i) {
+        double r = qp.b[i];
+        double scale = 1.0 + std::fabs(qp.b[i]);
+        for (std::size_t j = 0; j < n; ++j) {
+            r += qp.A[i * n + j] * d[j];
+            scale += std::fabs(qp.A[i * n + j]) * std::fabs(d[j]);
+        }
+        if (qp.equality[i] ? std::fabs(r) > tol * scale : r > tol * scale) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Reference optimum by enumerating every subset of inequality rows.  Rows
+/// linearly dependent on the selected set are dropped before the KKT solve
+/// (the feasibility gate still checks every original row, so an inconsistent
+/// dependency rejects the candidate).  Returns false when no KKT point exists,
+/// i.e. when the QP is infeasible.
+bool qpBruteForce(const quantape::math::QpProblem& qp, std::vector<double>& best_d) {
+    const std::size_t n = qp.dimension();
+    const std::size_t m = qp.rows();
+    std::vector<std::size_t> inequalities;
+    for (std::size_t i = 0; i < m; ++i) {
+        if (!qp.equality[i]) {
+            inequalities.push_back(i);
+        }
+    }
+    best_d.clear();
+    double best_f = 0.0;
+    const std::size_t combinations = std::size_t{1} << inequalities.size();
+    for (std::size_t mask = 0; mask < combinations; ++mask) {
+        std::vector<std::size_t> active;
+        for (std::size_t i = 0; i < m; ++i) {
+            if (qp.equality[i]) {
+                active.push_back(i);
+            }
+        }
+        for (std::size_t b = 0; b < inequalities.size(); ++b) {
+            if ((mask & (std::size_t{1} << b)) != 0) {
+                active.push_back(inequalities[b]);
+            }
+        }
+        // Greedy independent reduction (modified Gram-Schmidt, one re-pass).
+        std::vector<std::vector<double>> orthonormal;
+        std::vector<std::size_t> kept;
+        for (std::size_t row_index : active) {
+            std::vector<double> v(qp.A.begin() + static_cast<std::ptrdiff_t>(row_index * n),
+                                  qp.A.begin() + static_cast<std::ptrdiff_t>((row_index + 1) * n));
+            double norm2 = 0.0;
+            for (double x : v) {
+                norm2 += x * x;
+            }
+            if (!(norm2 > 0.0)) {
+                continue;
+            }
+            for (int pass = 0; pass < 2; ++pass) {
+                for (const auto& q : orthonormal) {
+                    double coefficient = 0.0;
+                    for (std::size_t j = 0; j < n; ++j) {
+                        coefficient += q[j] * v[j];
+                    }
+                    for (std::size_t j = 0; j < n; ++j) {
+                        v[j] -= coefficient * q[j];
+                    }
+                }
+            }
+            double remaining = 0.0;
+            for (double x : v) {
+                remaining += x * x;
+            }
+            if (remaining <= 1e-20 * norm2) {
+                continue;
+            }
+            const double norm = std::sqrt(remaining);
+            for (double& x : v) {
+                x /= norm;
+            }
+            orthonormal.push_back(std::move(v));
+            kept.push_back(row_index);
+        }
+
+        const std::size_t k = kept.size();
+        const std::size_t dim = n + k;
+        std::vector<double> matrix(dim * dim, 0.0);
+        std::vector<double> rhs(dim, 0.0);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < n; ++j) {
+                matrix[i * dim + j] = qp.B[i * n + j];
+            }
+            rhs[i] = -qp.g[i];
+        }
+        for (std::size_t w = 0; w < k; ++w) {
+            const std::size_t row_index = kept[w];
+            for (std::size_t j = 0; j < n; ++j) {
+                const double a = qp.A[row_index * n + j];
+                matrix[(n + w) * dim + j] = a;
+                matrix[j * dim + (n + w)] = a;
+            }
+            rhs[n + w] = -qp.b[row_index];
+        }
+        if (!quantape::math::detail::solveDenseInPlace(matrix, rhs, dim)) {
+            continue;
+        }
+        const std::vector<double> d(rhs.begin(), rhs.begin() + static_cast<std::ptrdiff_t>(n));
+        const std::vector<double> lambda(rhs.begin() + static_cast<std::ptrdiff_t>(n), rhs.end());
+        if (!qpFeasibleAt(qp, d, 1e-8)) {
+            continue;
+        }
+        bool dual_feasible = true;
+        for (std::size_t w = 0; w < k; ++w) {
+            if (!qp.equality[kept[w]] && lambda[w] < -1e-7 * (1.0 + qpMaxAbsValue(lambda))) {
+                dual_feasible = false;
+            }
+        }
+        if (!dual_feasible) {
+            continue;
+        }
+        std::vector<double> stationarity = qp.g;
+        double max_bd = 0.0;
+        double max_atl = 0.0;
+        for (std::size_t j = 0; j < n; ++j) {
+            for (std::size_t i = 0; i < n; ++i) {
+                const double term = qp.B[j * n + i] * d[i];
+                stationarity[j] += term;
+                max_bd = std::max(max_bd, std::fabs(term));
+            }
+        }
+        for (std::size_t w = 0; w < k; ++w) {
+            if (lambda[w] == 0.0) {
+                continue;
+            }
+            for (std::size_t j = 0; j < n; ++j) {
+                const double term = lambda[w] * qp.A[kept[w] * n + j];
+                stationarity[j] += term;
+                max_atl = std::max(max_atl, std::fabs(term));
+            }
+        }
+        const double scale = 1.0 + qpMaxAbsValue(qp.g) + max_bd + max_atl;
+        if (qpMaxAbsValue(stationarity) > 1e-7 * scale) {
+            continue;
+        }
+        const double f = qpObjectiveValue(qp, d);
+        if (best_d.empty() || f < best_f) {
+            best_f = f;
+            best_d = d;
+        }
+    }
+    return !best_d.empty();
+}
+
+/// Deterministic pseudo-random stream for the differential QP tests.
+struct QpRandom {
+    std::mt19937_64 gen;
+    explicit QpRandom(std::uint64_t seed) : gen(seed) {}
+    double uniform(double lo, double hi) {
+        return std::uniform_real_distribution<double>(lo, hi)(gen);
+    }
+    int integer(int lo, int hi) { return std::uniform_int_distribution<int>(lo, hi)(gen); }
+};
+
+/// Well-scaled random QP: B = M M' + diag (SPD), ~1/4 equality rows.
+quantape::math::QpProblem makeRandomQp(QpRandom& rng, int n, int m) {
+    quantape::math::QpProblem qp;
+    qp.g.resize(static_cast<std::size_t>(n));
+    qp.B.assign(static_cast<std::size_t>(n * n), 0.0);
+    qp.A.assign(static_cast<std::size_t>(m * n), 0.0);
+    qp.b.resize(static_cast<std::size_t>(m));
+    qp.equality.assign(static_cast<std::size_t>(m), 0);
+    std::vector<double> factor(static_cast<std::size_t>(n * n));
+    for (double& x : factor) {
+        x = rng.uniform(-1.0, 1.0);
+    }
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            double sum = 0.0;
+            for (int k = 0; k < n; ++k) {
+                sum += factor[static_cast<std::size_t>(i * n + k)] *
+                       factor[static_cast<std::size_t>(j * n + k)];
+            }
+            qp.B[static_cast<std::size_t>(i * n + j)] = sum;
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        qp.B[static_cast<std::size_t>(i * n + i)] += rng.uniform(0.05, 1.0);
+        qp.g[static_cast<std::size_t>(i)] = rng.uniform(-3.0, 3.0);
+    }
+    for (int i = 0; i < m; ++i) {
+        for (int j = 0; j < n; ++j) {
+            qp.A[static_cast<std::size_t>(i * n + j)] = rng.uniform(-2.0, 2.0);
+        }
+        qp.b[static_cast<std::size_t>(i)] = rng.uniform(-2.0, 2.0);
+        qp.equality[static_cast<std::size_t>(i)] = rng.integer(0, 3) == 0 ? 1 : 0;
+    }
+    return qp;
+}
+
+/// Three lower bounds on x0, all violated at x0 = 0; the binding one is 2.0358.
+struct ThreeLowerBoundsValueJac {
+    void operator()(const std::vector<double>& x, std::vector<double>& c,
+                    std::vector<double>& J) const {
+        c = {2.0358 - x[0], 2.0358 - 1.7 * x[0], 2.0358 - 1.3 * x[0]};
+        J = {-1.0, -1.7, -1.3};
+    }
+};
 
 } // namespace
 
@@ -1113,5 +1349,168 @@ TEST_F(OptimizerBaseTest, scalarBackendsExitPathsAndEmptyVectorRejected) {
         SteepestDescent<var> optimizer;
         std::vector<double> empty;
         EXPECT_THROW(optimizer.minimize(q, empty), std::invalid_argument);
+    }
+}
+
+// ── QP solver regressions: infeasible starts, phase-I and KKT gates ───────
+//
+// The previous active-set implementation seeded its working set with every
+// constraint violated at d = 0.  That made the initial KKT system singular
+// whenever more than n constraints were violated, and the "dependent row"
+// recovery could drop a violated row for good, so the solver could return
+// success with a primal-infeasible point.  These cases pin the two-phase
+// redesign (LP phase I + feasible-start active set + explicit KKT gate).
+
+TEST(QpSolverTest, oneDimensionalViolatedStartReturnsFeasibleOptimum) {
+    quantape::math::QpProblem qp;
+    qp.g = {0.5935};
+    qp.B = {0.5888};
+    qp.A = {0.0794, 0.4366};
+    qp.b = {0.8543, 0.9473};
+    qp.equality = {0, 0};
+
+    const auto result = quantape::math::solveActiveSetQp(qp);
+    ASSERT_TRUE(result.success);
+
+    // True optimum: row 0 binds, d = -b0 / A0 (the old solver returned
+    // d = -2.1697 with row-0 residual +0.682).
+    const double expected_d = -0.8543 / 0.0794;
+    CHECK_CLOSE_REL("1-D violated-start primal", result.d[0], expected_d, 1e-8);
+    const double expected_lambda0 = -(0.5888 * expected_d + 0.5935) / 0.0794;
+    CHECK_CLOSE_REL("1-D violated-start multiplier", result.lambda[0], expected_lambda0, 1e-7);
+    CHECK_CLOSE("1-D violated-start inactive multiplier", result.lambda[1], 0.0, 1e-14);
+    EXPECT_TRUE(qpFeasibleAt(qp, result.d, 1e-9));
+    CHECK_CLOSE("1-D violated-start stationarity",
+                result.d[0] * qp.B[0] + qp.g[0] + result.lambda[0] * qp.A[0], 0.0, 1e-10);
+}
+
+TEST(QpSolverTest, conflictingConstraintsReportFailure) {
+    // d <= 0 and -d + 1 <= 0 (i.e. d >= 1): no primal-feasible point.
+    quantape::math::QpProblem qp;
+    qp.g = {0.0};
+    qp.B = {1.0};
+    qp.A = {1.0, -1.0};
+    qp.b = {0.0, 1.0};
+    qp.equality = {0, 0};
+    const auto result = quantape::math::solveActiveSetQp(qp);
+    EXPECT_TRUE(!result.success);
+}
+
+TEST(QpSolverTest, redundantRowsAndEqualitiesStayRegular) {
+    // x + y = 1 enforced twice (consistent dependent equalities) plus the
+    // implied inequality x + y <= 2.  The KKT systems are singular unless the
+    // working set keeps a maximal independent subset.
+    quantape::math::QpProblem qp;
+    qp.g = {-2.0, -2.0};
+    qp.B = {1.0, 0.0, 0.0, 1.0};
+    qp.A = {1.0, 1.0, 2.0, 2.0, 1.0, 1.0};
+    qp.b = {-1.0, -2.0, -2.0};
+    qp.equality = {1, 1, 0};
+    const auto result = quantape::math::solveActiveSetQp(qp);
+    ASSERT_TRUE(result.success);
+    CHECK_CLOSE_REL("redundant equality d0", result.d[0], 0.5, 1e-9);
+    CHECK_CLOSE_REL("redundant equality d1", result.d[1], 0.5, 1e-9);
+}
+
+TEST(QpSolverTest, randomizedDifferentialAgainstActiveSetEnumeration) {
+    QpRandom rng(0x5eed1234u);
+    int feasible_cases = 0;
+    int infeasible_cases = 0;
+    constexpr int kCases = 3000;
+    for (int c = 0; c < kCases; ++c) {
+        const int n = rng.integer(1, 3);
+        const int m = rng.integer(0, 6);
+        const quantape::math::QpProblem qp = makeRandomQp(rng, n, m);
+        const auto result = quantape::math::solveActiveSetQp(qp);
+        std::vector<double> reference;
+        const bool reference_feasible = qpBruteForce(qp, reference);
+        SCOPED_TRACE(::testing::Message()
+                     << "random QP case " << c << " (n=" << n << ", m=" << m << ")");
+        if (!reference_feasible) {
+            ++infeasible_cases;
+            EXPECT_TRUE(!result.success);
+            continue;
+        }
+        ++feasible_cases;
+        if (!result.success) {
+            EXPECT_TRUE(result.success);
+            continue;
+        }
+        EXPECT_TRUE(qpFeasibleAt(qp, result.d, 1e-7));
+        for (std::size_t j = 0; j < result.d.size(); ++j) {
+            CHECK_CLOSE_REL("random QP primal component", result.d[j], reference[j], 1e-6, 1e-9);
+        }
+        CHECK_CLOSE_REL("random QP objective", qpObjectiveValue(qp, result.d),
+                        qpObjectiveValue(qp, reference), 1e-7, 1e-9);
+    }
+    // Both branches must be exercised materially, otherwise the test proves
+    // little about the phase-I infeasibility detection.
+    EXPECT_GT(feasible_cases, 500);
+    EXPECT_GT(infeasible_cases, 500);
+}
+
+TEST(QpSolverTest, rowOrderPermutationInvariance) {
+    QpRandom rng(0xabcdef01u);
+    int solved_cases = 0;
+    constexpr int kCases = 1000;
+    for (int c = 0; c < kCases; ++c) {
+        const int n = rng.integer(1, 3);
+        const int m = rng.integer(1, 6);
+        const quantape::math::QpProblem qp = makeRandomQp(rng, n, m);
+        std::vector<std::size_t> order(static_cast<std::size_t>(m));
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            order[i] = i;
+        }
+        std::shuffle(order.begin(), order.end(), rng.gen);
+        quantape::math::QpProblem permuted;
+        permuted.g = qp.g;
+        permuted.B = qp.B;
+        permuted.A.assign(qp.A.size(), 0.0);
+        permuted.b.resize(static_cast<std::size_t>(m));
+        permuted.equality.assign(static_cast<std::size_t>(m), 0);
+        for (int i = 0; i < m; ++i) {
+            const std::size_t source = order[static_cast<std::size_t>(i)];
+            for (int j = 0; j < n; ++j) {
+                permuted.A[static_cast<std::size_t>(i * n + j)] = qp.A[static_cast<std::size_t>(
+                    source * static_cast<std::size_t>(n) + static_cast<std::size_t>(j))];
+            }
+            permuted.b[static_cast<std::size_t>(i)] = qp.b[source];
+            permuted.equality[static_cast<std::size_t>(i)] = qp.equality[source];
+        }
+
+        const auto base = quantape::math::solveActiveSetQp(qp);
+        const auto shuffled = quantape::math::solveActiveSetQp(permuted);
+        SCOPED_TRACE(::testing::Message()
+                     << "permuted QP case " << c << " (n=" << n << ", m=" << m << ")");
+        ASSERT_EQ(base.success, shuffled.success);
+        if (!base.success) {
+            continue;
+        }
+        ++solved_cases;
+        for (std::size_t j = 0; j < base.d.size(); ++j) {
+            CHECK_CLOSE_REL("row-order permutation primal", shuffled.d[j], base.d[j], 1e-6, 1e-9);
+        }
+    }
+    EXPECT_GT(solved_cases, 400);
+}
+
+TEST(SlSqpQpRegressionTest, threeViolatedConstraintsAtStartBecomeFeasible) {
+    // n = 1 with three constraints all violated at x0 = 0, feasible set
+    // x0 >= 2.0358.  The old QP recovery dropped at most one of the three
+    // dependent violated rows and the subproblem was declared infeasible
+    // (OptimizeResult::Infeasible, 0 iterations).
+    quantape::math::StopCriteria criteria;
+    criteria.maxeval = 5000;
+    quantape::math::SLSQP<double> solver(criteria);
+    std::vector<double> x{0.0};
+    quantape::math::OptimizerState state;
+    const auto result = solver.minimize(ShiftTargetValueGrad{{0.0}}, ThreeLowerBoundsValueJac{},
+                                        quantape::math::Bounds::unbounded(1), x, state);
+    EXPECT_TRUE(result == quantape::math::OptimizeResult::Success);
+    CHECK_CLOSE_REL("SLSQP three violated constraints x0", x[0], 2.0358, 1e-7);
+    EXPECT_TRUE(state.iterations > 0);
+    EXPECT_TRUE(state.ineq_multipliers.size() == 3);
+    for (double mu : state.ineq_multipliers) {
+        EXPECT_TRUE(mu >= -1e-8);
     }
 }
