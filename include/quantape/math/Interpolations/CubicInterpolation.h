@@ -362,6 +362,50 @@ private:
         return lhs - rhs;
     }
 
+    /// Local cubic-Hermite monotonicity clamp for the Akima tie fallback.
+    ///
+    /// A segment with secant s is monotone when both end slopes lie in
+    /// [0, 3s] (reversed for s < 0), so a node slope shared by two adjacent
+    /// segments must satisfy the tighter of the two bounds. When the tie
+    /// fallback fires, the averaged secant can exceed that bound and make the
+    /// interpolant leave the data range (e.g. y = {0,0,0,10,20} dips below
+    /// zero on [1,2]). Clamp only this fallback: whenever the Akima weights
+    /// are well-defined the standard formula is left bit-identical.
+    ///
+    /// A sign change between the adjacent secants marks a local extremum, for
+    /// which the two segments impose opposite one-sided bounds; the standard
+    /// averaged fallback is already near zero there, so it is left alone.
+    /// A flat neighbour (zero secant) forces the node slope to zero, which the
+    /// min-based bound below does automatically.
+    template <typename T>
+    static T monotoneTieFallback(const T& candidate, const T& leftSecant, const T& rightSecant) {
+        const double left = primalOf(leftSecant);
+        const double right = primalOf(rightSecant);
+        const bool nonnegative = left >= 0.0 && right >= 0.0;
+        const bool nonpositive = left <= 0.0 && right <= 0.0;
+        if (!nonnegative && !nonpositive) {
+            return candidate;
+        }
+        const double bound = 3.0 * std::min(std::abs(left), std::abs(right));
+        const double value = primalOf(candidate);
+        if (nonnegative) {
+            if (value < 0.0) {
+                return T(0.0);
+            }
+            if (value > bound) {
+                return T(bound);
+            }
+        } else {
+            if (value > 0.0) {
+                return T(0.0);
+            }
+            if (value < -bound) {
+                return T(-bound);
+            }
+        }
+        return candidate;
+    }
+
     // ── Derivative approximation schemes (static, scalar-generic) ──
     // All five run for double, DoubleT (coefficient path), and ProbeDual
     // (branch-pinned linearization). Branch conditions always use primalOf.
@@ -412,9 +456,16 @@ private:
         std::vector<T> rhs(n);
 
         for (size_t i = 1; i < n - 1; ++i) {
-            lower[i - 1] = dx[i - 1];
+            // C^2 at interior node i. Matching the Hermite second derivatives
+            // across the knot gives
+            //   h_i*d_{i-1} + 2(h_i + h_{i-1})*d_i + h_{i-1}*d_{i+1}
+            //     = 3(h_{i-1}*S_i + h_i*S_{i-1}).
+            // The off-diagonals are therefore crossed relative to the
+            // second-derivative (M-form) system: d_{i-1} carries the RIGHT
+            // interval width and d_{i+1} the LEFT one.
+            lower[i - 1] = dx[i];
             diag[i] = 2.0 * (dx[i - 1] + dx[i]);
-            upper[i] = dx[i];
+            upper[i] = dx[i - 1];
             rhs[i] = 3.0 * (dx[i] * S[i - 1] + dx[i - 1] * S[i]);
         }
 
@@ -468,6 +519,17 @@ private:
         // secants, which keeps the primal value and the AD adjoint finite.
         // All branch decisions read the primal only, so the AD paths stay
         // primal-pinned for var and fvar<var>.
+        //
+        // QuantLib/scipy use the unclamped average as the tie fallback; that
+        // can violate the cubic-Hermite monotonicity bound 0 <= d_i <= 3 s_i
+        // and carry the interpolant outside the data range. Here the fallback
+        // is clamped to that local bound at interior nodes
+        // (monotoneTieFallback), which guarantees the monotone bound on the
+        // adjacent segments. The branching is only reachable through the
+        // tie/near-tie path: the code's secantGap() snaps gaps within 64 eps
+        // to zero, so near-ties on real curve data follow the same rule.
+        // Every well-separated weight path keeps the standard formula, so
+        // standard Akima values are bit-identical to the reference formula.
         std::vector<T> deriv(n);
 
         {
@@ -478,6 +540,8 @@ private:
             T w1 = weightAbs(secantGap(s1, s0), smooth);
             T w2 = weightAbs(secantGap(sLeft, sLeftLeft), smooth);
             if (primalOf(w1 + w2) == 0.0) {
+                // Endpoint: only segment 0 touches d_0, so the standard end
+                // stencil is kept (the clamp above needs two adjacent secants).
                 deriv[0] = (sLeft + s0) / 2.0;
             } else {
                 deriv[0] = (w1 * sLeft + w2 * s0) / (w1 + w2);
@@ -485,7 +549,7 @@ private:
             w1 = weightAbs(secantGap(S[2], s1), smooth);
             w2 = weightAbs(secantGap(s0, sLeft), smooth);
             if (primalOf(w1 + w2) == 0.0) {
-                deriv[1] = (s0 + s1) / 2.0;
+                deriv[1] = monotoneTieFallback((s0 + s1) / 2.0, s0, s1);
             } else {
                 deriv[1] = (w1 * s0 + w2 * s1) / (w1 + w2);
             }
@@ -495,7 +559,7 @@ private:
             T w1 = weightAbs(secantGap(S[i + 1], S[i]), smooth);
             T w2 = weightAbs(secantGap(S[i - 1], S[i - 2]), smooth);
             if (primalOf(w1 + w2) == 0.0) {
-                deriv[i] = (S[i - 1] + S[i]) / 2.0;
+                deriv[i] = monotoneTieFallback((S[i - 1] + S[i]) / 2.0, S[i - 1], S[i]);
             } else {
                 deriv[i] = (w1 * S[i - 1] + w2 * S[i]) / (w1 + w2);
             }
@@ -509,13 +573,14 @@ private:
             T w1 = weightAbs(secantGap(sRight, sLast), smooth);
             T w2 = weightAbs(secantGap(sPrev, S[n - 4]), smooth);
             if (primalOf(w1 + w2) == 0.0) {
-                deriv[n - 2] = (sPrev + sLast) / 2.0;
+                deriv[n - 2] = monotoneTieFallback((sPrev + sLast) / 2.0, sPrev, sLast);
             } else {
                 deriv[n - 2] = (w1 * sPrev + w2 * sLast) / (w1 + w2);
             }
             w1 = weightAbs(secantGap(sRightRight, sRight), smooth);
             w2 = weightAbs(secantGap(sLast, sPrev), smooth);
             if (primalOf(w1 + w2) == 0.0) {
+                // Endpoint: only segment n-2 touches d_{n-1}.
                 deriv[n - 1] = (sLast + sRight) / 2.0;
             } else {
                 deriv[n - 1] = (w1 * sLast + w2 * sRight) / (w1 + w2);

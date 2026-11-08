@@ -200,10 +200,11 @@ TEST_F(AdFinancialTest, discountCurvePvSensitivities) {
     CHECK_CLOSE("present value", present_value.val(), 94.0, 1e-12);
 
     stan::math::grad(present_value.vi_);
-    // Recorded from the legacy run; the weights sum to 1 (PV = 100 * sum w_i DF_i).
-    const double expected_sensitivities[] = {2.608695652173913, -33.91304347826087,
-                                             86.84782608695653, 53.26086956521739,
-                                             -8.80434782608696, 0.0};
+    // These are the natural-spline cardinal weights at t = 1.5, scaled by the
+    // cash flow: PV = 100 * sum w_i DF_i, so the weights sum to 100 and the
+    // adjoints are exactly these values.
+    const double expected_sensitivities[] = {5.301455301455,  -31.808731808732, 80.093555093555,
+                                             54.599792099792, -8.770790020790,  0.584719334719};
     for (size_t i = 0; i < discount_factors.size(); ++i) {
         CHECK_CLOSE("PV sensitivity to curve knot", discount_factors[i].adj(),
                     expected_sensitivities[i], 1e-12);

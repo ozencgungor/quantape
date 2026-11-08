@@ -59,7 +59,8 @@ public:
     /// Interpolated value (abscissa passive).
     DoubleT valueImpl(DoubleT x) const { return valueAt(toDouble(x)); }
 
-    /// First derivative (abscissa passive). Flat beyond the last node.
+    /// First derivative (abscissa passive). Beyond the last node the last
+    /// segment's formula is evaluated (it is not clamped flat).
     DoubleT derivativeImpl(DoubleT x) const { return derivativeAt(toDouble(x)); }
 
     /// Second derivative (the tension-spline `M(t)`); for diagnostics.
@@ -86,6 +87,14 @@ private:
         }
     }
 
+    /// Below this `sigma*h` the tension form loses its digits to cancellation
+    /// in `1/(sigma^2 sinh p)` against `-M/sigma^2`; the cubic form -- the
+    /// sigma -> 0 limit -- is evaluated instead.
+    static constexpr double kSmallP = 1e-3;
+    /// Above this `sigma*h` the sigma -> infinity (linear) limit is evaluated;
+    /// beyond it `sinh` overflows near 710 and the tension terms are negligible.
+    static constexpr double kLargeP = 200.0;
+
     static double safeRatio(double numerator, double denominator) {
         return denominator == 0.0 ? 0.0 : numerator / denominator;
     }
@@ -102,11 +111,15 @@ private:
             m_h[j] = h;
             const double p = m_sigma * h;
             const double sinhP = std::sinh(p);
-            if (p < 1e-6) {
-                // Series expansions keep the small-tension limit stable.
-                m_alpha[j] = -(1.0 / 6.0 - 7.0 * p * p / 360.0);
-                m_beta[j] = 1.0 / 3.0 - p * p / 45.0;
-                m_a[j] = h * (1.0 / 6.0 - 7.0 * p * p / 360.0);
+            if (p < kSmallP) {
+                // Series expansions of (1/p^2)(p/sinh p - 1) and
+                // (1/p^2)(p/tanh p - 1). The exact forms lose about
+                // log10(1/p^2) digits to cancellation, so the switch has to sit
+                // well above 1e-6: at p = 1e-6 they were already ~12 digits
+                // worse than the series.
+                m_alpha[j] = -(1.0 / 6.0 - 7.0 * p * p / 360.0 + 31.0 * p * p * p * p / 15120.0);
+                m_beta[j] = 1.0 / 3.0 - p * p / 45.0 + 2.0 * p * p * p * p / 945.0;
+                m_a[j] = h * (1.0 / 6.0 - 7.0 * p * p / 360.0 + 31.0 * p * p * p * p / 15120.0);
             } else {
                 m_alpha[j] = (1.0 / (p * p)) * (p / sinhP - 1.0);
                 m_beta[j] = (1.0 / (p * p)) * (p / std::tanh(p) - 1.0);
@@ -145,6 +158,44 @@ private:
                       (m_a[last] / m_h[last]) * m_m[last];
     }
 
+    /// The sigma -> 0 limit: the cubic through the same node second
+    /// derivatives (i.e. the natural cubic spline). Evaluated instead of the
+    /// tension form when `sigma*h` is tiny, where `1/(sigma^2 sinh p)` and
+    /// `-M/sigma^2` cancel catastrophically.
+    DoubleT cubicAt(std::size_t j, double x) const {
+        const double h = m_h[j];
+        const double right = this->m_x[j + 1] - x;
+        const double left = x - this->m_x[j];
+        return m_m[j] * (right * right * right) / (6.0 * h) +
+               m_m[j + 1] * (left * left * left) / (6.0 * h) +
+               (this->m_y[j] - m_m[j] * h * h / 6.0) * (right / h) +
+               (this->m_y[j + 1] - m_m[j + 1] * h * h / 6.0) * (left / h);
+    }
+
+    DoubleT cubicDerivativeAt(std::size_t j, double x) const {
+        const double h = m_h[j];
+        const double right = this->m_x[j + 1] - x;
+        const double left = x - this->m_x[j];
+        return -m_m[j] * (right * right) / (2.0 * h) + m_m[j + 1] * (left * left) / (2.0 * h) -
+               (this->m_y[j] - m_m[j] * h * h / 6.0) / h +
+               (this->m_y[j + 1] - m_m[j + 1] * h * h / 6.0) / h;
+    }
+
+    DoubleT cubicSecondDerivativeAt(std::size_t j, double x) const {
+        const double h = m_h[j];
+        return m_m[j] * (this->m_x[j + 1] - x) / h + m_m[j + 1] * (x - this->m_x[j]) / h;
+    }
+
+    /// The sigma -> infinity limit is the piecewise linear interpolant. Used
+    /// above `sigma*h = kLargeP`, where `sinh` overflows and the tension form
+    /// silently degenerates anyway.
+    DoubleT linearAt(std::size_t j, double x) const {
+        const double h = m_h[j];
+        return this->m_y[j] + (this->m_y[j + 1] - this->m_y[j]) * (x - this->m_x[j]) / h;
+    }
+
+    DoubleT linearSlope(std::size_t j) const { return (this->m_y[j + 1] - this->m_y[j]) / m_h[j]; }
+
     std::size_t segment(double x) const {
         const std::size_t n = this->m_x.size();
         if (!std::isfinite(x)) {
@@ -165,6 +216,12 @@ private:
         const std::size_t j = segment(x);
         const double h = m_h[j];
         const double p = m_sigma * h;
+        if (p < kSmallP) {
+            return cubicAt(j, x);
+        }
+        if (p > kLargeP) {
+            return linearAt(j, x);
+        }
         const double sinhP = std::sinh(p);
         const double xLeft = this->m_x[j];
         const double xRight = this->m_x[j + 1];
@@ -181,6 +238,12 @@ private:
         const std::size_t j = segment(x);
         const double h = m_h[j];
         const double p = m_sigma * h;
+        if (p < kSmallP) {
+            return cubicDerivativeAt(j, x);
+        }
+        if (p > kLargeP) {
+            return linearSlope(j);
+        }
         const double sinhP = std::sinh(p);
         const double xLeft = this->m_x[j];
         const double xRight = this->m_x[j + 1];
@@ -197,6 +260,12 @@ private:
         const std::size_t j = segment(x);
         const double h = m_h[j];
         const double p = m_sigma * h;
+        if (p < kSmallP) {
+            return cubicSecondDerivativeAt(j, x);
+        }
+        if (p > kLargeP) {
+            return DoubleT(0);
+        }
         const double sinhP = std::sinh(p);
         const double right = this->m_x[j + 1] - x;
         const double left = x - this->m_x[j];
