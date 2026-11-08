@@ -15,8 +15,13 @@ namespace quantape::math {
  *
  *   x_new = x_max - f(x_max) * (x_max - x_min) / (f(x_max) - f(x_min))
  *
- * More efficient than bisection but can be slow if one endpoint becomes "stuck".
- * Superlinear convergence in practice.
+ * Plain regula falsi can stall with one endpoint stuck forever (for convex or
+ * concave objectives), so this implementation uses the Illinois modification:
+ * when the same bracket end is retained on two consecutive steps, its function
+ * value is halved. That pulls the next interpolant towards the interior and
+ * restores superlinear convergence without giving up the bracket. Convergence
+ * is judged on the bracket width (the documented accuracy = bracket width),
+ * with an exact zero as the only value-based exit.
  *
  * @tparam DoubleT Numeric type (double or stan::math::var)
  */
@@ -30,6 +35,10 @@ public:
     template <typename F>
     DoubleT solveImpl(const F& f, double accuracy, SolverState<DoubleT>& s) const {
         DoubleT froot;
+        // Which bracket end the last step retained: 0 = none yet, -1 = xMin,
+        // +1 = xMax. The second consecutive retention halves that end's value
+        // (Illinois), which cures one-sided stagnation.
+        int retained = 0;
 
         // Main iteration loop
         while (s.evaluations <= s.maxEvaluations) {
@@ -45,22 +54,29 @@ public:
             froot = f(s.root);
             ++s.evaluations;
 
-            // Check for convergence
-            if (Base::isZero(froot, s.fScale)) {
+            // Exact zeros are roots; a merely small |f| is not (it would
+            // override the bracket-width accuracy contract).
+            if (Base::value(froot) == 0.0) {
                 return s.root;
             }
 
-            // Update brackets
-            if (Base::oppositeSigns(froot, s.fxMax)) {
-                // Root is between root and xMax
-                s.xMin = s.xMax;
-                s.fxMin = s.fxMax;
+            // Update brackets, keeping xMin < xMax and the root bracketed.
+            if (Base::oppositeSigns(froot, s.fxMin)) {
+                // Root is between xMin and root: replace xMax, xMin retained.
                 s.xMax = s.root;
                 s.fxMax = froot;
+                if (retained == -1) {
+                    s.fxMin = s.fxMin / DoubleT(2.0);
+                }
+                retained = -1;
             } else {
-                // Root is between xMin and root
-                s.xMax = s.root;
-                s.fxMax = froot;
+                // Root is between root and xMax: replace xMin, xMax retained.
+                s.xMin = s.root;
+                s.fxMin = froot;
+                if (retained == 1) {
+                    s.fxMax = s.fxMax / DoubleT(2.0);
+                }
+                retained = 1;
             }
 
             // Check if interval is small enough

@@ -72,8 +72,11 @@ public:
                         0.5 * accuracy);
             const DoubleT xm = (c - b) / DoubleT(2.0);
 
-            if (std::fabs(Base::value(xm)) <= Base::value(tol1) || Base::value(fb) == 0.0 ||
-                Base::isZero(fb, s.fScale)) {
+            // The bracket-width test is authoritative; the only value-based
+            // exit is an exact zero. A small |f| alone is not a root to the
+            // requested accuracy: it can sit in a curved/flat region far from
+            // the root (and the old fScale threshold was absolute below |f|=1).
+            if (std::fabs(Base::value(xm)) <= Base::value(tol1) || Base::value(fb) == 0.0) {
                 return b;
             }
 

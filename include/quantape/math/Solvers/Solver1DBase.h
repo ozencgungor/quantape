@@ -110,16 +110,21 @@ public:
         s.maxEvaluations = m_maxEvaluations;
 
         s.fxMin = f(s.xMin);
-        if (isZero(s.fxMin, s.fScale)) {
+        // An exact zero at a bound is the root: return it outright. This is
+        // the only value-based exit; every other convergence decision is made
+        // on the x axis (bracket width / step size), so a small |f| in a steep
+        // or curved region can never shorten the accuracy contract. In
+        // particular a merely tiny residual (e.g. f(x) = 1e-15 (x - x0) over
+        // [0, 1], where every |f| is below the old absolute ~9.3e-15 floor)
+        // is not a root.
+        if (quantape::math::detail::primalValue(s.fxMin) == 0.0) {
             return s.xMin;
         }
         s.fxMax = f(s.xMax);
-        if (isZero(s.fxMax, s.fScale)) {
+        s.evaluations = 2;
+        if (quantape::math::detail::primalValue(s.fxMax) == 0.0) {
             return s.xMax;
         }
-        s.evaluations = 2;
-        s.fScale = std::max(1.0, std::max(std::fabs(quantape::math::detail::primalValue(s.fxMin)),
-                                          std::fabs(quantape::math::detail::primalValue(s.fxMax))));
 
         if (!oppositeSigns(s.fxMin, s.fxMax)) {
             throw std::runtime_error("root not bracketed");
@@ -130,6 +135,7 @@ public:
                 quantape::math::detail::primalValue(s.xMax)) {
             throw std::invalid_argument("guess must be strictly between xMin and xMax");
         }
+
         s.root = guess;
 
         // Call derived class implementation
@@ -155,7 +161,7 @@ public:
 
         s.root = guess;
         s.fxMax = f(s.root);
-        if (isZero(s.fxMax, s.fScale)) {
+        if (quantape::math::detail::primalValue(s.fxMax) == 0.0) {
             return s.root;
         } else if (quantape::math::detail::primalValue(s.fxMax) > 0.0) {
             s.xMin = enforceBounds(s.root - step);
@@ -170,13 +176,14 @@ public:
         s.evaluations = 2;
 
         while (s.evaluations <= s.maxEvaluations) {
-            s.fScale =
-                std::max(1.0, std::max(std::fabs(quantape::math::detail::primalValue(s.fxMin)),
-                                       std::fabs(quantape::math::detail::primalValue(s.fxMax))));
-            if (isZero(s.fxMin, s.fScale)) {
+            // Exact zeros at the widened endpoints are roots; anything else
+            // keeps widening until the bracket straddles the root. The value
+            // pass then re-enters solve() with a proper bracket, where
+            // convergence is judged on the x axis.
+            if (quantape::math::detail::primalValue(s.fxMin) == 0.0) {
                 return s.xMin;
             }
-            if (isZero(s.fxMax, s.fScale)) {
+            if (quantape::math::detail::primalValue(s.fxMax) == 0.0) {
                 return s.xMax;
             }
             if (oppositeSigns(s.fxMin, s.fxMax)) {
@@ -241,14 +248,6 @@ public:
 protected:
     /// Primal value of a scalar (recursive for `fvar<var>`)
     static double value(const DoubleT& x) { return quantape::math::detail::primalValue(x); }
-
-    static bool isZero(const DoubleT& x, double scale) {
-        return quantape::math::detail::isZero(value(x), scale);
-    }
-
-    static bool close(const DoubleT& x, const DoubleT& y) {
-        return quantape::math::detail::close(value(x), value(y));
-    }
 
     static bool oppositeSigns(const DoubleT& a, const DoubleT& b) {
         return quantape::math::detail::oppositeSigns(value(a), value(b));

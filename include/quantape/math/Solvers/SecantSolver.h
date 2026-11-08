@@ -56,7 +56,10 @@ public:
             froot = f(s.root);
             ++s.evaluations;
 
-            if (std::fabs(Base::value(dx)) < accuracy || Base::isZero(froot, s.fScale)) {
+            // The step-size criterion (|dx| <= accuracy) is itself the
+            // residual scaled by the local secant slope, so it is the accuracy
+            // contract. Only an exact zero is an additional exit.
+            if (std::fabs(Base::value(dx)) < accuracy || Base::value(froot) == 0.0) {
                 return s.root;
             }
         }

@@ -69,7 +69,9 @@ public:
             froot = f(s.root);
             ++s.evaluations;
 
-            if (Base::isZero(froot, s.fScale)) {
+            // Only an exact zero short-circuits the x-accuracy tests above:
+            // a tiny residual elsewhere is not a root to `accuracy`.
+            if (Base::value(froot) == 0.0) {
                 return s.root;
             }
 

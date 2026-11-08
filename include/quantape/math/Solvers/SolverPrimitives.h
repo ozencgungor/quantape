@@ -72,7 +72,6 @@ struct SolverState {
     DoubleT fxMax{};             ///< Objective at xMax
     std::size_t evaluations = 0; ///< Function evaluations so far
     std::size_t maxEvaluations = 100;
-    double fScale = 1.0; ///< Typical |f| over the bracket, for |f| ~ 0 tests
 };
 
 /**
@@ -125,7 +124,9 @@ inline bool close(double x, double y) {
     return std::fabs(x - y) <= 42.0 * std::numeric_limits<double>::epsilon() * scale;
 }
 
-/// |x| ~ 0 against a reference magnitude (typically SolverState::fScale).
+/// |x| ~ 0 against a reference magnitude (with an absolute floor of 1.0).
+/// Used by the Newton derivative guard; the 1-D solvers' convergence tests use
+/// exact zeros and the x-axis accuracy criteria, never an |f| scale.
 inline bool isZero(double x, double scale) {
     return std::fabs(x) <= 42.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, scale);
 }

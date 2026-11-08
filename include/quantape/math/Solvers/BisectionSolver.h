@@ -50,7 +50,13 @@ public:
                 s.root = xMid;
             }
 
-            if (std::fabs(Base::value(dx)) < accuracy || Base::isZero(fMid, s.fScale)) {
+            // The bracket-width criterion is authoritative. Only an exact
+            // zero short-circuits: a tiny residual in a steep/flat region says
+            // nothing about the distance to the root.
+            if (Base::value(fMid) == 0.0) {
+                return xMid;
+            }
+            if (std::fabs(Base::value(dx)) < accuracy) {
                 return s.root;
             }
         }
