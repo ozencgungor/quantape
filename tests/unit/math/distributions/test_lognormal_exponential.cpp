@@ -687,3 +687,12 @@ TEST(ExponentialDistribution, gradHessClosedFormsAndEdges) {
         EXPECT_TRUE(std::isnan(v));
     }
 }
+
+// The lognormal quantile is exp(mu + sigma * normalInv(p)); it is finite over
+// the whole subnormal range of p. Reference: Boost
+// `quantile(lognormal_distribution<cpp_bin_float_100>{0,1}, p)`.
+TEST(LognormalDistribution, invResolvesSubnormalTail) {
+    const quantape::math::Lognormal<double> d{0.0, 1.0};
+    CHECK_CLOSE_REL("inv(5e-324)", d.inv(5e-324), 1.96706181266275515367e-17, 1e-12);
+    CHECK_CLOSE_REL("inv(7e-311)", d.inv(7e-311), 4.35543262402098417728e-17, 1e-12);
+}

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -459,4 +460,16 @@ TEST(StudentTParameterDerivatives, edgeBehavior) {
     for (double v : {pdfUp.value, pdfUp.gNu, pdfUp.gx, pdfUp.hNuNu, pdfUp.hNux, pdfUp.hxx}) {
         CHECK_CLOSE("flat pdf +inf pack", v, 0.0, 0.0);
     }
+}
+
+// The t quantile is a power law, so it stays finite down to the smallest
+// subnormal p (the normal-quantile seed resolves that range). References:
+// Boost `quantile(students_t_distribution<cpp_bin_float_100>{5}, p)`.
+TEST(StudentTDistribution, invResolvesSubnormalTail) {
+    const StudentT<double> dist{5.0};
+    CHECK_CLOSE_REL("t5 inv(5e-324)", dist.inv(5e-324), -7.18948599151996756084e64, 1e-12);
+    CHECK_CLOSE_REL("t5 inv(7e-311)", dist.inv(7e-311), -1.68436095377787928605e62, 1e-12);
+    // The quantile reproduces the smallest positive double exactly.
+    const double pmin = std::numeric_limits<double>::denorm_min();
+    CHECK_CLOSE("t5 cdf(inv(denorm_min))", dist.cdf(dist.inv(pmin)), pmin, 0.0);
 }

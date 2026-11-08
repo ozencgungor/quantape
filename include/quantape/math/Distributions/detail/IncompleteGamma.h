@@ -1,6 +1,7 @@
 #ifndef QUANTAPE_MATH_DISTRIBUTIONS_DETAIL_INCOMPLETE_GAMMA_H
 #define QUANTAPE_MATH_DISTRIBUTIONS_DETAIL_INCOMPLETE_GAMMA_H
 
+#include "quantape/math/Distributions/detail/NormalQuantile.h"
 #include "quantape/math/Distributions/detail/SecondOrderJet.h"
 
 #include <cmath>
@@ -32,14 +33,30 @@ namespace detail {
  *     and route other scalars through the templates above.
  *
  * Algorithm (Numerical Recipes style): power series for `x < a + 1`,
- * modified-Lentz continued fraction for `x >= a + 1`, both normalized with
- * `lgamma(a)`. The series/CF iterate until the increment is ~1e-17 relative
- * (iteration cap 10000), well below the rounding of the prefactor. The
- * exponent `a log x - x - lgamma(a)` cancels terms of size
- * `max(x, a log x)`, so the relative accuracy is ~1e-15 for moderate shape and
- * degrades to ~1e-11 around `a ~ 1e4`; shape ~1e8 is the practical iteration
- * cap. All arithmetic is scalar-generic (`T`), so AD scalars instantiate the
- * same code path.
+ * modified-Lentz continued fraction for `x >= a + 1`, both normalized with the
+ * prefactor `x^a e^{-x} / Gamma(a)`. The series/CF iterate until the increment
+ * is ~1e-17 relative, well below the rounding of the prefactor.
+ *
+ * Large shape (`a >= kGammaLargeShape = 1e6`): the iteration budget and the
+ * prefactor both scale with the shape so the kernels stay accurate up to the
+ * documented cap ~1e8 and beyond.
+ *   * Both the power series and the Lentz CF need `O(sqrt(a))` terms near
+ *     `x ~ a` (the series term is ~`exp(-n^2 / (2a))`, so the 1e-17 test needs
+ *     `n ~ 8.9 sqrt(a)`). The budget is therefore `10000` for moderate shape
+ *     and `9 sqrt(a) + 100` above it (`gammaIterationCap`), which is ~9e4
+ *     terms at `a = 1e8`.
+ *   * The prefactor is evaluated in the Stirling form
+ *     `a log x - x - lgamma(a) = a (log(1+u) - u) + L(a)`, `u = (x - a)/a`,
+ *     `L(a) = 0.5 log(a / 2 pi) - 1/(12a) + ...` (`gammaLogPrefactor`). The
+ *     literal form cancels terms of size `|lgamma(a)|`, so its absolute
+ *     exponent error is `~eps |lgamma(a)|` (~4e-7 at a = 1e8, i.e. 4e-7
+ *     relative on the probability); the Stirling form is `O(log a)` and, with
+ *     `log1pMinusArg` for the small-`u` bracket, holds ~1e-13 relative
+ *     accuracy. Below the threshold the literal expression is evaluated
+ *     unchanged.
+ *   * The budget is hard-capped at 4e6 iterations. If it is exhausted (shape
+ *     beyond ~2e11) the kernels return NaN; they never return a truncated
+ *     sum.
  *
  * Special values: `x <= 0 -> P = 0, Q = 1`; `x = +inf -> P = 1, Q = 0`;
  * `a <= 0` or NaN input returns NaN. The log variants remain finite for
@@ -89,15 +106,98 @@ inline bool isPositiveInfinity(const T& x) {
     return x > T(0) && x - x != T(0);
 }
 
-/// Double value of a scalar: identity for floating point, `.val()`-recursive
-/// for AD types (used only for the double-precision inverse-normal seed).
-template <class T>
-inline double scalarValue(const T& x) {
-    if constexpr (std::is_floating_point_v<T>) {
-        return static_cast<double>(x);
-    } else {
-        return scalarValue(x.val());
+/// Shapes at or above this use the scaled iteration budget and the Stirling
+/// form of the log prefactor (see the file comment); below it the literal
+/// prefactor and the 10000-term budget apply.
+inline constexpr double kGammaLargeShape = 1.0e6;
+
+/// The fixed series/CF budget used for moderate shape.
+inline constexpr int kGammaBaseIterationCap = 10000;
+
+/// Iteration budget for the series/CF at shape `a`.
+///
+/// `kGammaBaseIterationCap` for `a <= kGammaLargeShape`, and `9 sqrt(a) + 100`
+/// above, which covers the 1e-17 term test at `x ~ a` (`n ~ 8.9 sqrt(a)`) up
+/// to the documented shape cap ~1e8 (~9e4 terms). Capped at `4e6` so a
+/// pathological shape fails deterministically (the callers return NaN) instead
+/// of running for minutes.
+inline int gammaIterationCap(double a) {
+    constexpr int kHardCap = 4000000;
+    if (!(a > kGammaLargeShape)) {
+        return kGammaBaseIterationCap;
     }
+    const double scaled = 9.0 * std::sqrt(a) + 100.0;
+    if (!(scaled < static_cast<double>(kHardCap))) {
+        return kHardCap;
+    }
+    const int cap = static_cast<int>(scaled);
+    return cap > kGammaBaseIterationCap ? cap : kGammaBaseIterationCap;
+}
+
+/**
+ * @brief `L(a) = a log a - a - lgamma(a)`, the Stirling remainder.
+ *
+ * Evaluated by its asymptotic series
+ * `0.5 log(a / 2 pi) - 1/(12a) + 1/(360a^3) - 1/(1260a^5) + 1/(1680a^7) - ...`,
+ * which is `O(log a)` and therefore free of the cancellation inherent in the
+ * literal `a log a - a - lgamma(a)` (absolute error `~eps |lgamma(a)|`). Used
+ * only for `a >= kGammaLargeShape`; at `a = 1e6` the first omitted term is
+ * `-691/(360360 a^11) ~ 2e-72`.
+ */
+template <class T>
+inline T gammaStirlingRemainder(T a) {
+    using std::log;
+    constexpr double k2Pi = 6.283185307179586476925286766559005768;
+    const T invA = T(1) / a;
+    const T invA2 = invA * invA;
+    return T(0.5) * log(a / T(k2Pi)) -
+           invA * (T(1.0 / 12.0) -
+                   invA2 * (T(1.0 / 360.0) - invA2 * (T(1.0 / 1260.0) - invA2 * T(1.0 / 1680.0))));
+}
+
+/**
+ * @brief `log(1 + u) - u`, evaluated by its Taylor series for `|u| <= 0.25`.
+ *
+ * The direct form cancels its `O(u)` leading term and leaves only roundoff of
+ * the bracket `O(u^2)`; the series `-u^2/2 + u^3/3 - u^4/4 + ...` (geometric at
+ * `|u| = 0.25`, 40 terms reach ~1e-25) has no such cancellation. Outside the
+ * small-`u` window the direct form is well conditioned and is used instead.
+ */
+template <class T>
+inline T log1pMinusArg(T u) {
+    using std::fabs;
+    using std::log1p;
+    if (!(fabs(u) <= T(0.25))) {
+        return log1p(u) - u;
+    }
+    const T u2 = u * u;
+    T power = u2;
+    T sum = -T(0.5) * u2;
+    for (int m = 3; m <= 40; ++m) {
+        power *= u;
+        sum += (m % 2 == 1 ? T(1) : T(-1)) * power / T(m);
+        if (fabs(power) <= fabs(sum) * T(1e-18)) {
+            break;
+        }
+    }
+    return sum;
+}
+
+/**
+ * @brief `a log x - x - lgamma(a)`, the series/CF log prefactor.
+ *
+ * Evaluated for `a >= kGammaLargeShape` only (the callers keep the literal
+ * expression below the threshold, bitwise). With `u = (x - a)/a` the Stirling
+ * remainder separates the `O(a)` cancellation:
+ *   `a log x - x - lgamma(a) = a (log(1 + u) - u) + L(a)`.
+ * For `x` within a factor of two of `a` the difference `x - a` is exact
+ * (Sterbenz) and `log1pMinusArg` keeps the bracket relative-accurate, so the
+ * exponent is good to ~1e-13 even when `|lgamma(a)| ~ 1e9`.
+ */
+template <class T>
+inline T gammaLogPrefactor(T a, T x) {
+    const T u = (x - a) / a;
+    return gammaStirlingRemainder(a) + a * log1pMinusArg(u);
 }
 
 /**
@@ -134,25 +234,37 @@ inline bool incrementConverged(const SecondOrderJet& u, const SecondOrderJet& v,
  * @brief `log P(a, x)` from the power series (valid for `0 < x < a + 1`).
  *
  * `P(a, x) = x^a e^{-x} / Gamma(a) * sum_n x^n / (a (a+1) ... (a+n))`, so the
- * log is taken term-wise: no intermediate underflow in the prefactor.
+ * log is taken term-wise: no intermediate underflow in the prefactor. The
+ * iteration budget scales with `sqrt(a)`; if it is exhausted (shape beyond the
+ * documented cap) the result is NaN rather than a truncated sum (see the file
+ * comment).
  */
 template <class T>
 inline T gammaSeriesLogP(T a, T x) {
     using std::fabs;
     using std::lgamma;
     using std::log;
+    const int cap = gammaIterationCap(scalarValue(a));
     T ap = a;
     T del = T(1) / a;
     T sum = del;
-    for (int n = 1; n <= 10000; ++n) {
+    bool converged = false;
+    for (int n = 1; n <= cap; ++n) {
         ap += T(1);
         del *= x / ap;
         sum += del;
         if (incrementConverged(del, sum, T(1e-17))) {
+            converged = true;
             break;
         }
     }
-    return log(sum) + a * log(x) - x - lgamma(a);
+    if (!converged && cap > kGammaBaseIterationCap) {
+        return nanValue<T>();
+    }
+    if (scalarValue(a) < kGammaLargeShape) {
+        return log(sum) + a * log(x) - x - lgamma(a);
+    }
+    return log(sum) + gammaLogPrefactor(a, x);
 }
 
 /**
@@ -162,7 +274,8 @@ inline T gammaSeriesLogP(T a, T x) {
  * the continued fraction times the same prefactor, so `Q` can underflow in
  * the caller but `log Q` stays finite. A non-positive converged numerator
  * cannot occur mathematically; if rounding drives it there the result is
- * -Inf (probability below double precision).
+ * -Inf (probability below double precision). The iteration budget scales with
+ * `sqrt(a)`; an exhausted budget (shape beyond the documented cap) returns NaN.
  */
 template <class T>
 inline T gammaContinuedFractionLogQ(T a, T x) {
@@ -170,11 +283,13 @@ inline T gammaContinuedFractionLogQ(T a, T x) {
     using std::lgamma;
     using std::log;
     const double tiny = 1e-300;
+    const int cap = gammaIterationCap(scalarValue(a));
     T b = x + T(1) - a;
     T c = T(1) / T(tiny);
     T d = T(1) / b;
     T h = d;
-    for (int i = 1; i <= 10000; ++i) {
+    bool converged = false;
+    for (int i = 1; i <= cap; ++i) {
         const T an = -T(i) * (T(i) - a);
         b += T(2);
         d = an * d + b;
@@ -189,13 +304,20 @@ inline T gammaContinuedFractionLogQ(T a, T x) {
         const T delta = d * c;
         h *= delta;
         if (incrementConverged(delta - T(1), T(1), T(1e-17))) {
+            converged = true;
             break;
         }
+    }
+    if (!converged && cap > kGammaBaseIterationCap) {
+        return nanValue<T>();
     }
     if (!(h > T(0))) {
         return negativeInfinity<T>();
     }
-    return log(h) + a * log(x) - x - lgamma(a);
+    if (scalarValue(a) < kGammaLargeShape) {
+        return log(h) + a * log(x) - x - lgamma(a);
+    }
+    return log(h) + gammaLogPrefactor(a, x);
 }
 
 /// `log P(a, x)`, finite in the deep lower tail; NaN for invalid `a`.

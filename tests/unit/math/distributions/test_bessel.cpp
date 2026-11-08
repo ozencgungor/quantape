@@ -235,3 +235,38 @@ TEST(BesselOrderDerivatives, edges) {
     CHECK_CLOSE("dK at z=inf", besselKNuDeriv(2.0, kInf), 0.0, 0.0);
     CHECK_CLOSE("ldK at z=inf", besselKNuLogDeriv(2.0, kInf), 0.0, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// Order derivatives share besselI's series/asymptotic switch
+// (`bessel_detail::useAsymptotic`: `z >= 15 + nu/2` AND `z >= nu^2/2`), so
+// value and order derivatives always use the same expansion. The points below
+// sit in the large-order corner where `z >= 15 + nu/2` holds but `z < nu^2/2`,
+// so both the value and its order derivatives come from the power series.
+// References: 60-digit Decimal power series with exact integer-order
+// digamma/trigamma sums, cross-checked against 100-digit tanh-sinh quadrature
+// of the integral representation (agreeing to ~1e-19); also cross-checked with
+// the finite differences below. `I_20(25) = 2.44984054229523048407e6`.
+// ---------------------------------------------------------------------------
+
+TEST(BesselOrderDerivatives, largeOrderSeriesBranchMatchesReference) {
+    CHECK_CLOSE_REL("dI(20,25)", besselINuDeriv(20.0, 25.0), -1.81926953710160750434e6, 1e-11);
+    CHECK_CLOSE_REL("d2I(20,25)", besselINuDeriv2(20.0, 25.0), 1.27424795499156253815e6, 1e-11);
+    CHECK_CLOSE_REL("dI(10,20)", besselINuDeriv(10.0, 20.0), -1.74036590706319728600e6, 1e-11);
+    CHECK_CLOSE_REL("d2I(10,20)", besselINuDeriv2(10.0, 20.0), 6.95138482778510149735e5, 1e-11);
+}
+
+// Independent oracle: central differences of `besselI` itself at the same
+// series-branch points. The second difference is cancellation-limited to
+// ~eps |I| / h^2, hence the looser step and gate.
+TEST(BesselOrderDerivatives, largeOrderDerivativesMatchFiniteDifferences) {
+    for (double nu : {10.0, 20.0}) {
+        const double z = nu == 10.0 ? 20.0 : 25.0;
+        const double h = 1e-5;
+        const double fd1 = (besselI(nu + h, z) - besselI(nu - h, z)) / (2.0 * h);
+        CHECK_CLOSE_REL("dI vs finite difference", besselINuDeriv(nu, z), fd1, 1e-6, 1e-6);
+        const double h2 = 1e-3;
+        const double fd2 =
+            (besselI(nu + h2, z) - 2.0 * besselI(nu, z) + besselI(nu - h2, z)) / (h2 * h2);
+        CHECK_CLOSE_REL("d2I vs finite difference", besselINuDeriv2(nu, z), fd2, 1e-4, 1e-4);
+    }
+}

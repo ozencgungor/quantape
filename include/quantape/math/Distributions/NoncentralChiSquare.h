@@ -12,15 +12,20 @@
  *    with log weights `log w_j = -lambda/2 + j log(lambda/2) - lgamma(j+1)`.
  *    The sum runs outwards from the mode `j0 = floor(lambda/2)` with weights
  *    normalised to the mode value (relative weights), so the absolute scale
- *    never underflows even for lambda ~ 1e6; terms with relative weight below
- *    `e^{-45}` are dropped. Measured against mpmath (dps=45) on
- *    `nu <= 10, lambda <= 500`: max rel 1.7e-13 where the result is >= 1e-12
- *    (36 of 468 reference rows are deep tails below 1e-12 and only gated
- *    absolutely). Two documented caveats: a tail whose probability is
- *    dominated by terms outside the `e^{-45}` weight window (e.g. beyond
- *    ~15 sigma at `lambda = 1e5`) is not resolved, and the `lgamma` weight
- *    noise is ~`eps*lambda*log(lambda)` at the largest lambda (~6e-12
- *    relative bulk error at `lambda = 1e5`).
+ *    never underflows even for lambda ~ 1e6. Truncation uses the rigorous
+ *    monotone-weight bound `w_j r / (1 - r)` (`r` the next weight ratio,
+ *    every term `<= 1`) on the mass still left in the direction of travel,
+ *    stopped below `1e-18` of the running sum -- so the summation always
+ *    reaches the indices that build a deep tail, in either direction.
+ *    Measured against mpmath (dps=45) and Boost (cpp_bin_float_100) on
+ *    `nu <= 10, lambda <= 1000`: max rel 1.7e-13 where the result is
+ *    >= 1e-12, with deep tails resolved (e.g.
+ *    `F(242.674; 2, 1000) = 2.178291e-58` and `ccdf(2900) = 1.179080e-109`).
+ *    Remaining caveats: the `lgamma` weight noise is
+ *    ~`eps*lambda*log(lambda)` at the largest lambda (~6e-12 relative bulk
+ *    error at `lambda = 1e5`); a probability beyond the double range
+ *    underflows to 0; and the fixed 4e6-step summation cap bounds the deepest
+ *    tails to `lambda` of order 1e11.
  *  - PDF: `f(x) = 1/2 e^{-(x+lambda)/2} (x/lambda)^{nu/4-1/2} I_{nu/2-1}(sqrt(lambda x))`
  *    using `detail::besselI` (log space, `logBesselI`); x=0 limits handled
  *    exactly. `logPdf` is the same expression assembled in log space.
@@ -152,18 +157,28 @@ inline double noncentralChiSquareCdfDouble(double nu, double lambda, double x) {
     const double logD0 = (a0 + static_cast<double>(j0)) * std::log(y) - y -
                          std::lgamma(a0 + static_cast<double>(j0) + 1.0);
     const double d0 = std::exp(logD0);
-    const double wFloor = w0 * 1e-18;
+    // Truncation bound: away from the mode the Poisson weights are monotone,
+    // so the whole mass left in the direction of travel is at most
+    // `w * r / (1 - r)` with `r` the next weight ratio (`P <= 1` there and
+    // every term is positive). The loops stop only when that bound is below
+    // kRelCut of the running sum, so the summation reaches every index that
+    // contributes to the requested relative accuracy -- including the indices
+    // far from the mode that build a deep tail.
+    constexpr double kRelCut = 1e-18;
+    constexpr long kMaxSteps = 4000000;
 
     double sum = w0 * P0;
     double w = w0;
     double P = P0;
     double d = d0;
-    for (long j = j0;; ++j) { // upward
-        w *= halfL / (static_cast<double>(j) + 1.0);
+    for (long j = j0; j - j0 < kMaxSteps; ++j) { // upward
+        const double ratio = halfL / (static_cast<double>(j) + 1.0);
+        w *= ratio;
         P -= d;
         d *= y / (a0 + static_cast<double>(j) + 1.0);
         sum += w * P;
-        if (w < wFloor) {
+        const double remainder = ratio < 1.0 ? w * ratio / (1.0 - ratio) : 0.0;
+        if (!(w > 0.0) || remainder < sum * kRelCut) {
             break;
         }
     }
@@ -176,7 +191,9 @@ inline double noncentralChiSquareCdfDouble(double nu, double lambda, double x) {
             P += d;
             w *= static_cast<double>(j) / halfL;
             sum += w * P;
-            if (w < wFloor) {
+            const double ratio = static_cast<double>(j - 1) / halfL;
+            const double remainder = ratio < 1.0 ? w * ratio / (1.0 - ratio) : 0.0;
+            if (!(w > 0.0) || remainder < sum * kRelCut) {
                 break;
             }
         }
@@ -199,7 +216,9 @@ inline double noncentralChiSquareCcdfDouble(double nu, double lambda, double x) 
         return gammaQ(0.5 * nu, 0.5 * x);
     }
     // Same recurrence as the CDF with Q(a_{j+1}) = Q(a_j) + d_j:
-    // one gammaQ seeds the mode, the rest are flops.
+    // one gammaQ seeds the mode, the rest are flops. The truncation bound is
+    // the same (`Q <= 1`, monotone weights); it lets the summation climb to
+    // the indices above the mode that dominate a deep *upper* tail.
     const double halfL = 0.5 * lambda;
     const double y = 0.5 * x;
     const double a0 = 0.5 * nu;
@@ -211,18 +230,21 @@ inline double noncentralChiSquareCcdfDouble(double nu, double lambda, double x) 
     const double logD0 = (a0 + static_cast<double>(j0)) * std::log(y) - y -
                          std::lgamma(a0 + static_cast<double>(j0) + 1.0);
     const double d0 = std::exp(logD0);
-    const double wFloor = w0 * 1e-18;
+    constexpr double kRelCut = 1e-18;
+    constexpr long kMaxSteps = 4000000;
 
     double sum = w0 * Q0;
     double w = w0;
     double Q = Q0;
     double d = d0;
-    for (long j = j0;; ++j) { // upward
-        w *= halfL / (static_cast<double>(j) + 1.0);
+    for (long j = j0; j - j0 < kMaxSteps; ++j) { // upward
+        const double ratio = halfL / (static_cast<double>(j) + 1.0);
+        w *= ratio;
         Q += d;
         d *= y / (a0 + static_cast<double>(j) + 1.0);
         sum += w * Q;
-        if (w < wFloor) {
+        const double remainder = ratio < 1.0 ? w * ratio / (1.0 - ratio) : 0.0;
+        if (!(w > 0.0) || remainder < sum * kRelCut) {
             break;
         }
     }
@@ -235,7 +257,9 @@ inline double noncentralChiSquareCcdfDouble(double nu, double lambda, double x) 
             Q -= d;
             w *= static_cast<double>(j) / halfL;
             sum += w * Q;
-            if (w < wFloor) {
+            const double ratio = static_cast<double>(j - 1) / halfL;
+            const double remainder = ratio < 1.0 ? w * ratio / (1.0 - ratio) : 0.0;
+            if (!(w > 0.0) || remainder < sum * kRelCut) {
                 break;
             }
         }
@@ -250,8 +274,8 @@ inline double noncentralChiSquareCcdfDouble(double nu, double lambda, double x) 
  * term (`log w_j = -lambda/2 + j log(lambda/2) - lgamma(j+1)`), so tiny tail
  * probabilities never underflow midway. In a deep upper tail the dominant
  * terms sit far *above* the Poisson mode (the weight is tiny but
- * `Q(nu/2+j, x/2) -> 1`), so the mode-centred relative-weight cutoff of the
- * CDF cannot be used: `t(j) = log w_j + log Q(...)` is unimodal with its
+ * `Q(nu/2+j, x/2) -> 1`), where the linear-space double mixture underflows;
+ * `t(j) = log w_j + log Q(...)` is unimodal with its
  * maximum at or above `j0 = floor(lambda/2)`, and the sum runs over the terms
  * within `kLogCut` of that maximum (found by hill-climbing up from `j0`).
  * Accuracy is the log-sum-exp shift plus `gammaLogQ`; over the reference grid
@@ -858,16 +882,16 @@ inline NccsCdfGradHess noncentralChiSquareCdfGradHess(double nu, double lambda, 
  * `cdf(hi) >= p`, capped at 2000 expansions); a step leaving the bracket drops
  * into 100 bisection sweeps. Deterministic, tolerance ~1e-10 relative: the
  * mixture CDF itself carries a relative error growing with `lambda`
- * (~1e-11 at `lambda = 1e5`, plus the `e^{-45}` relative-weight window) and
- * the density `lgamma` noise ~`eps lambda log(lambda)`, so the recoverable
- * quantile accuracy is regime-limited rather than solver-limited.
+ * (~1e-11 at `lambda = 1e5`) and the density `lgamma` noise
+ * ~`eps lambda log(lambda)`, so the recoverable quantile accuracy is
+ * regime-limited rather than solver-limited.
  *
  * Tails/edges: `p <= 0 -> 0`, `p >= 1 -> +Inf`, NaN propagates, invalid
- * `nu`/`lambda` -> NaN. The deep upper tail is serviced through the direct
- * mixture (the CDF retains full relative accuracy there); a tail dominated by
- * Poisson terms outside the CDF's `e^{-45}` weight window is not resolved and
- * the quantile saturates at the largest bracket end (this bounds the large
- * `lambda` extreme-tail regime).
+ * `nu`/`lambda` -> NaN. The mixture CDF resolves both tails up to the
+ * documented relative accuracy, so the quantile tracks them: at
+ * `nu = 2, lambda = 1000` the deep lower-tail value is
+ * `inv(1e-60) = 232.4947870730993` (Boost `cpp_bin_float_100` reference
+ * 232.49478707309926) and `inv(1e-12) = 605.4638154469945`.
  */
 inline double noncentralChiSquareInvDouble(double nu, double lambda, double p) {
     using std::fabs;

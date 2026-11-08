@@ -540,3 +540,42 @@ TEST(InverseGammaParameterDerivatives, edgesAndInvalidInputs) {
     CHECK_CLOSE("pdf(+inf) value", pdfInf.value, 0.0, 0.0);
     CHECK_CLOSE("pdf(+inf) gx", pdfInf.gx, 0.0, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// Incomplete gamma at large shape. The series/CF budget scales with `sqrt(a)`
+// (`9 sqrt(a) + 100` above a = 1e6) and the log prefactor uses the Stirling
+// form, which keeps `P(a,a)` at ~1e-13 relative accuracy up to the documented
+// cap a <= 1e8. References: 80-digit Decimal power series with the Stirling
+// lgamma series, cross-checked against Boost `cpp_bin_float_100` `gamma_p`
+// (identical to 20 digits at a >= 1e6).
+// ---------------------------------------------------------------------------
+
+TEST(IncompleteGamma, largeShapeMatchesHighPrecision) {
+    using quantape::math::detail::gammaLogP;
+    using quantape::math::detail::gammaLogQ;
+    using quantape::math::detail::gammaP;
+    using quantape::math::detail::gammaQ;
+
+    CHECK_CLOSE_REL("P(1e6,1e6)", gammaP(1e6, 1e6), 0.500132980760872591244, 1e-12);
+    CHECK_CLOSE_REL("P(1e7,1e7)", gammaP(1e7, 1e7), 0.500042052208723698334, 1e-12);
+    CHECK_CLOSE_REL("P(1e8,1e8)", gammaP(1e8, 1e8), 0.500013298076014119871, 1e-11);
+
+    // Continued-fraction branch (x >= a + 1) and its complement.
+    CHECK_CLOSE_REL("Q(1e6,1e6+10)", gammaQ(1e6, 1e6 + 10.0), 0.495877683203090427170, 1e-12);
+    CHECK_CLOSE_REL("Q(1e7,1e7+100)", gammaQ(1e7, 1e7 + 100.0), 0.487344450632985278707, 1e-12);
+    CHECK_CLOSE_REL("P(1e8,1e8+1000)", gammaP(1e8, 1e8 + 1000.0), 0.539840936679227943608, 1e-11);
+
+    // log forms keep the relative accuracy of the value (references are the
+    // logarithms of the high-precision probabilities).
+    CHECK_CLOSE_REL("logP(1e6,1e6)", gammaLogP(1e6, 1e6), -0.692881254399695925555, 1e-12);
+    CHECK_CLOSE_REL("logQ(1e6,1e6)", gammaLogQ(1e6, 1e6), -0.693413177455728244051, 1e-12);
+    CHECK_CLOSE_REL("logP(1e8,1e8)", gammaLogP(1e8, 1e8), -0.693120584761588450178, 1e-11);
+    CHECK_CLOSE_REL("logQ(1e8,1e8)", gammaLogQ(1e8, 1e8), -0.693173777065657471616, 1e-11);
+    CHECK_CLOSE_REL("logQ(1e8,1e8+1000)", gammaLogQ(1e8, 1e8 + 1000.0), -0.776183059442754994481,
+                    1e-11);
+
+    // Deep lower tail: P(1e7, 0.9e7) = 4.75557e-23284, finite only in log
+    // space. The Stirling prefactor keeps the exponent's relative accuracy.
+    CHECK_CLOSE_REL("logP(1e7,0.9e7)", gammaLogP(1e7, 0.9e7), -53611.8319885368239050, 1e-10);
+    CHECK_CLOSE("logQ(1e7,0.9e7)", gammaLogQ(1e7, 0.9e7), 0.0, 1e-12);
+}

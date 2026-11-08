@@ -215,17 +215,19 @@ inline void orderAsymptotic(double nu, double z, double& S, double& S1, double& 
 /**
  * @brief Order derivative of I_nu(z): `dI_nu(z)/dnu` (nu > -1, z > 0).
  *
- * Series route (`z` below the `besselI` asymptotic switch):
- * `dI/dnu = I ln(z/2) - sum t_m psi(m+nu+1)`; asymptotic route: the
- * multiplicative correction is differentiated termwise in `mu = 4 nu^2`.
- * Accuracy ~1e-13 relative for nu in [0,20], z in [1e-3, 30].
+ * Series route (`z` below the `besselI` asymptotic switch): `dI/dnu = I ln(z/2)
+ * - sum t_m psi(m+nu+1)`; asymptotic route: the multiplicative correction is
+ * differentiated termwise in `mu = 4 nu^2`. The route is selected by the same
+ * `useAsymptotic` predicate as `besselI` (both `z >= 15 + nu/2` **and**
+ * `z >= nu^2/2`), so the derivative never differentiates a branch the value
+ * did not take. Accuracy ~1e-13 relative for nu in [0,20], z in [1e-3, 30].
  */
 inline double besselINuDeriv(double nu, double z) {
     if (!(nu > -1.0) || !(z > 0.0) || std::isnan(nu) || std::isnan(z)) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     const double lz = std::log(z / 2.0);
-    if (z >= 15.0 + 0.5 * nu) {
+    if (bessel_detail::useAsymptotic(nu, z)) {
         double S = 0.0, S1 = 0.0, S2 = 0.0;
         bessel_detail::orderAsymptotic(nu, z, S, S1, S2);
         const double pref = std::exp(z) / std::sqrt(2.0 * M_PI * z);
@@ -240,14 +242,15 @@ inline double besselINuDeriv(double nu, double z) {
  * @brief Second order derivative of I_nu(z): `d2I_nu(z)/dnu2`.
  *
  * `I (ln(z/2))^2 - 2 ln(z/2) S1 + S2` with `S1`, `S2` from the same
- * series/asymptotic differentiation as `besselINuDeriv`.
+ * series/asymptotic differentiation as `besselINuDeriv`, selected by the
+ * shared `useAsymptotic` predicate (see there).
  */
 inline double besselINuDeriv2(double nu, double z) {
     if (!(nu > -1.0) || !(z > 0.0) || std::isnan(nu) || std::isnan(z)) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     const double lz = std::log(z / 2.0);
-    if (z >= 15.0 + 0.5 * nu) {
+    if (bessel_detail::useAsymptotic(nu, z)) {
         double S = 0.0, S1 = 0.0, S2 = 0.0;
         bessel_detail::orderAsymptotic(nu, z, S, S1, S2);
         const double pref = std::exp(z) / std::sqrt(2.0 * M_PI * z);

@@ -514,3 +514,42 @@ TEST(NoncentralChiSquare, pdfGradHessFiniteDifferenceOracle) {
     CHECK_CLOSE_REL("gx vs FD", pack.gx,
                     (pdfAt(nu, lam, x + h) - pdfAt(nu, lam, x - h)) / (2.0 * h), 1e-6, 1e-7);
 }
+
+// ---------------------------------------------------------------------------
+// Poisson-mixture tails. The summation stops when the rigorous remaining-weight
+// bound `w r / (1 - r)` falls below 1e-18 of the running sum, so it reaches the
+// indices that build both tails. References: Boost
+// `non_central_chi_squared_distribution<cpp_bin_float_100>`.
+// ---------------------------------------------------------------------------
+
+TEST(NoncentralChiSquare, deepLowerAndUpperTails) {
+    const quantape::math::NoncentralChiSquare<double> nc{2.0, 1000.0};
+    // Lower tail at mean - 12 sigma; the mixture must reach ~350 indices below
+    // the Poisson mode to build it.
+    CHECK_CLOSE_REL("cdf mean-12sigma", nc.cdf(242.673983061294), 2.17829089869234123468e-58,
+                    1e-11);
+    CHECK_CLOSE_REL("cdf mean-8sigma", nc.cdf(495.782655374196), 3.44731772009301713707e-21, 1e-11);
+    // Upper tail: the dominant indices sit above the mode.
+    CHECK_CLOSE_REL("ccdf(2000)", nc.ccdf(2000.0), 1.99652956158971066924e-39, 1e-11);
+    CHECK_CLOSE_REL("ccdf(2900)", nc.ccdf(2900.0), 1.179079900663865061e-109, 1e-10);
+    // The cdf at the same upper-tail point is 1 - ccdf; gate absolutely since
+    // the 1 - p cancellation is inherent there.
+    CHECK_CLOSE("cdf(1508.2173446258039)", nc.cdf(1508.2173446258039), 0.999999999999696171246,
+                1e-12);
+
+    // Quantiles follow the mixture tails (the deep lower tail is driven by
+    // the cdf).
+    CHECK_CLOSE_REL("inv(1e-60)", nc.inv(1e-60), 232.494787073099259847, 1e-12);
+    CHECK_CLOSE_REL("inv(1e-30)", nc.inv(1e-30), 407.167241267759134337, 1e-12);
+    CHECK_CLOSE_REL("inv(1e-12)", nc.inv(1e-12), 605.463815446994759529, 1e-12);
+    CHECK_CLOSE_REL("inv(0.5)", nc.inv(0.5), 1001.00016668336829689, 1e-12);
+
+    // A second (nu, lambda) pair where the upper tail is resolved as well.
+    const quantape::math::NoncentralChiSquare<double> nc2{5.0, 100.0};
+    CHECK_CLOSE_REL("cdf(24.006173074733653)", nc2.cdf(24.006173074733653),
+                    3.69523772567056425875e-08, 1e-11);
+    CHECK_CLOSE_REL("ccdf(226.49074038789951)", nc2.ccdf(226.49074038789951),
+                    5.10447314250282399447e-07, 1e-11);
+    CHECK_CLOSE_REL("ccdf(307.48456731316588)", nc2.ccdf(307.48456731316588),
+                    7.56158851063660184662e-14, 1e-10);
+}
