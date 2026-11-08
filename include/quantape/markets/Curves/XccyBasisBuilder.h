@@ -33,7 +33,7 @@ namespace quantape::markets {
  * notional at start and maturity and the FX spot cancels, so the par condition
  * is
  *
- *   `sum_f tau D_f (f_f + b) + (D_f(0) - D_f(T)) = sum_d tau D_d f_d + (D_d(0) - D_d(T))`
+ *   `sum_f tau D_f (f_f + b) - (D_f(0) - D_f(T)) = sum_d tau D_d f_d - (D_d(0) - D_d(T))`
  *
  * with the basis spread `b` quoted on the foreign leg. Each pillar solves one
  * foreign zero node (foreign discounts at intermediate coupon dates are
@@ -85,7 +85,8 @@ using XccyNotionalMode = pricing::XccyNotionalMode;
 
 /// Model-implied basis spread (foreign leg spread) against a foreign discount
 /// curve, with both forecast curves given. Handles constant and resetting
-/// notionals; the spread annuity is always `sum tau D(pay)` on the quoted leg.
+/// notionals; on a quoted leg that resets, the spread accrues on the reset
+/// notional, so its annuity is `sum tau D(pay) adjN` (adjN = D_other/D_own).
 template <XccyForecastCurve ForeignForecastT, XccyForecastCurve DomesticForecastT>
 double impliedXccyBasisSpread(const DiscountCurve<double>& foreignDiscount,
                               const ForeignForecastT& foreignForecast,
@@ -237,9 +238,16 @@ DiscountCurve<double> bootstrapMixedXccyDiscountCurveImpl(
 
 } // namespace detail
 
-/// Self-forecast mixed bootstrap: xccy pillars forecast their floating legs on
-/// the trial foreign discount curve (OIS-style swaps), while FX swap pillars
-/// use the trial curve as the foreign side of the CIP ratio.
+/// Self-forecast mixed bootstrap: FX swap pillars use the trial curve as the
+/// foreign side of the CIP ratio.
+///
+/// A basis-quoted `XccySwap` pillar is only admissible here when the foreign
+/// forecast curve is distinct from the foreign discount curve. With forecast
+/// == discount the floating leg's coupons telescope to the notional term for
+/// every curve, so the leg is worth zero and the par basis measures the foreign
+/// curve through the annuity alone -- far too weakly to solve a pillar. Use the
+/// explicit-forecast overload, or `bootstrapXccyCoupled` (which bootstraps the
+/// foreign discount curve together with an IBOR-vs-OIS spread curve).
 template <XccyForecastCurve DomesticForecastT>
 DiscountCurve<double> bootstrapMixedXccyDiscountCurve(
     const DiscountCurve<double>& domesticDiscount, const DomesticForecastT& domesticForecast,
@@ -247,6 +255,14 @@ DiscountCurve<double> bootstrapMixedXccyDiscountCurve(
     InterpolationSpace space, InterpolationScheme scheme,
     const std::vector<XccyMixedPillar>& pillars, double accuracy = 1e-14, double tension = 0.0,
     int switchIndex = 1) {
+    for (const XccyMixedPillar& pillar : pillars) {
+        if (!std::holds_alternative<FxSwapPillar>(pillar.instrument())) {
+            throw std::invalid_argument(
+                "bootstrapMixedXccyDiscountCurve: a basis-quoted XccySwap pillar requires a "
+                "foreign forecast curve distinct from the foreign discount curve; use the "
+                "explicit-forecast overload or bootstrapXccyCoupled");
+        }
+    }
     const auto foreignForecastAt =
         [](const DiscountCurve<double>& trial) -> const DiscountCurve<double>& { return trial; };
     return detail::bootstrapMixedXccyDiscountCurveImpl(

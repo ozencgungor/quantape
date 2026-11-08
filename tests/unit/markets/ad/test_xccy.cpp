@@ -147,19 +147,22 @@ double evaluateXccyLegTimes(const XccyLegTimes& times, const DiscountT& discount
             (forecast.discount(coupon.tPrevious) / forecast.discount(coupon.tAccrual) - 1.0) /
             coupon.tau;
         coupons += coupon.tau * df * forward;
-        annuity += coupon.tau * df;
+        double adjustment = 1.0;
         if (resets) {
             const double ownStart = discount.discount(coupon.tPrevious);
-            const double adjustment = otherDiscount.discount(coupon.tPrevious) / ownStart;
+            adjustment = otherDiscount.discount(coupon.tPrevious) / ownStart;
             resetValue +=
                 adjustment *
                 (discount.discount(coupon.tAccrual) * (1.0 + forward * coupon.tau) - ownStart);
         }
+        annuity += coupon.tau * df * adjustment;
     }
     if (resets) {
         return resetValue;
     }
-    const double notional = discount.discount(times.tStart) - discount.discount(times.tEnd);
+    // Legacy oracle: the lending leg pays the notional at tStart and receives
+    // it at tEnd.
+    const double notional = discount.discount(times.tEnd) - discount.discount(times.tStart);
     return coupons + notional;
 }
 
@@ -1163,56 +1166,78 @@ void testXccyAnalyticRowsAgainstFiniteDifference() {
         markets::StackCurveView::make(domesticForecast);
 
     for (const bool spreadOnForeign : {true, false}) {
-        SCOPED_TRACE(spreadOnForeign ? "spread on foreign leg" : "spread on domestic leg");
-        markets::XccyPillar pillar;
-        pillar.maturity = reference.plusYears(3);
-        pillar.foreignTenor = datetime::Period(7, datetime::TimeUnit::Months);
-        pillar.domesticTenor = datetime::Period(4, datetime::TimeUnit::Months);
-        pillar.foreignPaymentLag = 2;
-        pillar.domesticPaymentLag = 1;
-        pillar.foreignBusinessDayConvention = datetime::BusinessDayConvention::Following;
-        pillar.domesticBusinessDayConvention = datetime::BusinessDayConvention::ModifiedFollowing;
-        pillar.foreignCalendar = calendar;
-        pillar.domesticCalendar = calendar;
-        pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
-        pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
-        pillar.spreadOnForeignLeg = spreadOnForeign;
-        const std::vector<markets::XccyRowBlock> analytic = markets::xccySwapJacobianRowsView(
-            *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
-            *domesticForecastView, pillar, reference, zeroDc);
-        const std::vector<markets::XccyRowBlock> finiteDifference =
-            markets::xccySwapJacobianRowsViewFiniteDifference(
-                *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
-                *domesticForecastView, pillar, reference, zeroDc);
-        // Foreign discount, foreign forecast, two foreign ancestors, domestic
-        // discount (merged with the domestic forecast parent) and domestic
-        // forecast.
-        EXPECT_EQ(analytic.size(), 6u);
-        EXPECT_EQ(finiteDifference.size(), analytic.size());
-        for (std::size_t b = 0; b < analytic.size(); ++b) {
-            EXPECT_TRUE(analytic[b].curve->identity() == finiteDifference[b].curve->identity());
-            EXPECT_EQ(analytic[b].row.size(), finiteDifference[b].row.size());
-            for (std::size_t i = 0; i < analytic[b].row.size(); ++i) {
-                CHECK_CLOSE("xccy analytic row vs FD", analytic[b].row[i],
-                            finiteDifference[b].row[i], 1e-6);
+        for (const markets::XccyNotionalMode notionalMode :
+             {markets::XccyNotionalMode::Const, markets::XccyNotionalMode::MtM}) {
+            for (const bool resetForeign : {true, false}) {
+                if (notionalMode == markets::XccyNotionalMode::Const && !resetForeign) {
+                    continue; // the reset flag is inert for a constant notional
+                }
+                SCOPED_TRACE(::testing::Message()
+                             << (spreadOnForeign ? "spread on foreign leg" : "spread on domestic")
+                             << (notionalMode == markets::XccyNotionalMode::MtM
+                                     ? (resetForeign ? ", foreign resets" : ", domestic resets")
+                                     : ", constant notional"));
+                markets::XccyPillar pillar;
+                pillar.maturity = reference.plusYears(3);
+                pillar.foreignTenor = datetime::Period(7, datetime::TimeUnit::Months);
+                pillar.domesticTenor = datetime::Period(4, datetime::TimeUnit::Months);
+                pillar.foreignPaymentLag = 2;
+                pillar.domesticPaymentLag = 1;
+                pillar.foreignBusinessDayConvention = datetime::BusinessDayConvention::Following;
+                pillar.domesticBusinessDayConvention =
+                    datetime::BusinessDayConvention::ModifiedFollowing;
+                pillar.foreignCalendar = calendar;
+                pillar.domesticCalendar = calendar;
+                pillar.foreignDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+                pillar.domesticDayCounter = datetime::DayCounter(datetime::DayCount::Actual360);
+                pillar.spreadOnForeignLeg = spreadOnForeign;
+                pillar.notional = notionalMode;
+                pillar.resetForeignLeg = resetForeign;
+                const std::vector<markets::XccyRowBlock> analytic =
+                    markets::xccySwapJacobianRowsView(*foreignDiscountView, *foreignForecastView,
+                                                      *domesticDiscountView, *domesticForecastView,
+                                                      pillar, reference, zeroDc);
+                const std::vector<markets::XccyRowBlock> finiteDifference =
+                    markets::xccySwapJacobianRowsViewFiniteDifference(
+                        *foreignDiscountView, *foreignForecastView, *domesticDiscountView,
+                        *domesticForecastView, pillar, reference, zeroDc);
+                // Foreign discount, foreign forecast, two foreign ancestors, domestic
+                // discount (merged with the domestic forecast parent) and domestic
+                // forecast.
+                EXPECT_EQ(analytic.size(), 6u);
+                EXPECT_EQ(finiteDifference.size(), analytic.size());
+                for (std::size_t b = 0; b < analytic.size(); ++b) {
+                    EXPECT_TRUE(analytic[b].curve->identity() ==
+                                finiteDifference[b].curve->identity());
+                    EXPECT_EQ(analytic[b].row.size(), finiteDifference[b].row.size());
+                    for (std::size_t i = 0; i < analytic[b].row.size(); ++i) {
+                        CHECK_CLOSE("xccy analytic row vs FD", analytic[b].row[i],
+                                    finiteDifference[b].row[i], 1e-6);
+                    }
+                }
+                double foreignBaseRisk = 0.0;
+                double domesticDiscountRisk = 0.0;
+                for (const markets::XccyRowBlock& block : analytic) {
+                    if (block.curve->identity() == foreignBase.get()) {
+                        for (const double value : block.row) {
+                            foreignBaseRisk += std::abs(value);
+                        }
+                    }
+                    if (block.curve->identity() == domesticDiscountView->identity()) {
+                        for (const double value : block.row) {
+                            domesticDiscountRisk += std::abs(value);
+                        }
+                    }
+                }
+                // The rows must be populated. A resetting leg's spread and
+                // principal cancel to second order in the forecast-vs-discount
+                // spread, so its block is legitimately near roundoff -- still
+                // non-zero, which separates a populated block from an empty one.
+                const double floor = notionalMode == markets::XccyNotionalMode::Const ? 1e-8 : 0.0;
+                EXPECT_GT(foreignBaseRisk, floor);
+                EXPECT_GT(domesticDiscountRisk, floor);
             }
         }
-        double foreignBaseRisk = 0.0;
-        double domesticDiscountRisk = 0.0;
-        for (const markets::XccyRowBlock& block : analytic) {
-            if (block.curve->identity() == foreignBase.get()) {
-                for (const double value : block.row) {
-                    foreignBaseRisk += std::abs(value);
-                }
-            }
-            if (block.curve->identity() == domesticDiscountView->identity()) {
-                for (const double value : block.row) {
-                    domesticDiscountRisk += std::abs(value);
-                }
-            }
-        }
-        EXPECT_GT(foreignBaseRisk, 1e-8);
-        EXPECT_GT(domesticDiscountRisk, 1e-8);
     }
 }
 
@@ -1654,7 +1679,7 @@ void testXccyMtMTelescoping() {
 
     // Foreign leg resets and forecasts on itself.
     for (const bool spreadOnForeign : {true, false}) {
-        const double expected = spreadOnForeign ? 0.08254738125917123 : -0.08295639871603087;
+        const double expected = spreadOnForeign ? 0.00290851111294 : -0.002915717566249;
         SCOPED_TRACE(spreadOnForeign ? "spread on foreign leg" : "spread on domestic leg");
         CHECK_CLOSE("mtm telescoping foreign reset",
                     markets::impliedXccyBasisSpread(
@@ -1664,7 +1689,7 @@ void testXccyMtMTelescoping() {
     }
     // Domestic leg resets and forecasts on itself.
     for (const bool spreadOnForeign : {true, false}) {
-        const double expected = spreadOnForeign ? -0.055470884346166476 : 0.055745739340945656;
+        const double expected = spreadOnForeign ? 0.004818006403192 : -0.00482994404399;
         SCOPED_TRACE(spreadOnForeign ? "spread on foreign leg" : "spread on domestic leg");
         CHECK_CLOSE("mtm telescoping domestic reset",
                     markets::impliedXccyBasisSpread(
@@ -1704,10 +1729,10 @@ void testXccyMtMGoldenSpreads() {
         double spread;
     };
     const std::vector<GoldenCase> cases{
-        {true, true, 0.08735367316126888},
-        {true, false, -0.087786505514019036},
-        {false, true, -0.052562454453813891},
-        {false, false, 0.052822898348205888},
+        {true, true, 0.00772667987566},
+        {true, false, -0.007745824364237},
+        {false, true, 0.007726436295545},
+        {false, false, -0.00774558019313},
     };
     for (const GoldenCase& golden : cases) {
         SCOPED_TRACE(::testing::Message() << "resetForeign=" << golden.resetForeign
@@ -2093,17 +2118,14 @@ void testMixedFxXccyLadderRecovery() {
                     xccy.spread, 1e-10);
     }
 
-    // Self-forecast mode solves the same residual with the trial curve as the
-    // foreign floating forecast, so its own residuals must vanish too.
-    const DiscountCurve<double> selfCurve = markets::bootstrapMixedXccyDiscountCurve(
-        domesticDiscount, domesticForecast, reference, zeroDc, InterpolationSpace::LogDiscount,
-        InterpolationScheme::Linear, pillars);
-    for (const markets::XccyPillar& xccy : xccyPillars) {
-        CHECK_CLOSE("mixed ladder self-forecast reprice",
-                    markets::impliedXccyBasisSpread(selfCurve, selfCurve, domesticDiscount,
-                                                    domesticForecast, xccy, reference, zeroDc),
-                    xccy.spread, 1e-10);
-    }
+    // Self-forecast mode cannot price a basis-quoted pillar: with forecast ==
+    // discount the foreign leg telescopes to zero for every curve, so its par
+    // basis measures the curve only through the annuity and the residual has no
+    // root. The overload rejects that ladder instead of failing to bracket.
+    EXPECT_THROW((void)(markets::bootstrapMixedXccyDiscountCurve(
+                     domesticDiscount, domesticForecast, reference, zeroDc,
+                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars)),
+                 std::invalid_argument);
 
     const std::vector<markets::XccyMixedPillar> unsorted{pillars[2], pillars[1]};
     EXPECT_THROW((void)(markets::bootstrapMixedXccyDiscountCurve(
@@ -2288,14 +2310,18 @@ void testXccyMixedBitwiseAgainstLegacy() {
     SCOPED_TRACE("explicit forecast");
     compare(legacyExplicit, explicitCurve);
 
-    const DiscountCurve<double> legacySelf = legacy::bootstrapMixedXccyDiscountCurve(
-        domesticDiscount, domesticForecast, reference, zeroDc, InterpolationSpace::LogDiscount,
-        InterpolationScheme::Linear, legacyPillars);
-    const DiscountCurve<double> selfCurve = markets::bootstrapMixedXccyDiscountCurve(
-        domesticDiscount, domesticForecast, reference, zeroDc, InterpolationSpace::LogDiscount,
-        InterpolationScheme::Linear, pillars);
+    // A self-forecast ladder cannot determine the foreign discount curve: with
+    // forecast == discount the constant-notional leg telescopes to zero for
+    // every curve, so the par basis depends on the foreign curve only through
+    // the annuity. The curve has to be pinned by FX-swap pillars instead, and
+    // with a single FX pillar this configuration is under-determined -- the
+    // bootstrap reports that it cannot bracket a pillar rather than returning a
+    // curve that does not satisfy its own quotes.
     SCOPED_TRACE("self forecast");
-    compare(legacySelf, selfCurve);
+    EXPECT_THROW((void)markets::bootstrapMixedXccyDiscountCurve(
+                     domesticDiscount, domesticForecast, reference, zeroDc,
+                     InterpolationSpace::LogDiscount, InterpolationScheme::Linear, pillars),
+                 std::invalid_argument);
 }
 
 /// Old-vs-new bitwise oracle of the coupled bootstrap: the fixed-point

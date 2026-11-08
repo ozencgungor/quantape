@@ -161,9 +161,11 @@ XccyLegRowScratch<ViewT>& legRowScratch() {
 /// Analytic leg rows: each coupon contributes `df * ratio * (-tprev w(tprev) +
 /// taccrual w(taccrual))` on the forecast native and ancestor blocks and
 /// `tau * forward * dD(tpay)` on the discount block; the notional adds
-/// `dD(tStart) - dD(tEnd)`. With `resets` the notional term is replaced by the
+/// `dD(tEnd) - dD(tStart)`. With `resets` the notional term is replaced by the
 /// telescoped reset value and the reset rows are added on the discount,
-/// `otherDiscount` and forecast blocks; the annuity rows are unchanged.
+/// `otherDiscount` and forecast blocks. A resettable leg's spread accrues on the
+/// reset notional, so its annuity is `sum tau D_own(tPay) adjN` and the annuity
+/// rows carry the `otherDiscount` block too.
 template <class ViewT>
 XccyLegRowsT<ViewT>
 xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& accrualDayCounter,
@@ -175,7 +177,7 @@ xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& 
     }
     XccyLegRowsT<ViewT> rows;
     rows.valueRows.reserve(4);
-    rows.annuityRows.reserve(1);
+    rows.annuityRows.reserve(resets ? 2 : 1);
     // Register every referenced block before taking references into the
     // vectors, so a later push cannot invalidate an earlier reference.
     xccyRowBlock(rows.valueRows, discount);
@@ -184,10 +186,15 @@ xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& 
         xccyRowBlock(rows.valueRows, *otherDiscount);
     }
     xccyRowBlock(rows.annuityRows, discount);
+    if (resets) {
+        xccyRowBlock(rows.annuityRows, *otherDiscount);
+    }
     XccyRowBlockT<ViewT>& discountValue = xccyRowBlock(rows.valueRows, discount);
     XccyRowBlockT<ViewT>& discountAnnuity = xccyRowBlock(rows.annuityRows, discount);
     XccyRowBlockT<ViewT>* otherValue =
         resets ? &xccyRowBlock(rows.valueRows, *otherDiscount) : nullptr;
+    XccyRowBlockT<ViewT>* otherAnnuity =
+        resets ? &xccyRowBlock(rows.annuityRows, *otherDiscount) : nullptr;
 
     XccyLegRowScratch<ViewT>& scratch = legRowScratch<ViewT>();
     std::vector<double>& weights = scratch.weights;
@@ -227,17 +234,22 @@ xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& 
         const double df = discount.discount(t);
         const double ratio = forecast.discount(tPrevious) / forecast.discount(tAccrual);
         const double forward = (ratio - 1.0) / tau;
-        rows.annuity += tau * df;
+        // A resettable leg's spread accrues on the reset notional, so the
+        // annuity carries the same D_other/D_own adjustment as the notional.
+        double adjustment = 1.0;
+        if (resets) {
+            adjustment = otherDiscount->discount(tPrevious) / discount.discount(tPrevious);
+        }
+        rows.annuity += tau * df * adjustment;
         xccyWeightsAt(discount, t, weights);
         for (std::size_t i = 1; i < discount.size(); ++i) {
             const double dDiscount = -t * df * weights[i];
-            discountAnnuity.row[i - 1] += tau * dDiscount;
+            discountAnnuity.row[i - 1] += tau * adjustment * dDiscount;
         }
         double forecastScale = df;
         if (resets) {
             const double ownStart = discount.discount(tPrevious);
             const double ownEnd = discount.discount(tAccrual);
-            const double adjustment = otherDiscount->discount(tPrevious) / ownStart;
             forecastScale = adjustment * ownEnd;
             rows.value += adjustment * (ownEnd * (1.0 + forward * tau) - ownStart);
             // Own discount: the reset adjustment's own-curve dependence cancels
@@ -253,12 +265,19 @@ xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& 
                     adjustment * (1.0 + forward * tau) * ownEnd *
                     (tPrevious * discountPrevious[i] - tAccrual * discountCurrent[i]);
             }
+            // d(adj)/d(z_own) at the reset date: adj = D_other/D_own, so the
+            // quotient moves by +adj * tStart * w(tStart).
+            for (std::size_t i = 1; i < discount.size(); ++i) {
+                discountAnnuity.row[i - 1] +=
+                    tau * df * adjustment * tPrevious * discountPrevious[i];
+            }
             discountPrevious.swap(discountCurrent);
             // Opposite discount: only the reset adjustment D_other/D_own moves.
             xccyWeightsAt(*otherDiscount, tPrevious, weights);
             for (std::size_t i = 1; i < otherDiscount->size(); ++i) {
                 otherValue->row[i - 1] += adjustment * tPrevious * weights[i] *
                                           (ownStart - ownEnd * (1.0 + forward * tau));
+                otherAnnuity->row[i - 1] -= tau * df * adjustment * tPrevious * weights[i];
             }
         } else {
             rows.value += tau * df * forward;
@@ -288,14 +307,16 @@ xccyLegNodeRows(const datetime::Schedule& schedule, const datetime::DayCounter& 
     }
     const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
     const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
-    rows.value += discount.discount(tStart) - discount.discount(tEnd);
+    // Principal term D(tEnd) - D(tStart) for the lending-leg convention (see
+    // xccyLegValue); the node derivative carries the same orientation.
+    rows.value += discount.discount(tEnd) - discount.discount(tStart);
     xccyWeightsAt(discount, tStart, weights);
     for (std::size_t i = 1; i < discount.size(); ++i) {
-        discountValue.row[i - 1] -= tStart * discount.discount(tStart) * weights[i];
+        discountValue.row[i - 1] += tStart * discount.discount(tStart) * weights[i];
     }
     xccyWeightsAt(discount, tEnd, weights);
     for (std::size_t i = 1; i < discount.size(); ++i) {
-        discountValue.row[i - 1] += tEnd * discount.discount(tEnd) * weights[i];
+        discountValue.row[i - 1] -= tEnd * discount.discount(tEnd) * weights[i];
     }
     return rows;
 }
@@ -358,20 +379,21 @@ double xccyBasisSpread(const ViewT& foreignDiscount, const ViewT& foreignForecas
             const double forward =
                 (forecast.discount(tPrevious) / forecast.discount(tAccrual) - 1.0) / tau;
             coupons += tau * df * forward;
-            annuity += tau * df;
+            double adjustment = 1.0;
             if (resets) {
                 const double ownStart = discount.discount(tPrevious);
-                const double adjustment = otherDiscount.discount(tPrevious) / ownStart;
+                adjustment = otherDiscount.discount(tPrevious) / ownStart;
                 resetValue +=
                     adjustment * (discount.discount(tAccrual) * (1.0 + forward * tau) - ownStart);
             }
+            annuity += tau * df * adjustment;
         }
         if (resets) {
             return resetValue;
         }
         const double tStart = datetime::yearFraction(referenceDate, dates.front(), zeroDayCounter);
         const double tEnd = datetime::yearFraction(referenceDate, dates.back(), zeroDayCounter);
-        const double notional = discount.discount(tStart) - discount.discount(tEnd);
+        const double notional = discount.discount(tEnd) - discount.discount(tStart);
         return coupons + notional;
     };
 

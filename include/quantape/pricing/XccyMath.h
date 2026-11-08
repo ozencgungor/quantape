@@ -25,13 +25,20 @@ namespace quantape::pricing {
  * `double` bootstrap, reverse-mode gradients and nested second-order tests;
  * branching is on convention flags only, never on curve values.
  *
- * A constant-notional leg pays coupons on the accrual ends and exchanges the
- * notional at the leg boundaries; a resetting leg's notional resets at every
- * accrual start to the opposite leg's forward-implied level, so its netted
- * cashflows telescope to
+ * Both legs are valued as lending legs: the notional is paid at the leg start
+ * and received at the end, so
  *
- *   `sum_k adjN_k (D_own(t_k) (1 + f_k tau_k) - D_own(t_{k-1}))`,
- *   `adjN_k = D_other(t_{k-1}) / D_own(t_{k-1})`.
+ *   constant notional: `sum_k tau_k D_own(tPay_k) f_k + (D_own(tEnd) -
+ *                      D_own(tStart))`,
+ *   resetting notional: `sum_k adjN_k (D_own(t_k) (1 + f_k tau_k) -
+ *                       D_own(t_{k-1}))`,  `adjN_k = D_other(t_{k-1}) /
+ *                       D_own(t_{k-1})`.
+ *
+ * The coupons of a leg priced off its own discount curve telescope to
+ * `1 - D_own(tEnd)`, which cancels the principal term: a par floater is worth
+ * zero. A resettable leg's spread accrues on the reset notional, so its annuity
+ * carries the same `adjN_k` factor. The quoted spread `b` is not part of the
+ * leg value: the par condition is `V_quote_leg + b * annuity = V_other_leg`.
  *
  * The instrument wrappers in `pricing/Xccy.h` compose this layer with the
  * plain-data `instruments::XccyBasisSwap`. Prepared-times construction throws
@@ -140,19 +147,27 @@ ScalarT xccyLegValue(const XccyLegTimes& times, const DiscountT& discount,
             (forecast.discount(coupon.tPrevious) / forecast.discount(coupon.tAccrual) - 1.0) /
             coupon.tau;
         coupons += coupon.tau * df * forward;
-        annuity += coupon.tau * df;
+        // A resettable leg's spread accrues on the reset notional, so its
+        // annuity carries the same D_other/D_own adjustment as the notional.
+        ScalarT adjustment = 1.0;
         if (resets) {
             const ScalarT ownStart = discount.discount(coupon.tPrevious);
-            const ScalarT adjustment = otherDiscount.discount(coupon.tPrevious) / ownStart;
+            adjustment = otherDiscount.discount(coupon.tPrevious) / ownStart;
             resetValue +=
                 adjustment *
                 (discount.discount(coupon.tAccrual) * (1.0 + forward * coupon.tau) - ownStart);
         }
+        annuity += coupon.tau * df * adjustment;
     }
     if (resets) {
         return resetValue;
     }
-    const ScalarT notional = discount.discount(times.tStart) - discount.discount(times.tEnd);
+    // Lending-leg convention (shared with `xccyParSpread`): the leg pays the
+    // notional at tStart and receives it at tEnd, so the principal term is
+    // D(tEnd) - D(tStart). Combined with the par-floater coupons, which
+    // telescope to the same magnitude, a leg priced off its own discount curve
+    // contributes nothing -- the two notional exchanges cancel, as they must.
+    const ScalarT notional = discount.discount(times.tEnd) - discount.discount(times.tStart);
     return coupons + notional;
 }
 

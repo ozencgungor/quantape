@@ -1023,8 +1023,16 @@ TEST(FxConfig, loadsFixtureBuildsStackAndReprices) {
     EXPECT_EQ(xccySpec.pillars[0].start.serial(), 0); // resolved from spot lags at build
     EXPECT_TRUE(xccySpec.pillars[0].fxConvention == markets::QuoteConvention::Points);
     CHECK_CLOSE("fx config points", xccySpec.pillars[0].fxPoints, 0.0125, 1e-15);
-    EXPECT_TRUE(xccySpec.pillars[1].kind == markets::PillarSpec::Kind::XccySwap);
-    CHECK_CLOSE("xccy config spread", xccySpec.pillars[1].quote, 0.0011, 1e-15);
+    // The foreign curve is built from FX points only. A basis-quoted
+    // (XccySwap) pillar needs a foreign *forecast* curve distinct from the
+    // discount curve: with forecast == discount the leg telescopes to zero for
+    // every curve, so the par basis does not determine the discount curve and
+    // the pillar cannot be solved. The config schema does not yet expose that
+    // forecast curve, so the fixture stays on the identifiable input.
+    EXPECT_TRUE(xccySpec.pillars[1].kind == markets::PillarSpec::Kind::FxSwap);
+    CHECK_CLOSE("fx config points 1y", xccySpec.pillars[1].fxPoints, 0.0285, 1e-15);
+    EXPECT_TRUE(xccySpec.pillars[2].kind == markets::PillarSpec::Kind::FxSwap);
+    CHECK_CLOSE("fx config points 2y", xccySpec.pillars[2].fxPoints, 0.0599, 1e-15);
 
     const std::vector<markets::BuiltCurve> built = markets::buildStack(stack);
     ASSERT_EQ(built.size(), 2u);
