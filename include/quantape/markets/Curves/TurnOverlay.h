@@ -35,6 +35,16 @@ namespace quantape::markets {
  * spikes seen across several tenors from a single window and amplitude. Both
  * terms are additive on top of the wrapped curve's zero rates.
  *
+ * Amplitude units: a turn amplitude is a persistent discount-factor exponent
+ * (`exp(-d * tTurn)`), while a bump amplitude is an incremental instantaneous
+ * forward over the window. Neither is the *level* funding-window simple-rate
+ * quote that `CurveBuilder.h`'s direct-turn pillar stores
+ * (`ForecastPillar::turnPillar`). The two representations are related by
+ * compounding over the window's accrual; the explicit conversion helpers
+ * `overlayAmplitudeFromLevelQuote` / `levelQuoteFromOverlayAmplitude` take the
+ * base forward and the window accrual and round-trip exactly; they only map
+ * between the units and leave both representations intact.
+ *
  * Turn amplitudes are inputs here; they are not calibrated by this overlay.
  * They are `DoubleT` scalars, so a `var`/`fvar<var>` overlay carries the
  * amplitudes as AD parameters and the exogenous turn risk `dV/d(amplitude)`
@@ -63,8 +73,18 @@ namespace quantape::markets {
 template <typename DoubleT, typename BaseT = DiscountCurve<DoubleT>>
 class TurnOverlay {
 public:
-    /// Flat forward bump over `[begin, end]`: an elevated funding window. The
-    /// amplitude is the stored AD parameter.
+    /// Flat instantaneous-forward bump over `[begin, end]`: an elevated
+    /// funding window. The amplitude is the stored AD parameter.
+    ///
+    /// Units: `amplitude` is an **instantaneous forward increment** (a rate
+    /// per unit of the overlay's zero-clock time), constant over the window;
+    /// the discount factor becomes `D_base(t) * exp(-amplitude * overlap(t))`.
+    /// It is NOT the level simple-rate quote of the funding window used by
+    /// `CurveBuilder.h`'s direct-turn pillars (`ForecastPillar::turnPillar`):
+    /// that quote is `(D(begin)/D(end) - 1)/tau`, a level rate over the
+    /// window's accrual `tau`. Use `overlayAmplitudeFromLevelQuote` /
+    /// `levelQuoteFromOverlayAmplitude` below to convert between the two
+    /// representations.
     struct Bump {
         double begin;
         double end;
@@ -214,6 +234,53 @@ private:
     std::vector<Bump> m_bumps;       ///< flat forward windows
     std::vector<double> m_nodeTimes; ///< 0, turn times, bump start times
 };
+
+/// Level quote <-> overlay bump amplitude conversion for a funding window.
+///
+/// The two turn representations in this repo use different amplitude units:
+///
+///   - a `TurnOverlay::Bump` amplitude `A` is an incremental *instantaneous
+///     forward* over the window, so over a fully covered window of width `W`
+///     the discount factor is multiplied by `exp(-A W)`;
+///   - a `CurveBuilder.h` `ForecastPillar::turnPillar` quote `L` is the
+///     *level* simple rate over the window,
+///     `L = (D(begin) / D(end) - 1) / tau`.
+///
+/// With the base curve's simple forward `f` over the same window and the
+/// window accrual `tau` (the quote/index day count, e.g. ACT/360),
+/// `1 + L tau = (1 + f tau) exp(A W)`. These helpers apply the conversion with
+/// the base forward and window inputs; `windowWidth` is measured on the
+/// overlay's zero clock. The helpers only map units; both representations keep
+/// their own semantics.
+inline double levelQuoteFromOverlayAmplitude(double amplitude, double baseForward,
+                                             double windowWidth, double accrualYearFraction) {
+    if (!(windowWidth > 0.0) || !(accrualYearFraction > 0.0)) {
+        throw std::invalid_argument(
+            "levelQuoteFromOverlayAmplitude: window width and accrual must be positive");
+    }
+    const double baseGross = 1.0 + baseForward * accrualYearFraction;
+    if (!(baseGross > 0.0)) {
+        throw std::invalid_argument("levelQuoteFromOverlayAmplitude: non-positive base growth");
+    }
+    return (baseGross * std::exp(amplitude * windowWidth) - 1.0) / accrualYearFraction;
+}
+
+/// Inverse of `levelQuoteFromOverlayAmplitude`: convert a level funding-window
+/// quote into the equivalent `TurnOverlay::Bump` amplitude. Both directions
+/// round-trip to machine precision for any positive window width/accrual.
+inline double overlayAmplitudeFromLevelQuote(double levelQuote, double baseForward,
+                                             double windowWidth, double accrualYearFraction) {
+    if (!(windowWidth > 0.0) || !(accrualYearFraction > 0.0)) {
+        throw std::invalid_argument(
+            "overlayAmplitudeFromLevelQuote: window width and accrual must be positive");
+    }
+    const double baseGross = 1.0 + baseForward * accrualYearFraction;
+    const double levelGross = 1.0 + levelQuote * accrualYearFraction;
+    if (!(baseGross > 0.0) || !(levelGross > 0.0)) {
+        throw std::invalid_argument("overlayAmplitudeFromLevelQuote: non-positive growth factor");
+    }
+    return std::log(levelGross / baseGross) / windowWidth;
+}
 
 namespace detail {
 

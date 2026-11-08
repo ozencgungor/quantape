@@ -89,7 +89,26 @@ constexpr std::string_view interpolationSchemeName(InterpolationScheme scheme) n
 
 namespace detail {
 struct CurveTrialUpdater;
+
+/// Fixed days-per-year of the ACT-family conventions, 0 for conventions whose
+/// year fraction is not a fixed multiple of the calendar-day count.
+constexpr double actualDaysPerYear(datetime::DayCount convention) noexcept {
+    switch (convention) {
+        case datetime::DayCount::Actual360:
+            return 360.0;
+        case datetime::DayCount::Actual364:
+            return 364.0;
+        case datetime::DayCount::Actual365Fixed:
+            return 365.0;
+        case datetime::DayCount::Actual365_25:
+            return 365.25;
+        case datetime::DayCount::Actual366:
+            return 366.0;
+        default:
+            return 0.0;
+    }
 }
+} // namespace detail
 
 template <typename DoubleT>
 class DiscountCurve {
@@ -181,24 +200,36 @@ public:
 
     /// Arithmetic average of simple overnight forwards over consecutive fixing
     /// boundaries `fixingTimes` (size >= 2, strictly increasing).
-    DoubleT averagedRate(const std::vector<double>& fixingTimes) const {
-        if (fixingTimes.size() < 2) {
-            throw std::invalid_argument("DiscountCurve::averagedRate: need two or more times");
+    ///
+    /// The times are the curve's zero-clock year fractions; the overnight
+    /// index accrual `tau` for each step comes from `accrualDayCounter`
+    /// (default ACT/360), so the simple fixing forward is
+    /// `(D(t_{k-1}) / D(t_k) - 1) / tau`. With an ACT/365F zero clock and an
+    /// ACT/360 overnight index this is the usual index average; using the
+    /// zero-clock step as tau overstates it by 365/360. The zero-clock tau
+    /// form is available through `averagedRateOnZeroClock`.
+    DoubleT averagedRate(const std::vector<double>& fixingTimes,
+                         const datetime::DayCounter& accrualDayCounter =
+                             datetime::DayCounter(datetime::DayCount::Actual360)) const {
+        const double zeroBasis = detail::actualDaysPerYear(m_zeroDayCounter.convention());
+        const double accrualBasis = detail::actualDaysPerYear(accrualDayCounter.convention());
+        if (!(zeroBasis > 0.0) || !(accrualBasis > 0.0)) {
+            throw std::invalid_argument(
+                "DiscountCurve::averagedRate: the zero clock and the accrual day count must "
+                "both be ACT-family conventions to convert times; use "
+                "averagedRateOnZeroClock for other clocks");
         }
-        DoubleT sum = 0;
-        std::size_t count = 0;
-        for (std::size_t k = 1; k < fixingTimes.size(); ++k) {
-            const double tau = fixingTimes[k] - fixingTimes[k - 1];
-            if (!(tau > 0.0)) {
-                throw std::invalid_argument(
-                    "DiscountCurve::averagedRate: times must be strictly increasing");
-            }
-            const DoubleT simple =
-                (discount(fixingTimes[k - 1]) / discount(fixingTimes[k]) - 1.0) / tau;
-            sum += simple;
-            ++count;
-        }
-        return sum / static_cast<double>(count);
+        const double basisRatio = zeroBasis / accrualBasis;
+        return averagedRateImpl(fixingTimes,
+                                [basisRatio](double step) { return step * basisRatio; });
+    }
+
+    /// Zero-clock averaging: each step's tau is the zero-clock time step
+    /// itself (the index is assumed to accrue on the curve's own clock).
+    /// Prefer the accrual-day-count overload above for an overnight index
+    /// quoted on a different clock.
+    DoubleT averagedRateOnZeroClock(const std::vector<double>& fixingTimes) const {
+        return averagedRateImpl(fixingTimes, [](double step) { return step; });
     }
 
     /// Continuously compounded forward rate over (t1, t2].
@@ -297,6 +328,35 @@ public:
     std::size_t size() const { return m_times.size(); }
 
 private:
+    /// Shared averaging loop; `tauFromStep` maps a zero-clock step to the
+    /// overnight index accrual of that step.
+    template <typename TauFromStep>
+    DoubleT averagedRateImpl(const std::vector<double>& fixingTimes,
+                             TauFromStep tauFromStep) const {
+        if (fixingTimes.size() < 2) {
+            throw std::invalid_argument("DiscountCurve::averagedRate: need two or more times");
+        }
+        DoubleT sum = 0;
+        std::size_t count = 0;
+        for (std::size_t k = 1; k < fixingTimes.size(); ++k) {
+            const double step = fixingTimes[k] - fixingTimes[k - 1];
+            if (!(step > 0.0)) {
+                throw std::invalid_argument(
+                    "DiscountCurve::averagedRate: times must be strictly increasing");
+            }
+            const double tau = tauFromStep(step);
+            if (!(tau > 0.0)) {
+                throw std::invalid_argument(
+                    "DiscountCurve::averagedRate: non-positive accrual year fraction");
+            }
+            const DoubleT simple =
+                (discount(fixingTimes[k - 1]) / discount(fixingTimes[k]) - 1.0) / tau;
+            sum += simple;
+            ++count;
+        }
+        return sum / static_cast<double>(count);
+    }
+
     /// Weights beyond the last node: the scheme extends its terminal
     /// derivative, so the space weight is `delta_{i, n-1}` plus the
     /// precomputed terminal-slope gradient times the extension length. Only

@@ -233,12 +233,26 @@ TEST(CurveComposition, compounding) {
     CHECK_CLOSE("compounded rate", curve.compoundedRate(1.0, 2.0, tau), (std::exp(0.04) - 1.0),
                 1e-14);
 
+    // The curve's times are ACT/365F year fractions; an overnight index
+    // accrues ACT/360, so each step's tau is (step * 365/360), not the step.
     const std::vector<double> boundaries{0.0, 0.25, 0.5, 0.75, 1.0};
+    const double zeroClockStep = 0.25;
+    const double act360Step = zeroClockStep * 365.0 / 360.0;
     double manual = 0.0;
     for (std::size_t k = 1; k < boundaries.size(); ++k) {
-        manual += (curve.discount(boundaries[k - 1]) / curve.discount(boundaries[k]) - 1.0) / 0.25;
+        manual +=
+            (curve.discount(boundaries[k - 1]) / curve.discount(boundaries[k]) - 1.0) / act360Step;
     }
-    CHECK_CLOSE("averaged rate", curve.averagedRate(boundaries), manual / 4.0, 1e-15);
+    CHECK_CLOSE("averaged rate on ACT/360 accrual", curve.averagedRate(boundaries), manual / 4.0,
+                1e-15);
+
+    double zeroClock = 0.0;
+    for (std::size_t k = 1; k < boundaries.size(); ++k) {
+        zeroClock += (curve.discount(boundaries[k - 1]) / curve.discount(boundaries[k]) - 1.0) /
+                     zeroClockStep;
+    }
+    CHECK_CLOSE("zero-clock averaged rate", curve.averagedRateOnZeroClock(boundaries),
+                zeroClock / 4.0, 1e-15);
 
     // Daily compounding telescopes to the compound factor.
     double product = 1.0;
@@ -248,6 +262,30 @@ TEST(CurveComposition, compounding) {
         product *= 1.0 + simple * 0.25;
     }
     CHECK_CLOSE("compounding telescopes", product, curve.compoundingFactor(0.0, 1.0), 1e-15);
+}
+
+// A flat continuously compounded 3% curve on an ACT/365F zero clock: the
+// ACT/360 daily overnight average is (exp(0.03/365) - 1) * 360, exactly
+// 365/360 below the zero-clock-step average.
+TEST(DiscountCurve, averagedRateUsesOvernightAccrual) {
+    const DiscountCurve<double> flat({0.0, 1.0, 2.0, 3.0}, {0.0, 0.03, 0.03, 0.03});
+    std::vector<double> daily;
+    daily.reserve(366);
+    for (int k = 0; k <= 365; ++k) {
+        daily.push_back(static_cast<double>(k) / 365.0);
+    }
+    const double dailySimple = (std::exp(0.03 / 365.0) - 1.0);
+    CHECK_CLOSE("ACT/360 overnight average", flat.averagedRate(daily), dailySimple * 360.0, 1e-13);
+    CHECK_CLOSE("ACT/365F accrual is the zero-clock step",
+                flat.averagedRate(daily, datetime::DayCounter(datetime::DayCount::Actual365Fixed)),
+                dailySimple * 365.0, 1e-13);
+    CHECK_CLOSE("explicit zero-clock average", flat.averagedRateOnZeroClock(daily),
+                dailySimple * 365.0, 1e-13);
+    EXPECT_THROW((void)flat.averagedRate(
+                     daily, datetime::DayCounter(datetime::DayCount::Thirty360BondBasis)),
+                 std::invalid_argument);
+    const std::vector<double> single{0.0};
+    EXPECT_THROW((void)flat.averagedRate(single), std::invalid_argument);
 }
 
 TEST(CurveBootstrap, basisSpreadRecovery) {
@@ -880,4 +918,53 @@ TEST(CurveBootstrap, impliedQuoteUnknownKind) {
     pillar.kind = static_cast<PillarKind>(42);
     pillar.maturity = datetime::Date(2027, 9, 29);
     EXPECT_THROW((void)markets::impliedQuote(pillar, reference, curve), std::invalid_argument);
+}
+
+// The two turn representations store different amplitude units: a
+// `TurnOverlay::Bump` amplitude is an incremental instantaneous forward over
+// the window, while a `ForecastPillar::turnPillar` quote is the level simple
+// rate over the window's accrual. The conversion helpers must round-trip and
+// reproduce the overlay's own window forward from the level quote.
+TEST(TurnOverlay, levelQuoteAmplitudeConversion) {
+    const double begin = 1.0;
+    const double end = 1.25;
+    const double width = end - begin;
+    const double tau = width * 365.0 / 360.0; // ACT/360 accrual on the ACT/365F clock
+
+    // Round trip across base-forward levels and amplitudes of both signs.
+    for (const double baseForward : {-0.005, 0.0, 0.03, 0.08}) {
+        for (const double amplitude : {8.5e-4, 4.0e-4, -4.0e-4}) {
+            const double level =
+                markets::levelQuoteFromOverlayAmplitude(amplitude, baseForward, width, tau);
+            CHECK_CLOSE("level -> amplitude round trip",
+                        markets::overlayAmplitudeFromLevelQuote(level, baseForward, width, tau),
+                        amplitude, 1e-14);
+            CHECK_CLOSE("amplitude -> level round trip",
+                        markets::levelQuoteFromOverlayAmplitude(
+                            markets::overlayAmplitudeFromLevelQuote(level, baseForward, width, tau),
+                            baseForward, width, tau),
+                        level, 1e-14);
+        }
+    }
+
+    // A flat 3% base: a 4 bp incremental level quote converts to an overlay
+    // amplitude, and the overlay's own ACT/360 window forward reproduces the
+    // level quote exactly.
+    auto base = std::make_shared<const DiscountCurve<double>>(
+        std::vector<double>{0.0, 1.0, 2.0, 3.0}, std::vector<double>{0.0, 0.03, 0.03, 0.03});
+    const double baseForward = (base->discount(begin) / base->discount(end) - 1.0) / tau;
+    const double level = baseForward + 4.0e-4;
+    const double amplitude =
+        markets::overlayAmplitudeFromLevelQuote(level, baseForward, width, tau);
+    const markets::TurnOverlay<double> overlay(base, {}, {{begin, end, amplitude}});
+    const double overlayForward = (overlay.discount(begin) / overlay.discount(end) - 1.0) / tau;
+    CHECK_CLOSE("overlay window forward equals the level quote", overlayForward, level, 1e-14);
+    CHECK_CLOSE("converted amplitude reproduces the level quote",
+                markets::levelQuoteFromOverlayAmplitude(amplitude, baseForward, width, tau), level,
+                1e-14);
+
+    EXPECT_THROW((void)markets::overlayAmplitudeFromLevelQuote(level, baseForward, 0.0, tau),
+                 std::invalid_argument);
+    EXPECT_THROW((void)markets::levelQuoteFromOverlayAmplitude(amplitude, baseForward, width, 0.0),
+                 std::invalid_argument);
 }
